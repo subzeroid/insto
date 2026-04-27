@@ -298,15 +298,16 @@ class OsintFacade:
         if not profile.avatar_url:
             return None
         dest_dir = self._media_dir(profile.username, "propic")
-        return await self._stream(profile.avatar_url, dest_dir / profile.pk)
+        return await self._stream(profile.avatar_url, dest_dir / _safe_pk(profile.pk))
 
     async def download_post_media(self, post: Post) -> list[Path]:
         """Download every media URL of `post` into `<output>/<owner>/posts/`."""
         owner = post.owner_username or "_"
         dest_dir = self._media_dir(owner, "posts")
+        pk = _safe_pk(post.pk)
         out: list[Path] = []
         for idx, url in enumerate(post.media_urls):
-            base = dest_dir / (post.pk if idx == 0 else f"{post.pk}_{idx}")
+            base = dest_dir / (pk if idx == 0 else f"{pk}_{idx}")
             out.append(await self._stream(url, base, taken_at=post.taken_at))
         return out
 
@@ -314,12 +315,16 @@ class OsintFacade:
         """Download a story into `<output>/<owner>/stories/`."""
         owner = story.owner_username or "_"
         dest_dir = self._media_dir(owner, "stories")
-        return await self._stream(story.media_url, dest_dir / story.pk, taken_at=story.taken_at)
+        return await self._stream(
+            story.media_url, dest_dir / _safe_pk(story.pk), taken_at=story.taken_at
+        )
 
     async def download_highlight_item(self, item: HighlightItem, *, owner_username: str) -> Path:
         """Download a highlight item into `<output>/<owner>/highlights/`."""
         dest_dir = self._media_dir(owner_username, "highlights")
-        return await self._stream(item.media_url, dest_dir / item.pk, taken_at=item.taken_at)
+        return await self._stream(
+            item.media_url, dest_dir / _safe_pk(item.pk), taken_at=item.taken_at
+        )
 
     def _media_dir(self, username: str, kind: str) -> Path:
         cleaned = _safe_path_segment(username.lstrip("@")) or "_"
@@ -374,3 +379,8 @@ def _safe_path_segment(value: str) -> str:
     if not _SAFE_SEGMENT_RE.fullmatch(value):
         return ""
     return value
+
+
+def _safe_pk(value: str) -> str:
+    """Return a filesystem-safe pk segment, substituting `_` if drifted."""
+    return _safe_path_segment(value) or "_"

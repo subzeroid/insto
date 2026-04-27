@@ -252,6 +252,8 @@ def to_maltego_csv(
         weight_str = str(weight) if weight is not None else "1"
         notes = raw.get("notes")
         notes_str = "" if notes is None else str(notes)
+        value_str = _escape_formula(value_str)
+        notes_str = _escape_formula(notes_str)
         props = {k: v for k, v in raw.items() if k not in {"value", "weight", "notes"}}
         if props:
             props_blob = json.dumps(
@@ -267,13 +269,30 @@ def to_maltego_csv(
     return _write(buf.getvalue().encode("utf-8"), dest)
 
 
+_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _escape_formula(value: str) -> str:
+    """Prefix `'` to defang spreadsheet formula injection on user-controlled text.
+
+    Targets like Instagram bios, captions, or usernames can begin with `=`,
+    `+`, `-`, or `@` and would otherwise be executed as formulas when an
+    insto CSV is opened in Excel / Google Sheets.
+    """
+    if value.startswith(_FORMULA_PREFIXES):
+        return "'" + value
+    return value
+
+
 def _csv_value(value: Any) -> Any:
     if value is None:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (list, tuple)):
-        return ",".join(str(v) for v in value)
+        return _escape_formula(",".join(str(v) for v in value))
+    if isinstance(value, str):
+        return _escape_formula(value)
     return value
 
 

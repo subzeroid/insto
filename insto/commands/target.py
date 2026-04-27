@@ -48,7 +48,9 @@ async def target_cmd(ctx: CommandContext) -> str:
 
 @command("current", "Show the active session target")
 async def current_cmd(ctx: CommandContext) -> str | None:
-    return ctx.session.target
+    target = ctx.session.target
+    ctx.print(f"target: @{target}" if target else "target: (none)")
+    return target
 
 
 @command("clear", "Clear the active session target")
@@ -56,6 +58,7 @@ async def clear_cmd(ctx: CommandContext) -> None:
     name = ctx.session.target
     ctx.session.clear()
     ctx.facade.clear_target_cache(name)
+    ctx.print(f"cleared target @{name}" if name else "no active target")
     return None
 
 

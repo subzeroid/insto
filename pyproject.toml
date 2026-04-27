@@ -5,7 +5,24 @@ description = "Interactive Instagram OSINT CLI on the HikerAPI backend"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "insto" }]
+authors = [{ name = "subzeroid" }]
+keywords = ["instagram", "osint", "cli", "repl", "hikerapi", "intelligence"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet",
+    "Topic :: Security",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
 dependencies = [
     "hikerapi>=0.1.0",
     "httpx>=0.27",
@@ -14,8 +31,20 @@ dependencies = [
     "tomli-w>=1.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/subzeroid/insto"
+Documentation = "https://subzeroid.github.io/insto/"
+Repository = "https://github.com/subzeroid/insto"
+Issues = "https://github.com/subzeroid/insto/issues"
+Changelog = "https://github.com/subzeroid/insto/blob/main/CHANGELOG.md"
+
 [project.optional-dependencies]
 completion = ["shtab>=1.7"]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "pymdown-extensions>=10",
+]
 
 [project.scripts]
 insto = "insto.cli:main"

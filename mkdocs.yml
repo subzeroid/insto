@@ -1,0 +1,71 @@
+site_name: insto
+site_description: Interactive Instagram OSINT CLI on the HikerAPI backend.
+site_url: https://subzeroid.github.io/insto/
+repo_url: https://github.com/subzeroid/insto
+repo_name: subzeroid/insto
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: amber
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+not_in_nav: |
+  internal/
+  plans/
+  superpowers/
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - Basic usage: basic-usage.md
+  - CLI reference: cli-reference.md
+  - Backends: backends.md
+  - Architecture: architecture.md
+  - Troubleshooting: troubleshooting.md
+  - Contributing: contributing.md
+  - Changelog: changelog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.snippets:
+      base_path:
+        - .
+        - docs
+  - pymdownx.tabbed:
+      alternate_style: true
+
+plugins:
+  - search

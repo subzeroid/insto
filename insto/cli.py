@@ -124,9 +124,7 @@ def setup_logging(level: int, *, log_dir: Path | None = None) -> Path:
         encoding="utf-8",
     )
     handler.setLevel(level)
-    handler.setFormatter(
-        RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
-    )
+    handler.setFormatter(RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
     root.addHandler(handler)
     return log_path
 
@@ -357,7 +355,9 @@ async def _run_oneshot(
     try:
         from rich.console import Console
 
-        console = Console()
+        from insto.ui.theme import INSTO_THEME
+
+        console = Console(theme=INSTO_THEME)
         await dispatch(line, facade=facade, session=session, console=console)
         return 0
     except (BackendError, CommandUsageError) as exc:

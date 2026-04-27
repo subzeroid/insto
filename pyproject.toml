@@ -65,3 +65,6 @@ ignore_missing_imports = true
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "e2e: end-to-end tests that exercise the CLI / REPL via the fake backend",
+]

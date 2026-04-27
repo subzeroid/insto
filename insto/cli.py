@@ -297,13 +297,21 @@ def _run_setup(
         token_input = secret_prompt("hiker.token (input hidden): ").strip()
     token = token_input or token_default
 
-    out_default = str(existing.output_dir) if existing else "./output"
+    out_default = str(
+        existing.output_dir.expanduser().resolve()
+        if existing
+        else (Path.cwd() / "output").resolve()
+    )
     out_input = prompt(f"output_dir [{out_default}]: ").strip()
-    output_path = out_input or out_default
+    output_path = str(Path(out_input).expanduser().resolve()) if out_input else out_default
 
-    db_default = str(existing.db_path) if existing else str(config_dir() / "store.db")
+    db_default = str(
+        existing.db_path.expanduser().resolve()
+        if existing
+        else (config_dir() / "store.db").expanduser().resolve()
+    )
     db_input = prompt(f"db_path [{db_default}]: ").strip()
-    db = db_input or db_default
+    db = str(Path(db_input).expanduser().resolve()) if db_input else db_default
 
     proxy_default = (existing.hiker_proxy or "") if existing else ""
     proxy_disp = proxy_default if proxy_default else "(none)"

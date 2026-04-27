@@ -246,8 +246,12 @@ def test_setup_writes_0600_with_token_and_proxy(capsys: pytest.CaptureFixture[st
     cfg = load_config()
     assert cfg.hiker_token == "tok-1234567890"
     assert cfg.hiker_proxy == "socks5h://127.0.0.1:9050"
-    assert str(cfg.output_dir) == "out-x"
-    assert str(cfg.db_path) == "/tmp/insto-store.db"
+    # Setup wizard resolves user input to absolute paths so behaviour does
+    # not depend on the CWD where `insto` is later invoked from.
+    assert cfg.output_dir.is_absolute()
+    assert cfg.output_dir.name == "out-x"
+    # Path("/tmp/...").resolve() expands the macOS /tmp -> /private/tmp symlink.
+    assert cfg.db_path == Path("/tmp/insto-store.db").resolve()
 
 
 def test_setup_keeps_existing_token_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,0 +1,4 @@
+docs/superpowers/
+docs/internal/
+.context/
+.claude/settings.local.json

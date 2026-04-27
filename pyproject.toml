@@ -41,6 +41,9 @@ target-version = "py311"
 select = ["E", "F", "I", "B", "UP", "W", "N", "SIM", "RUF"]
 ignore = []
 
+[tool.ruff.lint.per-file-ignores]
+"insto/exceptions.py" = ["N818"]
+
 [tool.ruff.format]
 quote-style = "double"
 

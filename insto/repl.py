@@ -35,6 +35,8 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.shortcuts.prompt import CompleteStyle
+from prompt_toolkit.styles import Style
 from rich.console import Console
 
 from insto._redact import redact_secrets
@@ -51,6 +53,22 @@ if TYPE_CHECKING:
     from insto.service.facade import OsintFacade
 
 EXIT_COMMANDS = frozenset({"quit", "exit", "q"})
+
+
+# Claude-Code-style popup: subtle dark slate row, accented command name on
+# the left, dimmed description on the right. The selected row gets a brighter
+# accent so it pops against the dark column.
+_PROMPT_STYLE = Style.from_dict(
+    {
+        "completion-menu": "bg:#1f2228",
+        "completion-menu.completion": "bg:#1f2228 #d2cdb6",
+        "completion-menu.completion.current": "bg:#3a2a14 #ffd166 bold",
+        "completion-menu.meta.completion": "bg:#1f2228 #6f7280",
+        "completion-menu.meta.completion.current": "bg:#3a2a14 #d8c9a3",
+        "scrollbar.background": "bg:#1f2228",
+        "scrollbar.button": "bg:#3a2a14",
+    }
+)
 
 
 class _SlashCommandCompleter(Completer):
@@ -183,6 +201,9 @@ class Repl:
             history=FileHistory(str(self._history_path)),
             completer=_completer(),
             complete_while_typing=True,
+            complete_style=CompleteStyle.COLUMN,
+            reserve_space_for_menu=10,
+            style=_PROMPT_STYLE,
             enable_history_search=True,
             bottom_toolbar=self.bottom_toolbar,
             key_bindings=self.key_bindings,

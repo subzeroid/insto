@@ -192,6 +192,7 @@ class Repl:
 
     async def _execute(self, line: str) -> None:
         head = line.lstrip("/").split(maxsplit=1)[0].lower() if line.strip() else ""
+        ok = False
         try:
             await dispatch(
                 line,
@@ -199,14 +200,17 @@ class Repl:
                 session=self.session,
                 console=self.console,
             )
+            ok = True
         except (BackendError, CommandUsageError) as exc:
             self._log.exception("repl command failed")
-            self.console.print(redact_secrets(_format_error(exc)), style="err")
+            self.console.print(_format_error(exc), style="err")
         except Exception as exc:  # pragma: no cover - safety net
             self._log.exception("repl crash")
             self.console.print(redact_secrets(f"unexpected error: {exc!r}"), style="err")
         finally:
-            if head:
+            # Skip recording when dispatch failed — typo'd commands like
+            # `/inof` would otherwise pollute /history.
+            if head and ok:
                 with contextlib.suppress(Exception):
                     await self.facade.record_command(head, self.session.target)
 

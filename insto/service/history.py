@@ -123,10 +123,15 @@ class HistoryStore:
         self._path = db_path
         self._lock = threading.Lock()
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep the connection-level busy timeout short so a contended write
+        # falls through to `_with_lock_retry`'s application-level backoff
+        # (100/250/500ms) quickly. With the previous 5s, the per-attempt
+        # busy wait stacked on top of three retries to a worst case of >20s
+        # — long enough to feel like a hang in interactive use.
         self._conn = sqlite3.connect(
             str(db_path),
             check_same_thread=False,
-            timeout=5.0,
+            timeout=1.0,
             isolation_level=None,
         )
         self._conn.row_factory = sqlite3.Row

@@ -107,6 +107,14 @@ def test_parser_proxy_flag() -> None:
     assert args.proxy == "socks5h://127.0.0.1:9050"
 
 
+def test_parser_hiker_token_flag() -> None:
+    """`--hiker-token` must override env/toml per spec §8."""
+    args = build_parser().parse_args(["--hiker-token", "abc123"])
+    assert args.hiker_token == "abc123"
+    args = build_parser().parse_args([])
+    assert args.hiker_token is None
+
+
 def test_parsed_cmd_resolves_to_command_spec() -> None:
     """`-c <name> ...` must round-trip through the command parser to a CommandSpec."""
     from insto.commands._base import parse_command_line

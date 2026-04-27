@@ -159,16 +159,21 @@ def _purge_output_dir(output_dir: Path) -> int:
 
     The directory itself is preserved so subsequent commands keep a stable
     write target. Returns the number of top-level entries removed. Missing
-    or empty trees count as zero deletions, never as errors.
+    or empty trees count as zero deletions, never as errors. A failure on
+    one entry does not abort the rest of the purge — that would leave the
+    user with a half-cleaned tree and no actionable signal.
     """
     if not output_dir.exists() or not output_dir.is_dir():
         return 0
     removed = 0
     for entry in output_dir.iterdir():
-        if entry.is_dir() and not entry.is_symlink():
-            shutil.rmtree(entry)
-        else:
-            entry.unlink()
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError:
+            continue
         removed += 1
     return removed
 

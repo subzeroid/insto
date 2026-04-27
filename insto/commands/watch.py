@@ -192,7 +192,7 @@ async def unwatch_cmd(ctx: CommandContext) -> bool:
     if not username:
         raise CommandUsageError("usage: /unwatch <username>")
     username = _validate_username(username)
-    removed = ctx.facade.watches.remove(username)
+    removed = await ctx.facade.watches.remove(username)
     if not removed:
         ctx.print(f"@{username} is not being watched")
         return False

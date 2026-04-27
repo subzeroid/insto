@@ -103,17 +103,23 @@ class WatchManager:
             entry.task = asyncio.create_task(self._loop(entry), name=f"insto-watch:{user}")
         return entry.to_spec()
 
-    def remove(self, user: str) -> bool:
-        """Cancel and forget the watch for `user`. Returns False if absent."""
+    async def remove(self, user: str) -> bool:
+        """Cancel and forget the watch for `user`. Returns False if absent.
+
+        Awaits the cancelled tasks so the in-flight tick has fully unwound
+        before we return — otherwise a still-running `_invoke` could write
+        to history after the entry is gone (or after the store closes).
+        """
         entry = self._entries.pop(user, None)
         if entry is None:
             return False
-        # Cancel both the loop task AND any in-flight tick — without the
-        # latter, a `_invoke` coroutine started before remove() can keep
-        # running detached and write to history after the entry is gone.
+        tasks: list[asyncio.Task[None]] = []
         for t in (entry.task, entry.invoke_task):
             if t is not None and not t.done():
                 t.cancel()
+                tasks.append(t)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         return True
 
     def list(self) -> list[WatchSpec]:

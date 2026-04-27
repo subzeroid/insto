@@ -394,6 +394,12 @@ class HikerBackend(OSINTBackend):
         limit: int | None,
         mapper: Callable[[dict[str, Any]], T],
     ) -> AsyncIterator[T]:
+        # Treat non-positive `limit` as "no limit". A literal `--limit 0` would
+        # otherwise yield exactly one item before the post-yield check fired —
+        # confusing semantics for a flag that callers reasonably read as "no
+        # cap". `/mutuals` translates 0 to its own sentinel before reaching us.
+        if limit is not None and limit <= 0:
+            limit = None
         cursor: str | None = None
         pages = 0
         yielded = 0
@@ -435,6 +441,8 @@ class HikerBackend(OSINTBackend):
         list_keys: tuple[str, ...],
         mapper: Callable[[dict[str, Any]], T],
     ) -> AsyncIterator[T]:
+        if limit is not None and limit <= 0:
+            limit = None
         payload = await self._call(fetch)
         items = _extract_single_list(payload, keys=list_keys)
         for index, raw in enumerate(items):

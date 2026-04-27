@@ -200,6 +200,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP/SOCKS5 proxy (overrides $HIKERAPI_PROXY and config.toml)",
     )
     parser.add_argument(
+        "--hiker-token",
+        dest="hiker_token",
+        default=None,
+        metavar="TOKEN",
+        help="HikerAPI token (overrides $HIKERAPI_TOKEN and config.toml)",
+    )
+    parser.add_argument(
         "--print-completion",
         dest="print_completion",
         choices=("bash", "zsh"),
@@ -237,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
-def _safe_load_config() -> Config | None:
+def _safe_load_config(hiker_token: str | None = None, proxy: str | None = None) -> Config | None:
     """Load config; surface security-relevant failures to stderr.
 
     A `BackendError` from `load_config()` typically means the config file
@@ -247,8 +254,13 @@ def _safe_load_config() -> Config | None:
     permissions-drift event. We print it (redacted) and return `None` so
     the caller can choose whether to bail or fall back to setup.
     """
+    overrides: dict[str, Any] = {}
+    if hiker_token is not None:
+        overrides["hiker_token"] = hiker_token
+    if proxy is not None:
+        overrides["hiker_proxy"] = proxy
     try:
-        return load_config()
+        return load_config(overrides or None)
     except BackendError as exc:
         print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
         return None
@@ -351,6 +363,7 @@ async def _run_oneshot(
     cmd_argv: list[str],
     target: str | None,
     proxy: str | None,
+    hiker_token: str | None,
     log: logging.Logger,
 ) -> int:
     """Run a single command line against a freshly-constructed facade."""
@@ -360,6 +373,8 @@ async def _run_oneshot(
     cli_overrides: dict[str, Any] = {}
     if proxy is not None:
         cli_overrides["hiker_proxy"] = proxy
+    if hiker_token is not None:
+        cli_overrides["hiker_token"] = hiker_token
     try:
         config = load_config(cli_overrides)
     except BackendError as exc:
@@ -372,12 +387,6 @@ async def _run_oneshot(
         print(SETUP_HINT, file=sys.stderr)
         return 1
 
-    from insto.backends import make_backend
-    from insto.service.facade import OsintFacade
-    from insto.service.history import HistoryStore
-
-    backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
-    history = HistoryStore(config.db_path)
     # Reuse a single httpx client for every CDN download in the run so we do
     # not pay TCP/TLS handshake cost on each media URL. Closed by facade.aclose().
     # Route CDN downloads through the same proxy as backend API calls — an
@@ -386,16 +395,36 @@ async def _run_oneshot(
     # to be proxied just like the API surface.
     import httpx as _httpx
 
+    from insto.backends import make_backend
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
+    from insto.service.facade import OsintFacade
+    from insto.service.history import HistoryStore
 
-    cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
-    if config.hiker_proxy:
-        cdn_kwargs["proxy"] = config.hiker_proxy
-    cdn_client = _httpx.AsyncClient(**cdn_kwargs)
-    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=cdn_client)
+    # Construct backend / history / cdn-client / facade through `_format_error`
+    # so an OSError from the sqlite open (disk full, EACCES, read-only FS) or
+    # a constructor failure does not escape `asyncio.run` as a raw traceback —
+    # which would bypass `redact_secrets` and could leak path/secret info.
+    history: HistoryStore | None = None
+    try:
+        backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
+        history = HistoryStore(config.db_path)
+        cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
+        if config.hiker_proxy:
+            cdn_kwargs["proxy"] = config.hiker_proxy
+        cdn_client = _httpx.AsyncClient(**cdn_kwargs)
+        facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=cdn_client)
+    except Exception as exc:
+        log.exception("one-shot bootstrap failed")
+        print(_format_error(exc), file=sys.stderr)
+        if history is not None:
+            with contextlib.suppress(Exception):
+                history.close()
+        return 1
+    assert history is not None  # for mypy: set above on the success path
 
     session = Session(target=target.lstrip("@") if target else None)
     head = cmd_argv[0].lstrip("/").lower() if cmd_argv else ""
+    dispatch_ok = False
     try:
         from rich.console import Console
 
@@ -403,13 +432,17 @@ async def _run_oneshot(
 
         console = Console(theme=INSTO_THEME)
         await dispatch(line, facade=facade, session=session, console=console)
+        dispatch_ok = True
         return 0
     except (BackendError, CommandUsageError) as exc:
         log.exception("one-shot failed")
         print(_format_error(exc), file=sys.stderr)
         return 1
     finally:
-        if head:
+        # Only record successful dispatches in cli_history — typo'd / failed
+        # invocations would otherwise pollute /history and the welcome screen's
+        # "recent activity" with garbage rows.
+        if head and dispatch_ok:
             with contextlib.suppress(Exception):
                 await facade.record_command(head, session.target)
         # Close backend (cancels any pending tasks that may still touch
@@ -447,9 +480,11 @@ def main(argv: list[str] | None = None) -> int:
         return _run_setup()
 
     if args.cmd_argv:
-        return asyncio.run(_run_oneshot(args.cmd_argv, args.target, args.proxy, log))
+        return asyncio.run(
+            _run_oneshot(args.cmd_argv, args.target, args.proxy, args.hiker_token, log)
+        )
 
-    config = _safe_load_config()
+    config = _safe_load_config(args.hiker_token, args.proxy)
     if config is None or not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         if not args.interactive:
@@ -462,11 +497,15 @@ def main(argv: list[str] | None = None) -> int:
         print("interactive REPL is unavailable", file=sys.stderr)
         return 1
     try:
-        run_repl()
+        run_repl(config=config)
     except NotImplementedError:
         print("interactive REPL is not implemented in this build", file=sys.stderr)
         return 1
     except (BackendError, CommandUsageError) as exc:
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        log.exception("REPL bootstrap failed")
         print(_format_error(exc), file=sys.stderr)
         return 1
     return 0

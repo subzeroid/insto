@@ -27,6 +27,7 @@ also work as a reference for what each insto DTO field is sourced from.
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from insto.exceptions import SchemaDrift
@@ -55,6 +56,36 @@ def _require(d: dict[str, Any], key: str, endpoint: str) -> Any:
     if value is None:
         raise SchemaDrift(endpoint, key)
     return value
+
+
+def _to_unix(value: Any, *, endpoint: str, field: str) -> int:
+    """Coerce a HikerAPI timestamp to unix-seconds.
+
+    HikerAPI is inconsistent: some endpoints return integer unix seconds,
+    others return ISO-8601 strings like ``2026-04-17T17:45:12Z``. Both
+    shapes are documented as the same logical field, so we accept either
+    and raise SchemaDrift only when the value is genuinely unparseable.
+    """
+    if isinstance(value, bool):
+        # bool is a subclass of int, so it would silently slip through;
+        # reject explicitly to surface the upstream bug instead of
+        # storing taken_at=1.
+        raise SchemaDrift(endpoint, field)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if s.isdigit() or (s.startswith("-") and s[1:].isdigit()):
+            return int(s)
+        try:
+            # fromisoformat in 3.11+ handles trailing 'Z' as UTC.
+            normalized = s.replace("Z", "+00:00") if s.endswith("Z") else s
+            return int(datetime.fromisoformat(normalized).timestamp())
+        except ValueError as exc:
+            raise SchemaDrift(endpoint, field) from exc
+    raise SchemaDrift(endpoint, field)
 
 
 def _opt_str(value: Any) -> str | None:
@@ -170,7 +201,7 @@ def map_post(d: dict[str, Any]) -> Post:
     return Post(
         pk=str(pk),
         code=str(code),
-        taken_at=int(taken_at),
+        taken_at=_to_unix(taken_at, endpoint="media", field="taken_at"),
         media_type=media_type,  # type: ignore[arg-type]
         caption=caption,
         like_count=int(d.get("like_count") or 0),
@@ -211,7 +242,7 @@ def map_comment(d: dict[str, Any], *, media_pk: str) -> Comment:
         user_pk=str(user_pk),
         user_username=str(user_username),
         text=str(text),
-        created_at=int(created_at),
+        created_at=_to_unix(created_at, endpoint="comment", field="created_at"),
         like_count=int(d.get("comment_like_count") or 0),
         reply_to_pk=_opt_str(reply_to),
     )
@@ -227,13 +258,18 @@ def map_story(d: dict[str, Any]) -> Story:
     `taken_at + 86400` if absent (Instagram's documented 24h TTL).
     """
     pk = _require(d, "pk", "story")
-    taken_at = int(_require(d, "taken_at", "story"))
+    taken_at = _to_unix(_require(d, "taken_at", "story"), endpoint="story", field="taken_at")
     raw_type = _require(d, "media_type", "story")
     media_type = _MEDIA_TYPE_STORY.get(int(raw_type))
     if media_type is None:
         raise SchemaDrift("story", "media_type")
 
-    expires_at = int(d.get("expiring_at") or d.get("expires_at") or (taken_at + 86400))
+    raw_expiry = d.get("expiring_at") or d.get("expires_at")
+    expires_at = (
+        _to_unix(raw_expiry, endpoint="story", field="expiring_at")
+        if raw_expiry is not None
+        else taken_at + 86400
+    )
     media_url = (
         (d.get("video_url") if media_type == "video" else d.get("thumbnail_url"))
         or d.get("thumbnail_url")
@@ -295,7 +331,11 @@ def map_highlight_item(d: dict[str, Any], *, highlight_pk: str) -> HighlightItem
     the caller because the items endpoint does not echo it.
     """
     pk = _require(d, "pk", "highlight_item")
-    taken_at = int(_require(d, "taken_at", "highlight_item"))
+    taken_at = _to_unix(
+        _require(d, "taken_at", "highlight_item"),
+        endpoint="highlight_item",
+        field="taken_at",
+    )
     raw_type = _require(d, "media_type", "highlight_item")
     media_type = _MEDIA_TYPE_STORY.get(int(raw_type))
     if media_type is None:

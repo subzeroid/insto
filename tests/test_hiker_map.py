@@ -357,3 +357,67 @@ def test_map_highlight_item_schema_drift_missing_media_type() -> None:
         map_highlight_item(payload, highlight_pk="h")
     assert exc.value.endpoint == "highlight_item"
     assert exc.value.missing_field == "media_type"
+
+
+# ---- timestamp coercion (HikerAPI returns int OR ISO-8601 string) -----------
+
+
+def test_map_post_taken_at_accepts_iso_string() -> None:
+    """HikerAPI's user_medias_chunk_v1 returns taken_at as ISO-8601, not int."""
+    payload = _load("post_image.json")
+    payload["taken_at"] = "2026-04-17T17:45:12Z"
+    post = map_post(payload)
+    # 2026-04-17T17:45:12Z == 1776447912 unix seconds
+    assert post.taken_at == 1776447912
+
+
+def test_map_post_taken_at_accepts_iso_with_offset() -> None:
+    payload = _load("post_image.json")
+    payload["taken_at"] = "2026-04-17T13:45:12-04:00"  # same instant as above
+    post = map_post(payload)
+    assert post.taken_at == 1776447912
+
+
+def test_map_post_taken_at_accepts_numeric_string() -> None:
+    payload = _load("post_image.json")
+    payload["taken_at"] = "1714210800"
+    post = map_post(payload)
+    assert post.taken_at == 1714210800
+
+
+def test_map_post_taken_at_garbage_string_raises_schema_drift() -> None:
+    payload = _load("post_image.json")
+    payload["taken_at"] = "not-a-timestamp"
+    with pytest.raises(SchemaDrift) as exc:
+        map_post(payload)
+    assert exc.value.endpoint == "media"
+    assert exc.value.missing_field == "taken_at"
+
+
+def test_map_comment_created_at_accepts_iso_string() -> None:
+    payload = _load("comment_basic.json")
+    payload["created_at"] = "2026-04-17T17:45:12Z"
+    comment = map_comment(payload, media_pk="3000000000000000001")
+    assert comment.created_at == 1776447912
+
+
+def test_map_story_taken_at_and_expiring_at_accept_iso() -> None:
+    payload = _load("story_image.json")
+    payload["taken_at"] = "2026-04-17T17:45:12Z"
+    payload["expiring_at"] = "2026-04-18T17:45:12Z"
+    story = map_story(payload)
+    assert story.taken_at == 1776447912
+    assert story.expires_at == 1776447912 + 86400
+
+
+def test_map_highlight_item_taken_at_accepts_iso() -> None:
+    item = map_highlight_item(
+        {
+            "pk": "h-item-1",
+            "taken_at": "2026-04-17T17:45:12Z",
+            "media_type": 1,
+            "thumbnail_url": "https://x/thumb.jpg",
+        },
+        highlight_pk="h",
+    )
+    assert item.taken_at == 1776447912

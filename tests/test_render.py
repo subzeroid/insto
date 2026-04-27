@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from insto._version import __version__ as insto_version
 from insto.config import Config
 from insto.models import Highlight, HighlightItem, Post, Profile, Quota, User
 from insto.service.facade import OsintFacade
@@ -197,7 +198,7 @@ def _facade(tmp_path: Path) -> Iterator[OsintFacade]:
 
 def test_welcome_wide_terminal_shows_two_columns(_facade: OsintFacade) -> None:
     out = _capture(render_welcome(_facade, width=120, email="me@example.com"), width=120)
-    assert "insto v0.1.0" in out
+    assert f"insto v{insto_version}" in out
     assert "Tips for getting started" in out
     assert "/target <user>" in out
     assert "Recent activity" in out
@@ -226,7 +227,7 @@ def test_welcome_narrow_terminal_drops_tips_panel(_facade: OsintFacade) -> None:
 
 def test_welcome_tiny_terminal_falls_back_to_status_line(_facade: OsintFacade) -> None:
     out = _capture(render_welcome(_facade, width=50, target="@alice"), width=50)
-    assert "insto v0.1.0" in out
+    assert f"insto v{insto_version}" in out
     assert "hiker" in out
     assert "@alice" in out
     # no panel border in the tiny fallback

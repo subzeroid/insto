@@ -31,6 +31,7 @@ from typing import IO, Any
 import httpx
 
 from insto.backends._base import OSINTBackend
+from insto.backends._cdn import DEFAULT_BYTE_BUDGET as CDN_PER_RESOURCE_BUDGET
 from insto.backends._cdn import stream_to_file
 from insto.config import Config
 from insto.exceptions import BackendError
@@ -236,15 +237,25 @@ class OsintFacade:
     async def snapshot(self, username: str, *, post_limit: int = 12) -> Profile:
         """Capture a fresh snapshot for `username` and persist it."""
         profile = await self.profile(username)
-        posts = await self.user_posts(username, limit=post_limit)
-        snap = self.history.snapshot_from_profile(profile, [p.pk for p in posts])
-        await self.history.add_snapshot_async(snap)
+        await self._persist_snapshot(profile, post_limit=post_limit)
         return profile
 
     async def diff(self, username: str) -> dict[str, Any]:
         """Compare the current profile of `username` against last snapshot."""
         profile = await self.profile(username)
         return self.history.diff(profile.pk, profile)
+
+    async def diff_and_snapshot(self, username: str, *, post_limit: int = 12) -> dict[str, Any]:
+        """One-pass watch tick: fetch profile once, diff, then persist snapshot."""
+        profile = await self.profile(username)
+        diff = self.history.diff(profile.pk, profile)
+        await self._persist_snapshot(profile, post_limit=post_limit)
+        return diff
+
+    async def _persist_snapshot(self, profile: Profile, *, post_limit: int) -> None:
+        posts = await self.user_posts(profile.username, limit=post_limit)
+        snap = self.history.snapshot_from_profile(profile, [p.pk for p in posts])
+        await self.history.add_snapshot_async(snap)
 
     # ------------------------------------------------------------------ ops
 
@@ -363,7 +374,8 @@ class OsintFacade:
     ) -> Path:
         # Per-command byte budget (spec §12: 5 GB / command). The
         # per-resource 500 MB cap still lives inside `_cdn.stream_to_file`.
-        if self._command_bytes_used >= self._command_byte_budget:
+        remaining = self._command_byte_budget - self._command_bytes_used
+        if remaining <= 0:
             raise BackendError(
                 "command exceeded byte budget "
                 f"{self._command_byte_budget} (used {self._command_bytes_used})"
@@ -373,6 +385,7 @@ class OsintFacade:
             dest,
             taken_at=taken_at,
             client=self._cdn_client,
+            byte_budget=min(CDN_PER_RESOURCE_BUDGET, remaining),
         )
         with contextlib.suppress(OSError):
             # If stat fails the budget stays accurate enough — the streamer

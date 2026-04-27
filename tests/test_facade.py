@@ -548,7 +548,9 @@ async def test_command_byte_budget_blocks_further_downloads_when_exceeded(
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
     facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
-    facade.reset_command_budget(total=512)  # 512 bytes — first download will overflow it
+    # Budget exactly fits one 1024-byte body; the second download has no
+    # remaining budget and must be refused before any HTTP call.
+    facade.reset_command_budget(total=len(body))
     profile = _profile(pk="42", username="alice", avatar_url=f"https://{CDN_HOST}/a")
     profile2 = _profile(pk="43", username="bob", avatar_url=f"https://{CDN_HOST}/b")
     try:

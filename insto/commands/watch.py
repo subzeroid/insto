@@ -115,10 +115,10 @@ def _build_tick(
     console = ctx.console
 
     async def tick() -> None:
-        diff = await facade.diff(username)
-        # snapshot AFTER diff so the next tick compares against the freshest
-        # one and we never report the same change twice.
-        await facade.snapshot(username)
+        # Single profile fetch per tick — diff first, then persist the fresh
+        # snapshot so the next tick compares against the freshest one and we
+        # never report the same change twice.
+        diff = await facade.diff_and_snapshot(username)
         if not notify or console is None:
             return
         message = _format_diff(username, diff)

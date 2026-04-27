@@ -155,7 +155,7 @@ def _extract_chunk(payload: Any) -> tuple[list[Any], str | None]:
     if isinstance(payload, list) and len(payload) == 2:
         raw_items, raw_cursor = payload
         items = list(raw_items) if isinstance(raw_items, list) else []
-        cursor = str(raw_cursor) if raw_cursor else None
+        cursor = _normalise_cursor(raw_cursor)
         return items, cursor
 
     if isinstance(payload, dict):
@@ -169,13 +169,31 @@ def _extract_chunk(payload: Any) -> tuple[list[Any], str | None]:
                 break
         cursor_out: str | None = None
         for key in ("next_max_id", "next_page_id", "end_cursor", "next_min_id"):
-            value = inner.get(key) or payload.get(key)
-            if value:
-                cursor_out = str(value)
+            value = inner.get(key)
+            if value is None:
+                value = payload.get(key)
+            cursor_out = _normalise_cursor(value)
+            if cursor_out is not None:
                 break
         return items_out, cursor_out
 
     return [], None
+
+
+def _normalise_cursor(value: Any) -> str | None:
+    """Return `value` as a non-empty cursor string, or None.
+
+    Treats `None` and the empty string as "no more pages", but preserves
+    the integer `0` (a legitimate first-page cursor on some endpoints) —
+    a plain truthiness check would silently terminate pagination there.
+    """
+
+    if value is None:
+        return None
+    text = str(value)
+    if text == "":
+        return None
+    return text
 
 
 def _extract_single_list(payload: Any, *, keys: tuple[str, ...]) -> list[Any]:

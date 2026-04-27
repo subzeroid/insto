@@ -58,7 +58,7 @@ from insto.exceptions import AuthInvalid, Banned, QuotaExhausted
 from insto.models import User
 from insto.service import analytics
 from insto.service.exporter import SCHEMA_VERSION
-from insto.service.facade import OsintFacade
+from insto.service.facade import OsintFacade, _safe_pk
 
 # 2GB free required at output_dir before /dossier may start.
 DOSSIER_MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
@@ -171,8 +171,9 @@ async def _do_posts(
         media_dir = dossier_dir / "posts"
         media_dir.mkdir(parents=True, exist_ok=True)
         for post in posts:
+            pk = _safe_pk(post.pk)
             for idx, url in enumerate(post.media_urls):
-                base = media_dir / (post.pk if idx == 0 else f"{post.pk}_{idx}")
+                base = media_dir / (pk if idx == 0 else f"{pk}_{idx}")
                 try:
                     await facade._stream(url, base, taken_at=post.taken_at)
                 except Exception:

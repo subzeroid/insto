@@ -108,9 +108,12 @@ class WatchManager:
         entry = self._entries.pop(user, None)
         if entry is None:
             return False
-        task = entry.task
-        if task is not None and not task.done():
-            task.cancel()
+        # Cancel both the loop task AND any in-flight tick — without the
+        # latter, a `_invoke` coroutine started before remove() can keep
+        # running detached and write to history after the entry is gone.
+        for t in (entry.task, entry.invoke_task):
+            if t is not None and not t.done():
+                t.cancel()
         return True
 
     def list(self) -> list[WatchSpec]:

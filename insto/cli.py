@@ -318,7 +318,7 @@ def _run_setup(
 
 def _print_completion(parser: argparse.ArgumentParser, shell: str) -> int:
     try:
-        import shtab  # type: ignore[import-not-found]
+        import shtab  # type: ignore[import-not-found,unused-ignore]
     except ImportError:
         print(
             "shell completion requires `pip install insto[completion]`",

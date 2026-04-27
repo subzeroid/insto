@@ -37,6 +37,7 @@ from typing import IO, Any
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
+    add_target_arg,
     command,
     resolve_export_dest,
     with_target,
@@ -289,6 +290,7 @@ async def _emit_toplist(
     "wcommented",
     "Top users commenting on the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def wcommented_cmd(ctx: CommandContext, username: str) -> TopList:
@@ -308,6 +310,7 @@ async def wcommented_cmd(ctx: CommandContext, username: str) -> TopList:
     "wtagged",
     "Top users who tagged the active target in their posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def wtagged_cmd(ctx: CommandContext, username: str) -> TopList:

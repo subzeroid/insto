@@ -87,12 +87,28 @@ def _quota_line(facade: OsintFacade) -> Text:
     """One-line backend / quota status."""
     quota = facade.quota()
     if quota.remaining is None:
-        body = "hiker · quota: unknown"
-    elif quota.limit is None:
-        body = f"hiker · {quota.remaining} quota remaining"
+        body = "hiker · balance: pending"
     else:
-        body = f"hiker · {quota.remaining}/{quota.limit} quota"
+        parts = [_format_requests(quota.remaining) + " requests left"]
+        if quota.amount is not None and quota.currency:
+            parts.append(_format_money(quota.amount, quota.currency))
+        if quota.rate is not None:
+            parts.append(f"{quota.rate} rps cap")
+        body = "hiker · " + " · ".join(parts)
     return Text(body, style="muted")
+
+
+def _format_requests(n: int) -> str:
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _format_money(amount: float, currency: str) -> str:
+    sym = {"USD": "$", "EUR": "€", "GBP": "£"}.get(currency.upper(), currency + " ")
+    return f"{sym}{amount:,.0f}" if amount >= 100 else f"{sym}{amount:,.2f}"
 
 
 def _right_column(facade: OsintFacade, email: str | None) -> RenderableType:

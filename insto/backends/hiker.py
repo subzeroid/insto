@@ -633,6 +633,39 @@ class HikerBackend(OSINTBackend):
     def get_quota(self) -> Quota:
         return self._quota
 
+    async def refresh_quota(self) -> Quota:
+        """Pull the current balance from `/sys/balance` and update `_quota`.
+
+        HikerAPI is pay-per-call, not a fixed N/100 quota. The balance
+        endpoint returns:
+          - ``requests``: total remaining requests on the current plan
+          - ``rate``: per-second rate limit
+          - ``amount`` / ``currency``: dollar balance
+
+        Per-response headers occasionally don't include quota info, so the
+        BottomToolbar would otherwise stay "unknown" forever. This method
+        is called once at REPL/CLI bootstrap so the user sees real numbers.
+        Failures are swallowed (returns the previous `_quota`); this never
+        kills the session.
+        """
+        try:
+            response = await self._client._client.get("/sys/balance")
+            response.raise_for_status()
+            data = response.json()
+        except Exception:
+            return self._quota
+        remaining = data.get("requests")
+        if isinstance(remaining, int):
+            self._quota = Quota.with_remaining(
+                remaining,
+                limit=None,
+                reset_at=None,
+                rate=data.get("rate"),
+                amount=data.get("amount"),
+                currency=data.get("currency"),
+            )
+        return self._quota
+
     def get_last_error(self) -> BaseException | None:
         return self._last_error
 

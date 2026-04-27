@@ -202,7 +202,8 @@ def test_welcome_wide_terminal_shows_two_columns(_facade: OsintFacade) -> None:
     assert "/target <user>" in out
     assert "Recent activity" in out
     assert "No recent activity" in out
-    assert "100/100 quota" in out
+    # 100 remaining requests rendered as "100 requests left" (pay-per-call shape).
+    assert "100 requests left" in out
     assert "me@example.com" in out
     # wasp banner present
     assert "##" in out
@@ -239,7 +240,7 @@ def test_welcome_quota_unknown_does_not_crash(tmp_path: Path) -> None:
     facade = OsintFacade(backend=backend, history=history, config=config)
     try:
         out = _capture(render_welcome(facade, width=120), width=120)
-        assert "quota: unknown" in out
+        assert "balance: pending" in out
     finally:
         history.close()
 

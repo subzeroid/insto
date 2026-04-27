@@ -398,6 +398,32 @@ def _validate_username(name: str) -> str:
     return name
 
 
+def add_target_arg(parser: argparse.ArgumentParser) -> None:
+    """Attach an optional positional `target` to a command parser.
+
+    Lets users run `/info instagram` (one-shot lookup) without setting the
+    session target. The active session target is the fallback when the
+    positional is absent. Inline target does NOT mutate session state — see
+    `with_target` / `with_pk` in this module.
+    """
+    parser.add_argument(
+        "target",
+        nargs="?",
+        help="Instagram username (with or without leading @); "
+        "defaults to the active session target",
+    )
+
+
+def compose_args(*builders: ArgsBuilder) -> ArgsBuilder:
+    """Combine several add_args functions into one (left-to-right)."""
+
+    def composed(parser: argparse.ArgumentParser) -> None:
+        for builder in builders:
+            builder(parser)
+
+    return composed
+
+
 def _extract_target(ctx: CommandContext) -> str:
     """Pull a target username from positional args or session state.
 
@@ -491,8 +517,10 @@ __all__ = [
     "CommandSpec",
     "CommandUsageError",
     "Session",
+    "add_target_arg",
     "build_parser_for",
     "command",
+    "compose_args",
     "dispatch",
     "download_or_print_url",
     "global_parser",

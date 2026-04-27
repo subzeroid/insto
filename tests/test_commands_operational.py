@@ -100,10 +100,16 @@ async def test_quota_prints_quota_snapshot(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
     payload = await dispatch("/quota", facade=facade, session=session, console=console)
-    assert payload == {"remaining": 42, "limit": 100, "reset_at": 1700000000}
+    assert payload == {
+        "remaining": 42,
+        "limit": 100,
+        "reset_at": 1700000000,
+        "rate": None,
+        "amount": None,
+        "currency": None,
+    }
     text = console.export_text()
-    assert "remaining=42" in text
-    assert "limit=100" in text
+    assert "requests left: 42" in text
 
 
 async def test_quota_unknown_renders_question_marks(
@@ -115,7 +121,7 @@ async def test_quota_unknown_renders_question_marks(
         console = Console(record=True, color_system=None, width=160)
         await dispatch("/quota", facade=facade, session=Session(), console=console)
         text = console.export_text()
-        assert "remaining=?" in text
+        assert "requests left: ?" in text
     finally:
         await facade.watches.cancel_all()
 
@@ -127,7 +133,14 @@ async def test_quota_json_export_writes_envelope(
     await dispatch(f"/quota --json {dest}", facade=facade, session=session, console=console)
     body = json.loads(dest.read_text())
     assert body["command"] == "quota"
-    assert body["data"] == {"remaining": 42, "limit": 100, "reset_at": 1700000000}
+    assert body["data"] == {
+        "remaining": 42,
+        "limit": 100,
+        "reset_at": 1700000000,
+        "rate": None,
+        "amount": None,
+        "currency": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +157,9 @@ async def test_health_reports_backend_quota_and_no_error(
         "remaining": 42,
         "limit": 100,
         "reset_at": 1700000000,
+        "rate": None,
+        "amount": None,
+        "currency": None,
     }
     assert payload["last_error"] == "—"
     assert payload["schema_drifts"] == 0

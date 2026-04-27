@@ -23,7 +23,9 @@ from insto.commands._base import (
     ArgsBuilder,
     CommandContext,
     CommandUsageError,
+    add_target_arg,
     command,
+    compose_args,
     resolve_export_dest,
     with_target,
 )
@@ -158,7 +160,11 @@ async def _emit_posts(
 # ---------------------------------------------------------------------------
 
 
-@command("stories", "Download active stories of the active target")
+@command(
+    "stories",
+    "Download active stories of the active target",
+    add_args=add_target_arg,
+)
 @with_target
 async def stories_cmd(ctx: CommandContext, username: str) -> Any:
     stories: list[Story] = await ctx.facade.user_stories(username, limit=ctx.limit)
@@ -207,7 +213,7 @@ def _add_highlights_args(parser: argparse.ArgumentParser) -> None:
 @command(
     "highlights",
     "List highlights or download items of the Nth one with --download N",
-    add_args=_add_highlights_args,
+    add_args=compose_args(add_target_arg, _add_highlights_args),
 )
 @with_target
 async def highlights_cmd(ctx: CommandContext, username: str) -> Any:

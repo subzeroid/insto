@@ -31,6 +31,7 @@ from typing import IO, Any
 from insto.commands._base import (
     ArgsBuilder,
     CommandContext,
+    add_target_arg,
     command,
     resolve_export_dest,
     with_target,
@@ -200,6 +201,7 @@ async def followings_cmd(ctx: CommandContext, username: str) -> list[User]:
     "similar",
     "Show suggested similar accounts for the active target",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def similar_cmd(ctx: CommandContext, username: str) -> list[User]:
@@ -256,6 +258,7 @@ def _mutuals_truncated_note(result: MutualsResult, *, side_limit: int) -> str | 
     "mutuals",
     "Show users in both the active target's followers and following lists",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def mutuals_cmd(ctx: CommandContext, username: str) -> MutualsResult:

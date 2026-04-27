@@ -24,6 +24,7 @@ from typing import IO, Any
 
 from insto.commands._base import (
     CommandContext,
+    add_target_arg,
     command,
     resolve_export_dest,
     with_target,
@@ -158,6 +159,7 @@ async def _emit_toplist(
     "hashtags",
     "Top hashtags in captions of the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def hashtags_cmd(ctx: CommandContext, username: str) -> TopList:
@@ -170,6 +172,7 @@ async def hashtags_cmd(ctx: CommandContext, username: str) -> TopList:
     "mentions",
     "Top @-mentions in captions of the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def mentions_cmd(ctx: CommandContext, username: str) -> TopList:
@@ -182,6 +185,7 @@ async def mentions_cmd(ctx: CommandContext, username: str) -> TopList:
     "locations",
     "Top geo-tagged locations of the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def locations_cmd(ctx: CommandContext, username: str) -> TopList:
@@ -215,6 +219,7 @@ def _caption_rows(posts: Sequence[Post]) -> list[dict[str, Any]]:
     "captions",
     "Dump captions of the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def captions_cmd(ctx: CommandContext, username: str) -> list[Post]:
@@ -285,6 +290,7 @@ def _likes_rows(stats: LikesStats) -> list[dict[str, Any]]:
     "likes",
     "Aggregate like-count stats over the active target's recent posts",
     csv=True,
+    add_args=add_target_arg,
 )
 @with_target
 async def likes_cmd(ctx: CommandContext, username: str) -> LikesStats:

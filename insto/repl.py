@@ -24,12 +24,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -52,28 +53,53 @@ if TYPE_CHECKING:
 EXIT_COMMANDS = frozenset({"quit", "exit", "q"})
 
 
-def _completer() -> WordCompleter:
-    """Build a `WordCompleter` over every registered command name.
+class _SlashCommandCompleter(Completer):
+    """Slack/Claude-Code-style command completer.
 
-    Each command appears twice — bare (`info`) and slash-prefixed (`/info`) —
-    so the completer triggers regardless of whether the user starts typing a
-    leading `/`. Per-completion meta strings carry the one-line `help` text
-    so the completion menu can render `command — description`.
+    Triggers on the *first token* of the line:
+
+    - `/`           → list every command, popup opens the moment `/` is typed.
+    - `/in`         → narrow to commands starting with "in".
+    - `inf`         → no leading slash also works (REPL strips `/` anyway).
+
+    Once the first token is finished (cursor is past whitespace), the completer
+    stays silent so per-command argument completion can plug in later without
+    fighting this layer.
     """
-    words: list[str] = []
-    meta: dict[str, str] = {}
-    for name, spec in sorted(COMMANDS.items()):
-        words.append(name)
-        words.append(f"/{name}")
-        meta[name] = spec.help
-        meta[f"/{name}"] = spec.help
-    return WordCompleter(
-        words=words,
-        meta_dict=meta,
-        ignore_case=True,
-        match_middle=False,
-        sentence=False,
-    )
+
+    def __init__(self) -> None:
+        self._items: list[tuple[str, str]] = sorted(
+            (name, spec.help) for name, spec in COMMANDS.items()
+        )
+
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterable[Completion]:
+        text = document.text_before_cursor
+        # Only complete while the user is typing the *first* token.
+        if " " in text.lstrip():
+            return
+        prefix = text.lstrip()
+        if prefix.startswith("/"):
+            user_typed = prefix[1:].lower()
+            slash = "/"
+        else:
+            user_typed = prefix.lower()
+            slash = ""
+        for name, help_text in self._items:
+            if not name.lower().startswith(user_typed):
+                continue
+            yield Completion(
+                text=f"{slash}{name}",
+                start_position=-len(prefix),
+                display=f"/{name}",
+                display_meta=help_text,
+            )
+
+
+def _completer() -> Completer:
+    """Slash-aware command completer (popup opens on `/`)."""
+    return _SlashCommandCompleter()
 
 
 def _format_quota(facade: OsintFacade) -> str:
@@ -84,9 +110,26 @@ def _format_quota(facade: OsintFacade) -> str:
         return "quota: ?"
     if quota is None or quota.remaining is None:
         return "quota: ?"
-    if quota.limit is None:
-        return f"quota: {quota.remaining}"
-    return f"quota: {quota.remaining}/{quota.limit}"
+    parts = [_format_count(quota.remaining) + " req"]
+    if quota.amount is not None and quota.currency:
+        parts.append(_format_money(quota.amount, quota.currency))
+    if quota.rate is not None:
+        parts.append(f"{quota.rate} rps")
+    return " · ".join(parts)
+
+
+def _format_count(n: int) -> str:
+    """Render a request count: 14722577 -> '14.7M', 1500 -> '1.5K'."""
+    if n >= 1_000_000:
+        return f"{n / 1_000_000:.1f}M"
+    if n >= 1_000:
+        return f"{n / 1_000:.1f}K"
+    return str(n)
+
+
+def _format_money(amount: float, currency: str) -> str:
+    sym = {"USD": "$", "EUR": "€", "GBP": "£"}.get(currency.upper(), currency + " ")
+    return f"{sym}{amount:,.0f}" if amount >= 100 else f"{sym}{amount:,.2f}"
 
 
 def _backend_label(facade: OsintFacade) -> str:
@@ -244,6 +287,16 @@ async def _safe_prune(facade: OsintFacade) -> None:
         await facade.history.prune_async()
 
 
+async def _safe_refresh_quota(facade: OsintFacade) -> None:
+    """Refresh backend quota in the background; swallow all errors."""
+    backend = facade.backend
+    refresh = getattr(backend, "refresh_quota", None)
+    if refresh is None:
+        return
+    with contextlib.suppress(Exception):
+        await refresh()
+
+
 def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], Awaitable[None]]]:
     """Construct facade + cleanup closure. Separated so tests can stub it."""
     cfg = config if config is not None else load_config()
@@ -298,12 +351,19 @@ def run_repl(config: Config | None = None, *, email: str | None = None) -> None:
         # Best-effort retention prune on session start so the store does
         # not grow unbounded. Failures are non-fatal and silenced.
         prune_task = asyncio.create_task(_safe_prune(facade))
+        # Best-effort quota fetch — populates the BottomToolbar so it does
+        # not stay "quota: unknown" through the whole session. Failure is
+        # silent (HikerAPI may be down, network blocked, etc.).
+        quota_task = asyncio.create_task(_safe_refresh_quota(facade))
         try:
             await repl.run()
         finally:
             prune_task.cancel()
+            quota_task.cancel()
             with contextlib.suppress(BaseException):
                 await prune_task
+            with contextlib.suppress(BaseException):
+                await quota_task
             await cleanup()
 
     asyncio.run(_main())

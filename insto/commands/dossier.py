@@ -51,6 +51,7 @@ from typing import Any
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
+    add_target_arg,
     command,
     with_target,
 )
@@ -408,6 +409,7 @@ def _write_manifest(
     "dossier",
     "Collect a full target package (profile, posts, network, analytics) "
     "under output/<user>/dossier/<ts>/",
+    add_args=add_target_arg,
 )
 @with_target
 async def dossier_cmd(ctx: CommandContext, username: str) -> Path:

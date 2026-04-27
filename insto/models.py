@@ -149,18 +149,40 @@ class HighlightItem:
 
 @dataclass(slots=True)
 class Quota:
-    """Backend quota snapshot — read from response headers (hiker)."""
+    """Backend quota snapshot.
+
+    HikerAPI is pay-per-call, so `remaining` is "requests left on plan",
+    `limit` is unused, and `rate` / `amount` / `currency` come from the
+    `/sys/balance` endpoint (USD balance and per-second rate cap).
+    """
 
     remaining: int | None
     limit: int | None = None
     reset_at: int | None = None
+    rate: int | None = None
+    amount: float | None = None
+    currency: str | None = None
 
     @classmethod
     def with_remaining(
-        cls, remaining: int, *, limit: int | None = None, reset_at: int | None = None
+        cls,
+        remaining: int,
+        *,
+        limit: int | None = None,
+        reset_at: int | None = None,
+        rate: int | None = None,
+        amount: float | None = None,
+        currency: str | None = None,
     ) -> Quota:
-        """Build a Quota from a parsed `X-Quota-Remaining` header."""
-        return cls(remaining=remaining, limit=limit, reset_at=reset_at)
+        """Build a Quota from a parsed header response or `/sys/balance` payload."""
+        return cls(
+            remaining=remaining,
+            limit=limit,
+            reset_at=reset_at,
+            rate=rate,
+            amount=amount,
+            currency=currency,
+        )
 
     @classmethod
     def unknown(cls) -> Quota:

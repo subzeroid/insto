@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import shutil
 from pathlib import Path
@@ -40,8 +41,16 @@ from insto.config import effective_config_report
 # ---------------------------------------------------------------------------
 
 
-@command("quota", "Show the last-known backend quota snapshot")
+@command("quota", "Show the current backend quota / balance")
 async def quota_cmd(ctx: CommandContext) -> dict[str, Any]:
+    # Fresh fetch so /quota always reflects the live balance, not a stale
+    # header captured from the previous command's response. Backends that
+    # do not implement refresh_quota (e.g. FakeBackend, aiograpi v0.2)
+    # silently fall back to the cached value.
+    refresh = getattr(ctx.facade.backend, "refresh_quota", None)
+    if refresh is not None:
+        with contextlib.suppress(Exception):
+            await refresh()
     quota = ctx.facade.quota()
     payload = dataclasses.asdict(quota)
     fmt = ctx.output_format()
@@ -54,10 +63,14 @@ async def quota_cmd(ctx: CommandContext) -> dict[str, Any]:
             dest=resolve_export_dest(dest_arg),
         )
         return payload
-    rem = "?" if quota.remaining is None else str(quota.remaining)
-    lim = "?" if quota.limit is None else str(quota.limit)
-    reset = "?" if quota.reset_at is None else str(quota.reset_at)
-    ctx.print(f"quota: remaining={rem} limit={lim} reset_at={reset}")
+    rem = "?" if quota.remaining is None else f"{quota.remaining:,}"
+    parts = [f"requests left: {rem}"]
+    if quota.amount is not None and quota.currency:
+        sym = {"USD": "$", "EUR": "€", "GBP": "£"}.get(quota.currency.upper(), quota.currency + " ")
+        parts.append(f"balance: {sym}{quota.amount:,.2f}")
+    if quota.rate is not None:
+        parts.append(f"rate: {quota.rate} rps")
+    ctx.print(" | ".join(parts))
     return payload
 
 

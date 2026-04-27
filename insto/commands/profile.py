@@ -20,6 +20,7 @@ from typing import Any
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
+    add_target_arg,
     command,
     download_or_print_url,
     resolve_export_dest,
@@ -52,6 +53,7 @@ def _profile_payload(profile: Profile, about: dict[str, Any]) -> dict[str, Any]:
 @command(
     "info",
     "Show full profile (with user_about) for the active target",
+    add_args=add_target_arg,
 )
 @with_target
 async def info_cmd(ctx: CommandContext, username: str) -> tuple[Profile, dict[str, Any]]:
@@ -78,6 +80,7 @@ async def info_cmd(ctx: CommandContext, username: str) -> tuple[Profile, dict[st
 @command(
     "propic",
     "Download the HD profile picture of the active target",
+    add_args=add_target_arg,
 )
 @with_target
 async def propic_cmd(ctx: CommandContext, username: str) -> Path | None:
@@ -150,7 +153,11 @@ def _emit_contact(
     return payload
 
 
-@command("email", "Show the public email (if any) for the active target")
+@command(
+    "email",
+    "Show the public email (if any) for the active target",
+    add_args=add_target_arg,
+)
 @with_target
 async def email_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
     profile, about = await ctx.facade.profile_info(username)
@@ -163,7 +170,11 @@ async def email_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
     )
 
 
-@command("phone", "Show the public phone (if any) for the active target")
+@command(
+    "phone",
+    "Show the public phone (if any) for the active target",
+    add_args=add_target_arg,
+)
 @with_target
 async def phone_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
     profile, about = await ctx.facade.profile_info(username)
@@ -184,6 +195,7 @@ async def phone_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
 @command(
     "export",
     "Export the full profile + user_about payload as a versioned JSON file",
+    add_args=add_target_arg,
 )
 @with_target
 async def export_cmd(ctx: CommandContext, username: str) -> Path | None:

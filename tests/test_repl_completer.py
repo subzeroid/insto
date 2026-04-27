@@ -79,33 +79,39 @@ def _completions(completer: object, text: str) -> list[str]:
     return [c.text for c in completions]
 
 
-def test_completer_lists_every_command_with_and_without_slash() -> None:
+def test_completer_lists_every_command_when_only_slash_typed() -> None:
+    """Slack/Claude-Code-style: typing '/' opens a popup with every command."""
     completer = _completer()
-    bare = _completions(completer, "")
-    assert set(COMMANDS) <= set(bare)
-    assert all(f"/{name}" in bare for name in COMMANDS)
+    matches = _completions(completer, "/")
+    assert all(f"/{name}" in matches for name in COMMANDS)
+    # And no bare names — display always includes the slash.
+    assert all(m.startswith("/") for m in matches)
 
 
-def test_completer_narrows_on_prefix() -> None:
+def test_completer_narrows_on_slash_prefix() -> None:
     completer = _completer()
-    # WordCompleter splits on word boundaries — `/info` looks up word `info`.
     matches = _completions(completer, "/info")
+    assert "/info" in matches
+    assert "/posts" not in matches
+
+
+def test_completer_works_without_leading_slash() -> None:
+    """Bare prefix (REPL strips leading '/' anyway) still narrows correctly."""
+    completer = _completer()
+    matches = _completions(completer, "inf")
+    # Returned text keeps its lack of slash so the user's typing isn't replaced
+    # with one they did not type.
     assert "info" in matches
-    # the short prefix `/info` should not pull in unrelated commands
     assert "posts" not in matches
-    # bare prefix narrows the same way
-    bare_matches = _completions(completer, "inf")
-    assert "info" in bare_matches
-    assert "posts" not in bare_matches
 
 
 def test_completer_meta_uses_command_help() -> None:
     completer = _completer()
     spec = next(iter(COMMANDS.values()))
-    doc = Document(text="", cursor_position=0)
+    doc = Document(text="/", cursor_position=1)
     by_text = {c.text: c for c in completer.get_completions(doc, complete_event=None)}
-    assert spec.name in by_text
-    meta = by_text[spec.name].display_meta_text
+    assert f"/{spec.name}" in by_text
+    meta = by_text[f"/{spec.name}"].display_meta_text
     assert spec.help == meta
 
 
@@ -151,7 +157,8 @@ def test_bottom_toolbar_shows_target_backend_and_quota(_facade: OsintFacade) -> 
     text = "".join(s for _, s in toolbar())
     assert "target: @alice" in text
     assert "backend: fake" in text
-    assert "quota: 80/100" in text
+    # Toolbar now renders pay-per-call quota: "80 req" instead of "80/100".
+    assert "80 req" in text
 
 
 def test_bottom_toolbar_target_none(_facade: OsintFacade) -> None:
@@ -173,7 +180,7 @@ def test_bottom_toolbar_quota_unknown(_facade: OsintFacade) -> None:
 
 def test_format_quota_handles_remaining_only(_facade: OsintFacade) -> None:
     _facade.backend.quota = Quota(remaining=42)  # type: ignore[attr-defined]
-    assert _format_quota(_facade) == "quota: 42"
+    assert _format_quota(_facade) == "42 req"
 
 
 def test_format_quota_handles_get_quota_raising(_facade: OsintFacade) -> None:

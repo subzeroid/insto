@@ -34,6 +34,7 @@ import dataclasses
 import io
 import json
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -96,11 +97,23 @@ def _now_iso_utc() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+_SAFE_TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
 def _normalize_target(target: str | None) -> str:
+    """Reduce `target` to a safe filesystem path segment for `default_export_path`.
+
+    The user-input target boundary already runs through `_validate_username`,
+    but DTO-derived targets (e.g. `profile.username` from the backend) reach
+    this helper too. Substituting `_` for anything containing a path separator
+    or `..` keeps a drifted / malicious payload from escaping `output_dir`.
+    """
     if target is None:
         return "_"
     cleaned = target.lstrip("@").strip()
-    return cleaned or "_"
+    if not cleaned or cleaned in (".", "..") or not _SAFE_TARGET_RE.fullmatch(cleaned):
+        return "_"
+    return cleaned
 
 
 def default_export_path(

@@ -96,7 +96,7 @@ def _validate_proxy_url(url: str) -> None:
     if parsed.scheme not in _VALID_PROXY_SCHEMES:
         allowed = sorted(_VALID_PROXY_SCHEMES)
         raise BackendError(f"invalid proxy URL {url!r}: scheme must be one of {allowed}")
-    if not parsed.netloc:
+    if not parsed.hostname:
         raise BackendError(f"invalid proxy URL {url!r}: missing host")
 
 

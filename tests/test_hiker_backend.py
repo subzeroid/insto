@@ -96,6 +96,9 @@ def test_validate_proxy_url_accepts_http_https_socks() -> None:
         "ftp://localhost",
         "://no-scheme",
         "http://",
+        # netloc='@' with no host — must be rejected before httpx ever sees it.
+        "http://@/",
+        "http://user:pass@",
     ],
 )
 def test_validate_proxy_url_rejects_garbage(url: str) -> None:

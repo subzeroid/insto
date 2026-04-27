@@ -442,3 +442,21 @@ async def test_quota_and_last_error_passthrough(facade: OsintFacade, backend: Fa
     assert isinstance(err, RateLimited)
     q = facade.quota()
     assert q is backend.quota
+
+
+# ----------------------------------------------------------------------- aclose
+
+
+async def test_facade_aclose_closes_backend(history: HistoryStore, config: Config) -> None:
+    """`facade.aclose()` must release the backend's network resources too."""
+
+    class _ClosingBackend(FakeBackend):
+        closed: bool = False
+
+        async def aclose(self) -> None:
+            object.__setattr__(self, "closed", True)
+
+    backend = _ClosingBackend()
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    await facade.aclose()
+    assert backend.closed is True

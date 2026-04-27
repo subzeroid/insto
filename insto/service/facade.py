@@ -22,6 +22,7 @@ returns the path actually written so the command can render it.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import sqlite3
 from pathlib import Path
@@ -358,6 +359,8 @@ class OsintFacade:
         if self._cdn_client is not None:
             await self._cdn_client.aclose()
             self._cdn_client = None
+        with contextlib.suppress(Exception):
+            await self.backend.aclose()
 
 
 _SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")

@@ -291,6 +291,43 @@ async def test_propic_missing_url_reports(
     assert "no profile picture URL" in _captured(recording_console)
 
 
+async def test_propic_sanitizes_drifted_pk(
+    backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+    recording_console: Console,
+) -> None:
+    """A drifted backend returning `pk='../etc'` must not escape output_dir."""
+    backend.profiles["42"] = Profile(
+        pk="../../../etc/passwd",
+        username="alice",
+        access="public",
+        full_name="Alice",
+        avatar_url="https://scontent.cdninstagram.com/a.jpg",
+    )
+
+    body = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00" + b"\x00" * 1024
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "image/jpeg", "content-length": str(len(body))},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
+    try:
+        session.set_target("alice")
+        out = await dispatch("/propic", facade=facade, session=session, console=recording_console)
+        assert isinstance(out, Path)
+        assert out.is_relative_to(config.output_dir)
+        assert ".." not in out.parts
+    finally:
+        await facade.aclose()
+
+
 # ---------------------------------------------------------------------------
 # /email
 # ---------------------------------------------------------------------------

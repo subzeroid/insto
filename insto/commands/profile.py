@@ -26,6 +26,7 @@ from insto.commands._base import (
     with_target,
 )
 from insto.models import Profile
+from insto.service.facade import _safe_pk
 from insto.ui.render import render_profile
 
 
@@ -87,9 +88,11 @@ async def propic_cmd(ctx: CommandContext, username: str) -> Path | None:
     # Use the already-validated `username` rather than the network-sourced
     # `profile.username` as the path segment. The two are identical for any
     # well-formed Instagram response; passing the validated one keeps the
-    # path-traversal guard at the user-input boundary.
+    # path-traversal guard at the user-input boundary. `profile.pk` is also
+    # backend-derived, so sanitize it the same way `facade.download_propic`
+    # does.
     dest_dir = ctx.facade._media_dir(username, "propic")
-    dest = dest_dir / profile.pk
+    dest = dest_dir / _safe_pk(profile.pk)
     out = await download_or_print_url(
         ctx.facade,
         profile.avatar_url,

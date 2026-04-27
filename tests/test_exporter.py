@@ -43,6 +43,28 @@ def test_default_export_path_custom_output_dir(tmp_path: Path) -> None:
     assert p == tmp_path / "u" / "posts.json"
 
 
+@pytest.mark.parametrize(
+    "drifted_target",
+    [
+        "../etc",
+        "..",
+        ".",
+        "a/b",
+        "a\\b",
+        "with spaces",
+        "naughty\x00",
+    ],
+)
+def test_default_export_path_substitutes_underscore_for_unsafe_target(
+    drifted_target: str, tmp_path: Path
+) -> None:
+    """Defense-in-depth: backend-derived `target` cannot escape `output_dir`."""
+    p = default_export_path(command="info", target=drifted_target, ext="json", output_dir=tmp_path)
+    # Whatever happens, the path stays under `tmp_path / _ /` (the substitution
+    # bucket) — never under tmp_path's parent or a smuggled subpath.
+    assert p == tmp_path / "_" / "info.json"
+
+
 def test_to_json_writes_schema_envelope(tmp_path: Path) -> None:
     dest = tmp_path / "out.json"
     to_json({"foo": "bar"}, command="info", target="@nasa", dest=dest)

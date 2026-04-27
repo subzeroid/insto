@@ -116,3 +116,11 @@ class OSINTBackend(ABC):
     @abstractmethod
     def get_last_error(self) -> BaseException | None:
         """Return the last exception raised by this backend, if any."""
+
+    async def aclose(self) -> None:  # noqa: B027 — intentional empty default
+        """Release backend-owned resources (HTTP clients, sockets, …).
+
+        Default implementation is a no-op so simple in-memory backends (the
+        test fakes, future mock backends) need not override. Real backends
+        with network clients (HikerBackend) override to close them.
+        """

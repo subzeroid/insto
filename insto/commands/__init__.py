@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from insto.commands import batch as _batch  # noqa: F401  (registers commands)
 from insto.commands import content as _content  # noqa: F401  (registers commands)
+from insto.commands import dossier as _dossier  # noqa: F401  (registers commands)
 from insto.commands import interactions as _interactions  # noqa: F401  (registers commands)
 from insto.commands import media as _media  # noqa: F401  (registers commands)
 from insto.commands import network as _network  # noqa: F401  (registers commands)

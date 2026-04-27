@@ -265,6 +265,13 @@ class HikerBackend(OSINTBackend):
         self._apply_retry = retry_decorator if retry_decorator is not None else with_retry()
         self._quota: Quota = Quota.unknown()
         self._last_error: BaseException | None = None
+        self._drift_count: int = 0
+
+    def _record_drift(self, exc: SchemaDrift) -> SchemaDrift:
+        """Track a `SchemaDrift` for `/health`. Returns `exc` so callers can `raise`."""
+        self._drift_count += 1
+        self._last_error = exc
+        return exc
 
     # ------------------------------------------------------------------ hooks
 
@@ -323,10 +330,13 @@ class HikerBackend(OSINTBackend):
             payload = await self._call(lambda: self._client.user_by_username_v2(username=username))
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(username), exc)
-        user = self._unwrap_user(payload, endpoint="user_by_username_v2")
+        try:
+            user = self._unwrap_user(payload, endpoint="user_by_username_v2")
+        except SchemaDrift as exc:
+            raise self._record_drift(exc) from None
         pk = user.get("pk") or user.get("pk_id")
         if not pk:
-            raise SchemaDrift("user_by_username_v2", "pk")
+            raise self._record_drift(SchemaDrift("user_by_username_v2", "pk"))
         return str(pk)
 
     async def get_profile(self, pk: str) -> Profile:
@@ -334,8 +344,11 @@ class HikerBackend(OSINTBackend):
             payload = await self._call(lambda: self._client.user_by_id_v2(id=pk))
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(pk), exc)
-        user = self._unwrap_user(payload, endpoint="user_by_id_v2")
-        return map_profile(user)
+        try:
+            user = self._unwrap_user(payload, endpoint="user_by_id_v2")
+            return map_profile(user)
+        except SchemaDrift as exc:
+            raise self._record_drift(exc) from None
 
     async def get_user_about(self, pk: str) -> dict[str, Any]:
         try:
@@ -343,7 +356,7 @@ class HikerBackend(OSINTBackend):
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(pk), exc)
         if not isinstance(payload, dict):
-            raise SchemaDrift("user_about_v1", "user")
+            raise self._record_drift(SchemaDrift("user_about_v1", "user"))
         return payload
 
     @staticmethod
@@ -378,8 +391,12 @@ class HikerBackend(OSINTBackend):
             items, next_cursor = _extract_chunk(payload)
             for raw in items:
                 if not isinstance(raw, dict):
-                    raise SchemaDrift(endpoint, "item")
-                yield mapper(raw)
+                    raise self._record_drift(SchemaDrift(endpoint, "item"))
+                try:
+                    mapped = mapper(raw)
+                except SchemaDrift as exc:
+                    raise self._record_drift(exc) from None
+                yield mapped
                 yielded += 1
                 if limit is not None and yielded >= limit:
                     return
@@ -400,8 +417,12 @@ class HikerBackend(OSINTBackend):
         items = _extract_single_list(payload, keys=list_keys)
         for index, raw in enumerate(items):
             if not isinstance(raw, dict):
-                raise SchemaDrift(endpoint, "item")
-            yield mapper(raw)
+                raise self._record_drift(SchemaDrift(endpoint, "item"))
+            try:
+                mapped = mapper(raw)
+            except SchemaDrift as exc:
+                raise self._record_drift(exc) from None
+            yield mapped
             if limit is not None and index + 1 >= limit:
                 return
 
@@ -488,16 +509,20 @@ class HikerBackend(OSINTBackend):
             if isinstance(inner, dict):
                 body = inner
         if not isinstance(body, dict):
-            raise SchemaDrift("highlight_by_id_v2", "highlight")
+            raise self._record_drift(SchemaDrift("highlight_by_id_v2", "highlight"))
         items = body.get("items")
         if not isinstance(items, list):
-            raise SchemaDrift("highlight_by_id_v2", "items")
+            raise self._record_drift(SchemaDrift("highlight_by_id_v2", "items"))
 
         mapper = partial(map_highlight_item, highlight_pk=str(highlight_id))
         for index, raw in enumerate(items):
             if not isinstance(raw, dict):
-                raise SchemaDrift("highlight_by_id_v2", "item")
-            yield mapper(raw)
+                raise self._record_drift(SchemaDrift("highlight_by_id_v2", "item"))
+            try:
+                mapped = mapper(raw)
+            except SchemaDrift as exc:
+                raise self._record_drift(exc) from None
+            yield mapped
             if limit is not None and index + 1 >= limit:
                 return
 
@@ -550,7 +575,10 @@ class HikerBackend(OSINTBackend):
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(pk), exc)
         items = _extract_single_list(payload, keys=("suggested", "users", "items"))
-        return [map_user(raw) for raw in items if isinstance(raw, dict)]
+        try:
+            return [map_user(raw) for raw in items if isinstance(raw, dict)]
+        except SchemaDrift as exc:
+            raise self._record_drift(exc) from None
 
     async def iter_hashtag_posts(
         self, tag: str, *, limit: int | None = None
@@ -575,6 +603,9 @@ class HikerBackend(OSINTBackend):
 
     def get_last_error(self) -> BaseException | None:
         return self._last_error
+
+    def get_schema_drift_count(self) -> int:
+        return self._drift_count
 
     async def aclose(self) -> None:
         """Close the underlying SDK client."""

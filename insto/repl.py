@@ -26,7 +26,7 @@ import contextlib
 import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import WordCompleter
@@ -252,12 +252,16 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     history = HistoryStore(cfg.db_path)
     # Reuse a single httpx client across CDN downloads so HTTP/2 connection
     # reuse + TLS session resumption work for the whole REPL session. The
-    # facade owns the client and closes it via aclose().
+    # facade owns the client and closes it via aclose(). Same proxy as the
+    # backend API client — see cli._run_oneshot for the rationale.
     import httpx as _httpx
 
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
 
-    cdn_client = _httpx.AsyncClient(follow_redirects=False, timeout=_CDN_TIMEOUT)
+    cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
+    if cfg.hiker_proxy:
+        cdn_kwargs["proxy"] = cfg.hiker_proxy
+    cdn_client = _httpx.AsyncClient(**cdn_kwargs)
     facade = OsintFacade(backend=backend, history=history, config=cfg, cdn_client=cdn_client)
 
     async def cleanup() -> None:

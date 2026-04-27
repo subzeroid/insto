@@ -103,6 +103,7 @@ class FakeBackend(OSINTBackend):
     """Counts simulated page fetches per `iter_*` method (debug for limit tests)."""
 
     _last_error: BaseException | None = field(default=None, init=False)
+    _drift_count: int = field(default=0, init=False)
 
     def _consume_error(self, slot: str) -> None:
         """If an error is queued in `self.errors.<slot>`, raise it once."""
@@ -111,6 +112,8 @@ class FakeBackend(OSINTBackend):
             return
         setattr(self.errors, slot, None)
         self._last_error = err
+        if isinstance(err, SchemaDrift):
+            self._drift_count += 1
         raise err
 
     async def resolve_target(self, username: str) -> str:
@@ -248,6 +251,9 @@ class FakeBackend(OSINTBackend):
 
     def get_last_error(self) -> BaseException | None:
         return self._last_error
+
+    def get_schema_drift_count(self) -> int:
+        return self._drift_count
 
 
 __all__ = [

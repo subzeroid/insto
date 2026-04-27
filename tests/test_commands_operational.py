@@ -152,14 +152,16 @@ async def test_health_reports_backend_quota_and_no_error(
 async def test_health_surfaces_last_error_and_drift_counter(
     backend: FakeBackend, history: HistoryStore, config: Config
 ) -> None:
-    backend._last_error = SchemaDrift(  # type: ignore[attr-defined]
-        endpoint="user_by_username_v2", missing_field="pk"
-    )
+    drift = SchemaDrift(endpoint="user_by_username_v2", missing_field="pk")
+    backend._last_error = drift  # type: ignore[attr-defined]
+    backend._drift_count = 3  # type: ignore[attr-defined]
     facade = OsintFacade(backend=backend, history=history, config=config)
     try:
         console = Console(record=True, color_system=None, width=160)
         payload = await dispatch("/health", facade=facade, session=Session(), console=console)
-        assert payload["schema_drifts"] == 1
+        # Counter accumulates across calls — `/health` reports the running
+        # total, not just whether the last error was a drift.
+        assert payload["schema_drifts"] == 3
         assert "SchemaDrift" in payload["last_error"]
         assert "missing field" in payload["last_error"]
     finally:

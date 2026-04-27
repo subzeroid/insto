@@ -34,7 +34,6 @@ from insto.commands._base import (
     resolve_export_dest,
 )
 from insto.config import effective_config_report
-from insto.exceptions import SchemaDrift
 
 # ---------------------------------------------------------------------------
 # /quota
@@ -77,7 +76,7 @@ def _format_last_error(err: BaseException | None) -> str:
 async def health_cmd(ctx: CommandContext) -> dict[str, Any]:
     quota = ctx.facade.quota()
     last_err = ctx.facade.last_error()
-    schema_drifts = 1 if isinstance(last_err, SchemaDrift) else 0
+    schema_drifts = ctx.facade.backend.get_schema_drift_count()
     payload: dict[str, Any] = {
         "backend": type(ctx.facade.backend).__name__,
         "quota": dataclasses.asdict(quota),

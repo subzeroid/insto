@@ -238,9 +238,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _safe_load_config() -> Config | None:
+    """Load config; surface security-relevant failures to stderr.
+
+    A `BackendError` from `load_config()` typically means the config file
+    is group/world-readable — exactly the security signal the operator
+    needs to see. Swallowing it would degrade the message to the generic
+    "no token configured" hint, masking a likely tampering or
+    permissions-drift event. We print it (redacted) and return `None` so
+    the caller can choose whether to bail or fall back to setup.
+    """
     try:
         return load_config()
-    except BackendError:
+    except BackendError as exc:
+        print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
         return None
 
 
@@ -363,11 +373,18 @@ async def _run_oneshot(
     history = HistoryStore(config.db_path)
     # Reuse a single httpx client for every CDN download in the run so we do
     # not pay TCP/TLS handshake cost on each media URL. Closed by facade.aclose().
+    # Route CDN downloads through the same proxy as backend API calls — an
+    # operator who configured `hiker_proxy` for OSINT identity protection
+    # expects media fetches (which hit `*.cdninstagram.com` / `*.fbcdn.net`)
+    # to be proxied just like the API surface.
     import httpx as _httpx
 
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
 
-    cdn_client = _httpx.AsyncClient(follow_redirects=False, timeout=_CDN_TIMEOUT)
+    cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
+    if config.hiker_proxy:
+        cdn_kwargs["proxy"] = config.hiker_proxy
+    cdn_client = _httpx.AsyncClient(**cdn_kwargs)
     facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=cdn_client)
 
     session = Session(target=target.lstrip("@") if target else None)

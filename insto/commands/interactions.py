@@ -169,9 +169,11 @@ async def comments_cmd(ctx: CommandContext, username: str) -> list[Comment]:
         analyzed_posts = 1
         header = f"Comments on {match.code} (post by @{username}):"
     else:
-        # Aggregate mode: `--limit` caps the *post* window (already applied to
-        # `posts` above); per-post comment retrieval is unbounded so a small
-        # window does not silently truncate comments on the first post.
+        # Aggregate mode: `--limit` caps the post window (already applied to
+        # `posts` above). Per-post comment retrieval falls back to the facade
+        # default (50/post), so the spec §9 bounded-window guarantee holds —
+        # a 50-post celebrity target pulls at most ~2.5k comments, not the
+        # entire comment history.
         comments = []
         for post in posts:
             comments.extend(await ctx.facade.post_comments(post.pk))

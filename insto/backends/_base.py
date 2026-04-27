@@ -117,6 +117,15 @@ class OSINTBackend(ABC):
     def get_last_error(self) -> BaseException | None:
         """Return the last exception raised by this backend, if any."""
 
+    def get_schema_drift_count(self) -> int:
+        """Return the number of `SchemaDrift` errors observed this session.
+
+        Default 0 so simple backends (in-process fakes) need not track. Real
+        backends override to expose a running counter — surfaced by `/health`
+        so an operator can spot provider degradation.
+        """
+        return 0
+
     async def aclose(self) -> None:  # noqa: B027 — intentional empty default
         """Release backend-owned resources (HTTP clients, sockets, …).
 

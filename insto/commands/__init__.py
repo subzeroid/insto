@@ -13,6 +13,7 @@ Commands talk only to `OsintFacade` (never directly to backend / analytics
 from __future__ import annotations
 
 from insto.commands import content as _content  # noqa: F401  (registers commands)
+from insto.commands import interactions as _interactions  # noqa: F401  (registers commands)
 from insto.commands import media as _media  # noqa: F401  (registers commands)
 from insto.commands import network as _network  # noqa: F401  (registers commands)
 from insto.commands import profile as _profile  # noqa: F401  (registers commands)

@@ -400,3 +400,48 @@ async def test_dossier_limit_override_caps_collections(
     manifest = (out / "MANIFEST.md").read_text()
     # Truncation should be flagged on collections that hit the cap.
     assert "truncated=true" in manifest
+
+
+# ---------------------------------------------------------------------------
+# Regression: /dossier must not double-fetch followers/following.
+# Previously _do_mutuals called facade.mutuals(), which itself iterated both
+# lists — so /dossier paid 2x the quota for those endpoints on every run.
+# ---------------------------------------------------------------------------
+
+
+async def test_dossier_network_bundle_fetches_followers_following_once(
+    backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = _make_facade(backend, history, config)
+    await dispatch("/dossier --no-download --yes", facade=facade, session=session)
+
+    # The fake records every backend call. With the bundled implementation
+    # /dossier should iterate followers and following exactly once each.
+    followers_calls = sum(1 for entry in backend.request_log if entry[0] == "iter_user_followers")
+    following_calls = sum(1 for entry in backend.request_log if entry[0] == "iter_user_following")
+    assert followers_calls == 1, f"followers fetched {followers_calls}x (expected 1)"
+    assert following_calls == 1, f"following fetched {following_calls}x (expected 1)"
+
+
+async def test_dossier_network_bundle_marks_all_three_failed_on_quota_exhausted(
+    backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """If followers fetch fails, mutuals is mathematically meaningless —
+    the bundle marks followers + mutuals as failed and surfaces the quota
+    error to abort sibling sections too."""
+    backend.errors.iter_user_followers = QuotaExhausted("burst hit")
+    facade = _make_facade(backend, history, config)
+    out = await dispatch("/dossier --no-download --yes", facade=facade, session=session)
+
+    manifest = (out / "MANIFEST.md").read_text()
+    assert "partial: true" in manifest
+    assert "**followers** — failed:" in manifest
+    assert "**mutuals** — failed:" in manifest
+    # Following should still have a chance to succeed (independent fetch).
+    assert (out / "following.csv").exists()

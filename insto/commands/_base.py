@@ -352,6 +352,10 @@ async def dispatch(
             raise CommandUsageError(
                 f"/{spec.name} needs aiograpi backend (missing capability: {', '.join(missing)})"
             )
+    # Reset the spec §12 per-command CDN byte budget. /batch keeps the same
+    # facade for the whole batch but each child invocation goes through
+    # `dispatch()` and gets its own fresh 5 GB budget.
+    facade.reset_command_budget()
     ctx = CommandContext(facade=facade, args=args, session=session, console=console)
     return await spec.fn(ctx)
 

@@ -33,6 +33,7 @@ import httpx
 from insto.backends._base import OSINTBackend
 from insto.backends._cdn import stream_to_file
 from insto.config import Config
+from insto.exceptions import BackendError
 from insto.models import (
     Comment,
     Highlight,
@@ -57,6 +58,11 @@ from insto.service.watch import WatchManager
 class OsintFacade:
     """Stateful facade composing backend + service helpers for one session."""
 
+    # Spec §12: 5 GB cap on the total bytes a single command run may stream
+    # from the CDN (on top of the per-resource 500 MB budget enforced inside
+    # `_cdn.stream_to_file`). Reset by `dispatch()` before each command.
+    DEFAULT_COMMAND_BYTE_BUDGET: int = 5 * 1024 * 1024 * 1024
+
     def __init__(
         self,
         *,
@@ -71,6 +77,22 @@ class OsintFacade:
         self._cdn_client = cdn_client
         self._pk_cache: dict[str, str] = {}
         self.watches = WatchManager()
+        self._command_byte_budget: int = self.DEFAULT_COMMAND_BYTE_BUDGET
+        self._command_bytes_used: int = 0
+
+    def reset_command_budget(self, total: int | None = None) -> None:
+        """Start a fresh per-command CDN byte budget.
+
+        Called from `dispatch()` once per command. Subsequent CDN downloads
+        are tracked against this budget; exceeding it raises `BackendError`
+        from the next `_stream` call.
+        """
+        self._command_byte_budget = total if total is not None else self.DEFAULT_COMMAND_BYTE_BUDGET
+        self._command_bytes_used = 0
+
+    @property
+    def command_bytes_remaining(self) -> int:
+        return max(0, self._command_byte_budget - self._command_bytes_used)
 
     @property
     def db_connection(self) -> sqlite3.Connection:
@@ -340,12 +362,24 @@ class OsintFacade:
         *,
         taken_at: float | int | None = None,
     ) -> Path:
-        return await stream_to_file(
+        # Per-command byte budget (spec §12: 5 GB / command). The
+        # per-resource 500 MB cap still lives inside `_cdn.stream_to_file`.
+        if self._command_bytes_used >= self._command_byte_budget:
+            raise BackendError(
+                "command exceeded byte budget "
+                f"{self._command_byte_budget} (used {self._command_bytes_used})"
+            )
+        path = await stream_to_file(
             url,
             dest,
             taken_at=taken_at,
             client=self._cdn_client,
         )
+        with contextlib.suppress(OSError):
+            # If stat fails the budget stays accurate enough — the streamer
+            # has already enforced the per-resource cap on the just-written file.
+            self._command_bytes_used += path.stat().st_size
+        return path
 
     # ------------------------------------------------------------------- log
 

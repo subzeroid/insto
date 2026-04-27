@@ -418,6 +418,61 @@ async def test_download_post_media_multi_url(
     assert outs[1].name == "p1_1.jpg"
 
 
+# ----------------------------------------------------------- per-command budget
+
+
+async def test_command_byte_budget_resets_between_commands(
+    backend: FakeBackend, history: HistoryStore, config: Config
+) -> None:
+    """`reset_command_budget()` clears bytes_used so two back-to-back commands
+    each get a fresh per-command budget rather than sharing one."""
+    body = _pad(JPEG_MAGIC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=body)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
+    profile = _profile(pk="42", username="alice", avatar_url=f"https://{CDN_HOST}/a")
+    try:
+        await facade.download_propic(profile)
+        used_first = facade._command_bytes_used
+        assert used_first > 0
+
+        facade.reset_command_budget()
+        assert facade._command_bytes_used == 0
+        assert facade.command_bytes_remaining == facade.DEFAULT_COMMAND_BYTE_BUDGET
+    finally:
+        await facade.aclose()
+
+
+async def test_command_byte_budget_blocks_further_downloads_when_exceeded(
+    backend: FakeBackend, history: HistoryStore, config: Config
+) -> None:
+    """Once the per-command budget is exhausted, the next `_stream` call must
+    raise BackendError without contacting the CDN."""
+    body = _pad(JPEG_MAGIC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=body)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
+    facade.reset_command_budget(total=512)  # 512 bytes — first download will overflow it
+    profile = _profile(pk="42", username="alice", avatar_url=f"https://{CDN_HOST}/a")
+    profile2 = _profile(pk="43", username="bob", avatar_url=f"https://{CDN_HOST}/b")
+    try:
+        # First download exceeds the tiny budget after writing.
+        await facade.download_propic(profile)
+        # Second download must be refused before any HTTP call.
+        from insto.exceptions import BackendError
+
+        with pytest.raises(BackendError, match="exceeded byte budget"):
+            await facade.download_propic(profile2)
+    finally:
+        await facade.aclose()
+
+
 # ------------------------------------------------------------------- record_log
 
 

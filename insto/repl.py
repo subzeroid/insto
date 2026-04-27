@@ -250,7 +250,15 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
 
     backend = make_backend("hiker", token=cfg.hiker_token, proxy=cfg.hiker_proxy)
     history = HistoryStore(cfg.db_path)
-    facade = OsintFacade(backend=backend, history=history, config=cfg)
+    # Reuse a single httpx client across CDN downloads so HTTP/2 connection
+    # reuse + TLS session resumption work for the whole REPL session. The
+    # facade owns the client and closes it via aclose().
+    import httpx as _httpx
+
+    from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
+
+    cdn_client = _httpx.AsyncClient(follow_redirects=False, timeout=_CDN_TIMEOUT)
+    facade = OsintFacade(backend=backend, history=history, config=cfg, cdn_client=cdn_client)
 
     async def cleanup() -> None:
         # Cancel watches and close the backend BEFORE the history store —

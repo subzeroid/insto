@@ -361,7 +361,14 @@ async def _run_oneshot(
 
     backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
     history = HistoryStore(config.db_path)
-    facade = OsintFacade(backend=backend, history=history, config=config)
+    # Reuse a single httpx client for every CDN download in the run so we do
+    # not pay TCP/TLS handshake cost on each media URL. Closed by facade.aclose().
+    import httpx as _httpx
+
+    from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
+
+    cdn_client = _httpx.AsyncClient(follow_redirects=False, timeout=_CDN_TIMEOUT)
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=cdn_client)
 
     session = Session(target=target.lstrip("@") if target else None)
     head = cmd_argv[0].lstrip("/").lower() if cmd_argv else ""

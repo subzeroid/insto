@@ -42,7 +42,7 @@ import contextlib
 import dataclasses
 import shutil
 import time
-from collections.abc import Coroutine, Sequence
+from collections.abc import Awaitable, Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -185,35 +185,99 @@ async def _do_posts(
     return SectionResult(name="posts", file=path, count=len(posts), truncated=len(posts) >= limit)
 
 
-async def _do_followers(
+async def _do_network_bundle(
     facade: OsintFacade, username: str, limit: int, dossier_dir: Path
-) -> SectionResult:
-    users = await facade.followers(username, limit=limit)
-    path = dossier_dir / "followers.csv"
-    facade.export_csv(_user_rows(users), command="followers", target=username, dest=path)
-    return SectionResult(
-        name="followers", file=path, count=len(users), truncated=len(users) >= limit
+) -> tuple[SectionResult, SectionResult, SectionResult]:
+    """Fetch followers + following exactly once, derive mutuals locally.
+
+    The previous implementation called `facade.mutuals(...)` from a third
+    section coroutine, which re-pulled both lists and doubled the quota
+    cost. Bundling the three sections lets us share the lists and still
+    surface partial failures (a followers-fetch failure marks all three
+    sections failed, which is correct: mutuals is meaningless without
+    both sides).
+    """
+
+    async def _safe_fetch(coro: Awaitable[list[User]]) -> list[User] | BaseException:
+        try:
+            return await coro
+        except (QuotaExhausted, AuthInvalid, Banned) as exc:
+            return exc
+        except Exception as exc:
+            return exc
+
+    followers_res, followings_res = await asyncio.gather(
+        _safe_fetch(facade.followers(username, limit=limit)),
+        _safe_fetch(facade.followings(username, limit=limit)),
     )
 
+    if isinstance(followers_res, BaseException):
+        followers_section = SectionResult(
+            name="followers",
+            error=f"{type(followers_res).__name__}: {followers_res}",
+        )
+    else:
+        path = dossier_dir / "followers.csv"
+        facade.export_csv(
+            _user_rows(followers_res), command="followers", target=username, dest=path
+        )
+        followers_section = SectionResult(
+            name="followers",
+            file=path,
+            count=len(followers_res),
+            truncated=len(followers_res) >= limit,
+        )
 
-async def _do_following(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
-) -> SectionResult:
-    users = await facade.followings(username, limit=limit)
-    path = dossier_dir / "following.csv"
-    facade.export_csv(_user_rows(users), command="followings", target=username, dest=path)
-    return SectionResult(
-        name="following", file=path, count=len(users), truncated=len(users) >= limit
-    )
+    if isinstance(followings_res, BaseException):
+        following_section = SectionResult(
+            name="following",
+            error=f"{type(followings_res).__name__}: {followings_res}",
+        )
+    else:
+        path = dossier_dir / "following.csv"
+        facade.export_csv(
+            _user_rows(followings_res), command="followings", target=username, dest=path
+        )
+        following_section = SectionResult(
+            name="following",
+            file=path,
+            count=len(followings_res),
+            truncated=len(followings_res) >= limit,
+        )
 
+    if isinstance(followers_res, BaseException) or isinstance(followings_res, BaseException):
+        # Pick whichever side actually failed; if both did, prefer followers.
+        # Mutuals is mathematically meaningless without both lists.
+        side: BaseException = (
+            followers_res
+            if isinstance(followers_res, BaseException)
+            else followings_res
+            if isinstance(followings_res, BaseException)
+            else AssertionError("unreachable")
+        )
+        mutuals_section = SectionResult(
+            name="mutuals",
+            error=f"{type(side).__name__}: skipped (network fetch failed)",
+        )
+    else:
+        result = analytics.compute_mutuals(
+            followers_res,
+            followings_res,
+            target=username,
+            follower_limit=limit,
+            following_limit=limit,
+        )
+        path = dossier_dir / "mutuals.csv"
+        facade.export_csv(_user_rows(result.items), command="mutuals", target=username, dest=path)
+        mutuals_section = SectionResult(name="mutuals", file=path, count=len(result.items))
 
-async def _do_mutuals(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
-) -> SectionResult:
-    result = await facade.mutuals(username, follower_limit=limit, following_limit=limit)
-    path = dossier_dir / "mutuals.csv"
-    facade.export_csv(_user_rows(result.items), command="mutuals", target=username, dest=path)
-    return SectionResult(name="mutuals", file=path, count=len(result.items))
+    # Re-raise hard limits so the outer guard can flip the abort flag for
+    # remaining sibling sections.
+    for r in (followers_res, followings_res):
+        if isinstance(r, (QuotaExhausted, AuthInvalid, Banned)):
+            raise r
+
+    return followers_section, following_section, mutuals_section
 
 
 async def _do_hashtags(
@@ -393,19 +457,62 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
             abort.set()
             return exc
 
+    # `_do_network_bundle` fetches followers + following once and derives
+    # mutuals locally — runs as a single guarded coroutine that returns 3
+    # SectionResults.
+    async def _network_guarded() -> (
+        tuple[SectionResult, SectionResult, SectionResult] | BaseException
+    ):
+        if abort.is_set():
+            return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
+        try:
+            return await _do_network_bundle(ctx.facade, username, network_n, dossier_dir)
+        except (QuotaExhausted, AuthInvalid, Banned) as exc:
+            abort.set()
+            return exc
+
     coros = [
         _guarded(_do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)),
-        _guarded(_do_followers(ctx.facade, username, network_n, dossier_dir)),
-        _guarded(_do_following(ctx.facade, username, network_n, dossier_dir)),
-        _guarded(_do_mutuals(ctx.facade, username, network_n, dossier_dir)),
         _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir)),
         _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir)),
         _guarded(_do_locations(ctx.facade, username, analytics_n, dossier_dir)),
         _guarded(_do_wcommented(ctx.facade, username, analytics_n, dossier_dir)),
         _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir)),
     ]
-    results = await asyncio.gather(*coros, return_exceptions=True)
-    for name, r in zip(SECTION_NAMES, results, strict=True):
+    network_task = asyncio.create_task(_network_guarded())
+    other_results = await asyncio.gather(*coros, return_exceptions=True)
+    network_result = await network_task
+
+    # Reassemble in SECTION_NAMES order.
+    posts_r, hashtags_r, mentions_r, locations_r, wcommented_r, wtagged_r = other_results
+    if isinstance(network_result, BaseException):
+        followers_r: SectionResult | BaseException = SectionResult(
+            name="followers",
+            error=f"{type(network_result).__name__}: {network_result}",
+        )
+        following_r: SectionResult | BaseException = SectionResult(
+            name="following",
+            error=f"{type(network_result).__name__}: {network_result}",
+        )
+        mutuals_r: SectionResult | BaseException = SectionResult(
+            name="mutuals",
+            error=f"{type(network_result).__name__}: {network_result}",
+        )
+    else:
+        followers_r, following_r, mutuals_r = network_result
+
+    ordered: list[SectionResult | BaseException] = [
+        posts_r,
+        followers_r,
+        following_r,
+        mutuals_r,
+        hashtags_r,
+        mentions_r,
+        locations_r,
+        wcommented_r,
+        wtagged_r,
+    ]
+    for name, r in zip(SECTION_NAMES, ordered, strict=True):
         if isinstance(r, BaseException):
             sections.append(SectionResult(name=name, error=f"{type(r).__name__}: {r}"))
         else:

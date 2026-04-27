@@ -1,6 +1,434 @@
-"""CLI entry point for insto. Implemented in later tasks."""
+"""CLI entry point for insto: argparse-driven one-shot mode + REPL launcher.
+
+Surface area:
+
+- `insto`                            — interactive REPL (default).
+- `insto setup`                      — interactive wizard, writes
+  `~/.insto/config.toml` (mode 0600).
+- `insto @user -c <cmd> [args]`      — one-shot: run a single slash-command
+  with `@user` as the active target.
+- `insto --print-completion {bash|zsh}` — emit a shell-completion script.
+- `--verbose` / `--debug`            — set logging level for the rotating
+  log file under `~/.insto/logs/insto.log`.
+
+Every error string the user sees on stderr — from the wizard, from
+one-shot dispatch, from the completion path — first goes through
+`_format_error()`, which maps every backend exception into a one-line,
+human-readable message and runs the result through
+`insto._redact.redact_secrets()` so that an accidentally-leaked token in
+an exception arg never makes it to a terminal or copy-pasted bug
+report. The same redaction is applied by the logging formatter so log
+files stay safe to share.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import logging
+import os
+import shlex
+import sys
+from collections.abc import Callable
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import IO, Any
+
+from insto import __version__
+from insto._redact import redact_secrets
+from insto.commands import (  # noqa: F401  — importing registers all commands
+    COMMANDS,
+    CommandUsageError,
+    Session,
+    dispatch,
+    parse_command_line,
+)
+from insto.config import (
+    Config,
+    config_dir,
+    load_config,
+    write_config,
+)
+from insto.exceptions import (
+    AuthInvalid,
+    BackendError,
+    Banned,
+    PostNotFound,
+    PostPrivate,
+    ProfileBlocked,
+    ProfileDeleted,
+    ProfileNotFound,
+    ProfilePrivate,
+    QuotaExhausted,
+    RateLimited,
+    SchemaDrift,
+    Transient,
+)
+
+LOG_FILENAME = "insto.log"
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 3
+SETUP_HINT = "no HIKERAPI_TOKEN configured. Run `insto setup` to create one."
 
 
-def main() -> None:
-    """Argparse-based one-shot CLI; full implementation comes in a later task."""
-    raise NotImplementedError("insto.cli.main is implemented in a later task")
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+
+class RedactingFormatter(logging.Formatter):
+    """Logging formatter that runs every record through `redact_secrets`.
+
+    Wrapping `format()` (rather than the message templating) guarantees the
+    full final string — including the rendered exception traceback — is
+    redacted before it lands on disk.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_secrets(super().format(record))
+
+
+class _SecureRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler that creates and keeps the log file at mode 0600."""
+
+    def _open(self) -> Any:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        fd = os.open(self.baseFilename, flags, 0o600)
+        with os.fdopen(fd, "a", encoding=self.encoding or "utf-8"):
+            pass
+        with contextlib.suppress(OSError):
+            os.chmod(self.baseFilename, 0o600)
+        return super()._open()
+
+
+def setup_logging(level: int, *, log_dir: Path | None = None) -> Path:
+    """Configure the `insto` logger to write to a 0600 rotating file."""
+    target_dir = log_dir if log_dir is not None else (config_dir() / "logs")
+    target_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with contextlib.suppress(OSError):
+        target_dir.chmod(0o700)
+    log_path = target_dir / LOG_FILENAME
+
+    root = logging.getLogger("insto")
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        handler.close()
+    root.setLevel(level)
+    root.propagate = False
+
+    handler = _SecureRotatingFileHandler(
+        log_path,
+        maxBytes=LOG_MAX_BYTES,
+        backupCount=LOG_BACKUP_COUNT,
+        encoding="utf-8",
+    )
+    handler.setLevel(level)
+    handler.setFormatter(
+        RedactingFormatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+    root.addHandler(handler)
+    return log_path
+
+
+# ---------------------------------------------------------------------------
+# Error formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_error(exc: BaseException) -> str:
+    """Return a redacted, one-line description of `exc` suitable for stderr."""
+    if isinstance(exc, ProfileNotFound):
+        msg = f"profile not found: @{exc.username}"
+    elif isinstance(exc, ProfilePrivate):
+        msg = f"profile is private: @{exc.username}"
+    elif isinstance(exc, ProfileBlocked):
+        msg = f"profile has blocked us: @{exc.username}"
+    elif isinstance(exc, ProfileDeleted):
+        msg = f"profile is deleted: @{exc.username}"
+    elif isinstance(exc, PostNotFound):
+        msg = f"post not found: {exc.ref}"
+    elif isinstance(exc, PostPrivate):
+        msg = f"post is private: {exc.ref}"
+    elif isinstance(exc, AuthInvalid):
+        msg = "auth invalid — run `insto setup` to refresh the HikerAPI token"
+    elif isinstance(exc, QuotaExhausted):
+        msg = "quota exhausted — wait for the next window or upgrade your HikerAPI plan"
+    elif isinstance(exc, RateLimited):
+        msg = f"rate limited — retry after {exc.retry_after:.1f}s"
+    elif isinstance(exc, SchemaDrift):
+        msg = f"schema drift in {exc.endpoint}: missing field {exc.missing_field!r}"
+    elif isinstance(exc, Transient):
+        msg = f"transient backend error: {exc.detail}"
+    elif isinstance(exc, Banned):
+        msg = f"backend account is banned: {exc.detail}"
+    elif isinstance(exc, BackendError):
+        msg = f"backend error: {exc}"
+    elif isinstance(exc, CommandUsageError):
+        msg = f"usage: {exc}"
+    else:
+        msg = f"{type(exc).__name__}: {exc}"
+    return redact_secrets(msg)
+
+
+# ---------------------------------------------------------------------------
+# Argparse
+# ---------------------------------------------------------------------------
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Construct the top-level argparse parser used by `insto.cli.main`."""
+    parser = argparse.ArgumentParser(
+        prog="insto",
+        description="Interactive Instagram OSINT CLI on the HikerAPI backend.",
+    )
+    parser.add_argument("--version", action="version", version=f"insto {__version__}")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="enable INFO logging to ~/.insto/logs/insto.log",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="enable DEBUG logging to ~/.insto/logs/insto.log",
+    )
+    parser.add_argument(
+        "--proxy",
+        default=None,
+        metavar="URL",
+        help="HTTP/SOCKS5 proxy (overrides $HIKERAPI_PROXY and config.toml)",
+    )
+    parser.add_argument(
+        "--print-completion",
+        dest="print_completion",
+        choices=("bash", "zsh"),
+        default=None,
+        metavar="SHELL",
+        help="print a shell completion script and exit",
+    )
+    parser.add_argument(
+        "--interactive",
+        "-i",
+        action="store_true",
+        help="force the interactive REPL (default when no command is given)",
+    )
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        metavar="TARGET",
+        help="username (e.g. @ferrari) or the literal `setup` to run the wizard",
+    )
+    parser.add_argument(
+        "-c",
+        "--cmd",
+        dest="cmd_argv",
+        nargs=argparse.REMAINDER,
+        default=None,
+        metavar="CMD",
+        help="one-shot: command name and its arguments (everything after -c)",
+    )
+    return parser
+
+
+# ---------------------------------------------------------------------------
+# Setup wizard
+# ---------------------------------------------------------------------------
+
+
+def _safe_load_config() -> Config | None:
+    try:
+        return load_config()
+    except BackendError:
+        return None
+
+
+def _run_setup(
+    *,
+    prompt: Callable[[str], str] = input,
+    out: IO[str] | None = None,
+) -> int:
+    """Interactive wizard. Writes `~/.insto/config.toml` (mode 0600)."""
+    stream = out if out is not None else sys.stdout
+    existing = _safe_load_config()
+
+    print("insto setup — writes ~/.insto/config.toml (mode 0600)", file=stream)
+    print("press Enter to keep the shown default; values are masked on display.", file=stream)
+
+    token_default = existing.hiker_token if existing else None
+    if token_default:
+        token_disp = f"***{token_default[-4:]}" if len(token_default) >= 4 else "***"
+        token_input = prompt(f"hiker.token [{token_disp}]: ").strip()
+    else:
+        token_input = prompt("hiker.token: ").strip()
+    token = token_input or token_default
+
+    out_default = str(existing.output_dir) if existing else "./output"
+    out_input = prompt(f"output_dir [{out_default}]: ").strip()
+    output_path = out_input or out_default
+
+    db_default = str(existing.db_path) if existing else str(config_dir() / "store.db")
+    db_input = prompt(f"db_path [{db_default}]: ").strip()
+    db = db_input or db_default
+
+    proxy_default = (existing.hiker_proxy or "") if existing else ""
+    proxy_disp = proxy_default if proxy_default else "(none)"
+    proxy_input = prompt(f"proxy (optional) [{proxy_disp}]: ").strip()
+    if proxy_input == "":
+        proxy = proxy_default
+    elif proxy_input == "-":
+        proxy = ""
+    else:
+        proxy = proxy_input
+
+    payload: dict[str, Any] = {}
+    hiker: dict[str, Any] = {}
+    if token:
+        hiker["token"] = token
+    if proxy:
+        hiker["proxy"] = proxy
+    if hiker:
+        payload["hiker"] = hiker
+    payload["output_dir"] = output_path
+    payload["db_path"] = db
+
+    path = write_config(payload)
+    print(f"wrote {path}", file=stream)
+    if not token:
+        print(SETUP_HINT, file=stream)
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Shell completion
+# ---------------------------------------------------------------------------
+
+
+def _print_completion(parser: argparse.ArgumentParser, shell: str) -> int:
+    try:
+        import shtab  # type: ignore[import-not-found]
+    except ImportError:
+        print(
+            "shell completion requires `pip install insto[completion]`",
+            file=sys.stderr,
+        )
+        return 1
+    script = shtab.complete(parser, shell=shell)
+    sys.stdout.write(script)
+    if not script.endswith("\n"):
+        sys.stdout.write("\n")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# One-shot dispatch
+# ---------------------------------------------------------------------------
+
+
+async def _run_oneshot(
+    cmd_argv: list[str],
+    target: str | None,
+    proxy: str | None,
+    log: logging.Logger,
+) -> int:
+    """Run a single command line against a freshly-constructed facade."""
+    line = shlex.join(cmd_argv)
+    log.debug("one-shot dispatch: %s", line)
+
+    cli_overrides: dict[str, Any] = {}
+    if proxy is not None:
+        cli_overrides["hiker_proxy"] = proxy
+    config = load_config(cli_overrides)
+    if not config.hiker_token:
+        print(SETUP_HINT, file=sys.stderr)
+        return 1
+
+    from insto.backends import make_backend
+    from insto.service.facade import OsintFacade
+    from insto.service.history import HistoryStore
+
+    backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
+    history = HistoryStore(config.db_path)
+    facade = OsintFacade(backend=backend, history=history, config=config)
+
+    session = Session(target=target.lstrip("@") if target else None)
+    try:
+        from rich.console import Console
+
+        console = Console()
+        await dispatch(line, facade=facade, session=session, console=console)
+        return 0
+    except (BackendError, CommandUsageError) as exc:
+        log.exception("one-shot failed")
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+    finally:
+        history.close()
+        await facade.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+
+    if args.debug:
+        level = logging.DEBUG
+    elif args.verbose:
+        level = logging.INFO
+    else:
+        level = logging.WARNING
+    with contextlib.suppress(OSError):
+        # Logging setup failures must never break the CLI itself.
+        setup_logging(level)
+    log = logging.getLogger("insto.cli")
+
+    if args.print_completion:
+        return _print_completion(parser, args.print_completion)
+
+    if args.target == "setup":
+        return _run_setup()
+
+    if args.cmd_argv:
+        return asyncio.run(_run_oneshot(args.cmd_argv, args.target, args.proxy, log))
+
+    config = _safe_load_config()
+    if config is None or not config.hiker_token:
+        print(SETUP_HINT, file=sys.stderr)
+        if not args.interactive:
+            return 1
+
+    try:
+        from insto.repl import run_repl
+    except ImportError:
+        log.exception("REPL import failed")
+        print("interactive REPL is unavailable", file=sys.stderr)
+        return 1
+    try:
+        run_repl()
+    except NotImplementedError:
+        print("interactive REPL is not implemented in this build", file=sys.stderr)
+        return 1
+    except (BackendError, CommandUsageError) as exc:
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+__all__ = [
+    "LOG_BACKUP_COUNT",
+    "LOG_FILENAME",
+    "LOG_MAX_BYTES",
+    "SETUP_HINT",
+    "RedactingFormatter",
+    "_format_error",
+    "build_parser",
+    "main",
+    "setup_logging",
+]

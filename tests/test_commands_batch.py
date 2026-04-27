@@ -624,6 +624,43 @@ async def test_batch_invalid_subcommand_errors(
 
 
 # ---------------------------------------------------------------------------
+# Worker-failure path redacts secrets in the captured exception message
+# ---------------------------------------------------------------------------
+
+
+async def test_batch_worker_failure_message_is_redacted(
+    isolated_registry: dict[str, CommandSpec],
+    facade: OsintFacade,
+    session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-quota exception's message must flow through `redact_secrets`."""
+    monkeypatch.setenv("HIKERAPI_TOKEN", "tok-very-secret-1234")
+
+    @command("leaky", "test fake that raises with a secret in the message")
+    async def fn(ctx: CommandContext) -> None:
+        raise Transient(
+            "fetch failed: https://cdn.example.com/x.jpg?signature=SECRET_SIG_42 "
+            "(token leaked: tok-very-secret-1234)"
+        )
+
+    targets_file = _file_with_targets(tmp_path, ["alice"])
+    result = await dispatch(
+        f"/batch --concurrency 1 {targets_file} leaky",
+        facade=facade,
+        session=session,
+    )
+    assert isinstance(result, dict)
+    assert len(result["failed"]) == 1
+    _, msg = result["failed"][0]
+    assert "tok-very-secret-1234" not in msg
+    assert "SECRET_SIG_42" not in msg
+    assert "***" in msg
+    assert "signature=***" in msg
+
+
+# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
 

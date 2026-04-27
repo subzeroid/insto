@@ -43,6 +43,7 @@ import sys
 import time
 from pathlib import Path
 
+from insto._redact import redact_secrets
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
@@ -337,12 +338,16 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
                 await dispatch(cmd_line, facade=ctx.facade, session=session, console=ctx.console)
             except QuotaExhausted as exc:
                 quota_hit.set()
-                ctx.print(f"quota exhausted at @{target}: {exc}; saving progress and exiting")
+                ctx.print(
+                    f"quota exhausted at @{target}: {redact_secrets(str(exc))}; "
+                    "saving progress and exiting"
+                )
                 return
             except Exception as exc:
+                safe_msg = redact_secrets(str(exc))
                 async with state_lock:
-                    failed.append((target, str(exc)))
-                ctx.print(f"@{target}: failed — {exc}")
+                    failed.append((target, safe_msg))
+                ctx.print(f"@{target}: failed — {safe_msg}")
                 return
             async with state_lock:
                 _append_resume(resume_file, target)

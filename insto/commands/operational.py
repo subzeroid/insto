@@ -201,9 +201,36 @@ async def purge_cmd(ctx: CommandContext) -> dict[str, Any]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# /help
+# ---------------------------------------------------------------------------
+
+
+@command("help", "List every registered command with its one-line description")
+async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
+    from insto.commands._base import COMMANDS
+
+    rows = [{"name": name, "help": spec.help} for name, spec in sorted(COMMANDS.items())]
+    fmt = ctx.output_format()
+    if fmt == "json":
+        dest_arg = ctx.args.json if ctx.args.json is not None else ""
+        ctx.facade.export_json(
+            rows,
+            command="help",
+            target=None,
+            dest=resolve_export_dest(dest_arg),
+        )
+        return rows
+    width = max(len(r["name"]) for r in rows) if rows else 8
+    for row in rows:
+        ctx.print(f"/{row['name']:<{width}}  — {row['help']}")
+    return rows
+
+
 __all__ = [
     "config_cmd",
     "health_cmd",
+    "help_cmd",
     "purge_cmd",
     "quota_cmd",
 ]

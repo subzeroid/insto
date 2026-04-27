@@ -505,6 +505,29 @@ async def test_with_target_raises_when_unset(facade: OsintFacade, session: Sessi
         await fn(_ctx(facade, session))
 
 
+@pytest.mark.parametrize(
+    "evil",
+    [
+        "../etc",
+        "..",
+        ".",
+        "a/b",
+        "a\\b",
+        "a\x00b",
+        "alice;rm",
+    ],
+)
+async def test_with_target_rejects_path_traversal_and_meta_chars(
+    facade: OsintFacade, session: Session, evil: str
+) -> None:
+    @with_target
+    async def fn(ctx: CommandContext, username: str) -> str:
+        return username
+
+    with pytest.raises(CommandUsageError, match="invalid username"):
+        await fn(_ctx(facade, session, target=evil))
+
+
 async def test_with_pk_resolves_via_facade_cache(
     facade: OsintFacade,
     backend: FakeBackend,

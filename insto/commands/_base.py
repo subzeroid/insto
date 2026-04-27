@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import re
 import shlex
 import sys
 from collections.abc import Awaitable, Callable
@@ -354,6 +355,24 @@ async def dispatch(
 # ---------------------------------------------------------------------------
 
 
+_USERNAME_RE = re.compile(r"^[A-Za-z0-9._]+$")
+
+
+def _validate_username(name: str) -> str:
+    """Reject usernames that cannot be safely used as filesystem path segments.
+
+    Instagram usernames are restricted to `[A-Za-z0-9._]` server-side, so any
+    `/`, `..`, NUL, whitespace, or other shell-meta characters are user error
+    and must be rejected before we use the value as a directory segment in
+    `output/<user>/...`.
+    """
+    if not _USERNAME_RE.fullmatch(name) or name in (".", ".."):
+        raise CommandUsageError(
+            f"invalid username {name!r}: only letters, digits, '.' and '_' are allowed"
+        )
+    return name
+
+
 def _extract_target(ctx: CommandContext) -> str:
     """Pull a target username from positional args or session state.
 
@@ -364,9 +383,9 @@ def _extract_target(ctx: CommandContext) -> str:
     if explicit:
         cleaned = str(explicit).lstrip("@").strip()
         if cleaned:
-            return cleaned
+            return _validate_username(cleaned)
     if ctx.session.target:
-        return ctx.session.target
+        return _validate_username(ctx.session.target)
     raise CommandUsageError("no target set — pass a username or run /target <user> first")
 
 

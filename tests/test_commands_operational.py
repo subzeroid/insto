@@ -325,3 +325,19 @@ async def test_purge_proceeds_when_user_confirms(
     assert result["kind"] == "history"
     assert result["deleted"] == 1
     assert facade.history.recent_commands(50) == []
+
+
+async def test_help_lists_registered_commands(
+    facade: OsintFacade,
+    session: Session,
+    console: Console,
+) -> None:
+    from insto.commands._base import COMMANDS
+
+    result = await dispatch("/help", facade=facade, session=session, console=console)
+    assert isinstance(result, list)
+    names = {row["name"] for row in result}
+    # Every registered command must be advertised.
+    assert names == set(COMMANDS)
+    assert "help" in names
+    assert "info" in names

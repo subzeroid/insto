@@ -533,10 +533,15 @@ class HikerBackend(OSINTBackend):
         async def fetch(cursor: str | None) -> Any:
             return await self._client.hashtag_medias_recent_v2(name=tag, page_id=cursor)
 
-        async for post in self._iter_chunks(
-            fetch, endpoint="hashtag_medias_recent_v2", limit=limit, mapper=map_post
-        ):
-            yield post
+        try:
+            async for post in self._iter_chunks(
+                fetch, endpoint="hashtag_medias_recent_v2", limit=limit, mapper=map_post
+            ):
+                yield post
+        except _NotFoundError as exc:
+            mapped = BackendError(f"hashtag not found: #{tag}")
+            self._last_error = mapped
+            raise mapped from exc
 
     # -------------------------------------------------------------- bookkeeping
 

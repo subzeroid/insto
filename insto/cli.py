@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import getpass
 import logging
 import os
 import shlex
@@ -246,11 +247,22 @@ def _safe_load_config() -> Config | None:
 def _run_setup(
     *,
     prompt: Callable[[str], str] = input,
+    secret_prompt: Callable[[str], str] | None = None,
     out: IO[str] | None = None,
 ) -> int:
-    """Interactive wizard. Writes `~/.insto/config.toml` (mode 0600)."""
+    """Interactive wizard. Writes `~/.insto/config.toml` (mode 0600).
+
+    The token is read via `secret_prompt` (defaults to `getpass.getpass`)
+    so it never echoes to the terminal or scrollback. Tests inject a
+    scripted callable instead. If only `prompt` is overridden, the same
+    callable handles the token line so existing scripted tests keep
+    working.
+    """
     stream = out if out is not None else sys.stdout
     existing = _safe_load_config()
+
+    if secret_prompt is None:
+        secret_prompt = prompt if prompt is not input else getpass.getpass
 
     print("insto setup — writes ~/.insto/config.toml (mode 0600)", file=stream)
     print("press Enter to keep the shown default; values are masked on display.", file=stream)
@@ -258,9 +270,9 @@ def _run_setup(
     token_default = existing.hiker_token if existing else None
     if token_default:
         token_disp = f"***{token_default[-4:]}" if len(token_default) >= 4 else "***"
-        token_input = prompt(f"hiker.token [{token_disp}]: ").strip()
+        token_input = secret_prompt(f"hiker.token [{token_disp}] (input hidden): ").strip()
     else:
-        token_input = prompt("hiker.token: ").strip()
+        token_input = secret_prompt("hiker.token (input hidden): ").strip()
     token = token_input or token_default
 
     out_default = str(existing.output_dir) if existing else "./output"
@@ -352,6 +364,7 @@ async def _run_oneshot(
     facade = OsintFacade(backend=backend, history=history, config=config)
 
     session = Session(target=target.lstrip("@") if target else None)
+    head = cmd_argv[0].lstrip("/").lower() if cmd_argv else ""
     try:
         from rich.console import Console
 
@@ -365,6 +378,9 @@ async def _run_oneshot(
         print(_format_error(exc), file=sys.stderr)
         return 1
     finally:
+        if head:
+            with contextlib.suppress(Exception):
+                await facade.record_command(head, session.target)
         history.close()
         await facade.aclose()
 

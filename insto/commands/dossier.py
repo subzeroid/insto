@@ -42,7 +42,7 @@ import contextlib
 import dataclasses
 import shutil
 import time
-from collections.abc import Sequence
+from collections.abc import Coroutine, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -54,6 +54,7 @@ from insto.commands._base import (
     command,
     with_target,
 )
+from insto.exceptions import AuthInvalid, Banned, QuotaExhausted
 from insto.models import User
 from insto.service import analytics
 from insto.service.exporter import SCHEMA_VERSION
@@ -373,16 +374,34 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
     )
     sections: list[SectionResult] = [SectionResult(name="profile", file=profile_path, count=1)]
 
+    # If quota or auth fails on one section, every subsequent section will
+    # fail the same way — burning N more API calls for nothing. A shared
+    # event lets each section bail early once any sibling has hit a hard
+    # limit. We still write a partial MANIFEST so progress is preserved.
+    abort = asyncio.Event()
+
+    async def _guarded(
+        coro: Coroutine[Any, Any, SectionResult],
+    ) -> SectionResult | BaseException:
+        if abort.is_set():
+            coro.close()
+            return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
+        try:
+            return await coro
+        except (QuotaExhausted, AuthInvalid, Banned) as exc:
+            abort.set()
+            return exc
+
     coros = [
-        _do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download),
-        _do_followers(ctx.facade, username, network_n, dossier_dir),
-        _do_following(ctx.facade, username, network_n, dossier_dir),
-        _do_mutuals(ctx.facade, username, network_n, dossier_dir),
-        _do_hashtags(ctx.facade, username, analytics_n, dossier_dir),
-        _do_mentions(ctx.facade, username, analytics_n, dossier_dir),
-        _do_locations(ctx.facade, username, analytics_n, dossier_dir),
-        _do_wcommented(ctx.facade, username, analytics_n, dossier_dir),
-        _do_wtagged(ctx.facade, username, tagged_n, dossier_dir),
+        _guarded(_do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)),
+        _guarded(_do_followers(ctx.facade, username, network_n, dossier_dir)),
+        _guarded(_do_following(ctx.facade, username, network_n, dossier_dir)),
+        _guarded(_do_mutuals(ctx.facade, username, network_n, dossier_dir)),
+        _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir)),
+        _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir)),
+        _guarded(_do_locations(ctx.facade, username, analytics_n, dossier_dir)),
+        _guarded(_do_wcommented(ctx.facade, username, analytics_n, dossier_dir)),
+        _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir)),
     ]
     results = await asyncio.gather(*coros, return_exceptions=True)
     for name, r in zip(SECTION_NAMES, results, strict=True):

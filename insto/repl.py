@@ -191,6 +191,7 @@ class Repl:
             return await self.prompt_session.prompt_async(self._prompt_prefix())
 
     async def _execute(self, line: str) -> None:
+        head = line.lstrip("/").split(maxsplit=1)[0].lower() if line.strip() else ""
         try:
             await dispatch(
                 line,
@@ -204,6 +205,10 @@ class Repl:
         except Exception as exc:  # pragma: no cover - safety net
             self._log.exception("repl crash")
             self.console.print(redact_secrets(f"unexpected error: {exc!r}"), style="err")
+        finally:
+            if head:
+                with contextlib.suppress(Exception):
+                    await self.facade.record_command(head, self.session.target)
 
     async def run(self) -> None:
         """Main loop: banner, prompt, dispatch, repeat. Returns on EOF / quit."""
@@ -227,6 +232,12 @@ class Repl:
 # ---------------------------------------------------------------------------
 # Bootstrap entry point used by `insto.cli.main`
 # ---------------------------------------------------------------------------
+
+
+async def _safe_prune(facade: OsintFacade) -> None:
+    """Run retention prune in the background; swallow all errors."""
+    with contextlib.suppress(Exception):
+        await facade.history.prune_async()
 
 
 def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], Awaitable[None]]]:
@@ -257,9 +268,15 @@ def run_repl(config: Config | None = None, *, email: str | None = None) -> None:
 
     async def _main() -> None:
         repl = Repl(facade=facade, config=cfg, email=email)
+        # Best-effort retention prune on session start so the store does
+        # not grow unbounded. Failures are non-fatal and silenced.
+        prune_task = asyncio.create_task(_safe_prune(facade))
         try:
             await repl.run()
         finally:
+            prune_task.cancel()
+            with contextlib.suppress(BaseException):
+                await prune_task
             await cleanup()
 
     asyncio.run(_main())

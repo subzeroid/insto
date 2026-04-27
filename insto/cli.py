@@ -307,7 +307,9 @@ def _run_setup(
 
     proxy_default = (existing.hiker_proxy or "") if existing else ""
     proxy_disp = proxy_default if proxy_default else "(none)"
-    proxy_input = prompt(f"proxy (optional) [{proxy_disp}]: ").strip()
+    proxy_input = prompt(
+        f"proxy URL (http://, https://, socks5h://) (optional, '-' to clear) [{proxy_disp}]: "
+    ).strip()
     if proxy_input == "":
         proxy = proxy_default
     elif proxy_input == "-":

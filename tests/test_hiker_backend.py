@@ -33,6 +33,7 @@ from insto.backends.hiker import (
     DEFAULT_MAX_PAGES,
     HikerBackend,
     _extract_chunk,
+    _normalise_cursor,
     _validate_proxy_url,
 )
 from insto.exceptions import (
@@ -157,6 +158,30 @@ def test_extract_chunk_terminates_when_cursor_falsy() -> None:
     items, cursor = _extract_chunk([[{"pk": "1"}], None])
     assert items == [{"pk": "1"}]
     assert cursor is None
+
+
+def test_normalise_cursor_preserves_integer_zero() -> None:
+    """Integer `0` is a legitimate first-page cursor on some
+    endpoints; a plain truthiness check would terminate pagination
+    on the first page. Regression test for the int-cursor fix."""
+    assert _normalise_cursor(0) == "0"
+
+
+def test_normalise_cursor_treats_false_as_terminal() -> None:
+    """`False` must signal end-of-pagination. Without an explicit
+    `is False` check, `str(False) == "False"` would be re-fed as a
+    literal cursor and loop until the safety cap aborts."""
+    assert _normalise_cursor(False) is None
+
+
+def test_normalise_cursor_handles_none_and_empty_string() -> None:
+    assert _normalise_cursor(None) is None
+    assert _normalise_cursor("") is None
+
+
+def test_normalise_cursor_returns_string_form_for_real_cursors() -> None:
+    assert _normalise_cursor("abc") == "abc"
+    assert _normalise_cursor(42) == "42"
 
 
 # ------------------------------------------------------------ resolve_target

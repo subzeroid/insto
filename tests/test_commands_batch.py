@@ -702,3 +702,33 @@ async def test_batch_resume_file_format_is_jsonl(
     rec: dict[str, Any] = json.loads(resume_path.read_text().strip())
     assert rec["target"] == "alice"
     assert isinstance(rec["ts"], int)
+
+
+def test_resume_directory_is_mode_0700() -> None:
+    """`~/.insto/batch-resume/` must be 0700 — resume files contain
+    target usernames in plaintext, so on multi-user systems the dir
+    must not be world/group-readable. Regression: earlier
+    `mkdir(parents=True, exist_ok=True)` without `mode=` left the
+    directory at the umask default (often 0o755)."""
+
+    resume_dir = batch_module._resume_path("dummy").parent
+    assert resume_dir.exists()
+    assert (resume_dir.stat().st_mode & 0o777) == 0o700
+
+
+def test_resume_directory_rechmoded_if_preexisting_with_loose_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the resume dir already exists with looser permissions
+    (e.g. created before the 0700 hardening landed), the next call
+    must tighten it to 0700."""
+
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("INSTO_HOME", str(fake_home))
+    pre = fake_home / "batch-resume"
+    pre.mkdir(parents=True)
+    pre.chmod(0o755)
+
+    batch_module._resume_path("dummy")
+
+    assert (pre.stat().st_mode & 0o777) == 0o700

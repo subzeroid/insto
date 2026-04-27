@@ -183,12 +183,15 @@ def _extract_chunk(payload: Any) -> tuple[list[Any], str | None]:
 def _normalise_cursor(value: Any) -> str | None:
     """Return `value` as a non-empty cursor string, or None.
 
-    Treats `None` and the empty string as "no more pages", but preserves
-    the integer `0` (a legitimate first-page cursor on some endpoints) —
-    a plain truthiness check would silently terminate pagination there.
+    Treats `None`, `False`, and the empty string as "no more pages",
+    but preserves the integer `0` (a legitimate first-page cursor on
+    some endpoints) — a plain truthiness check would silently
+    terminate pagination there. `False` is rejected because
+    `str(False) == "False"` would otherwise be re-fed as a literal
+    cursor string and loop until the page-cap aborts.
     """
 
-    if value is None:
+    if value is None or value is False:
         return None
     text = str(value)
     if text == "":

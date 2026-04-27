@@ -165,11 +165,14 @@ def _resume_path(sha: str) -> Path:
 
     Lives under the config dir (not the output dir) so `/purge cache` —
     which recursively wipes the output dir — never silently destroys
-    in-progress batch state. The directory is created with mode 0700
-    inherited from `~/.insto`.
+    in-progress batch state. Resume files contain target usernames in
+    plaintext, so the directory is created (and re-chmod'd if it
+    already existed with looser permissions) at mode 0700 to match the
+    privacy contract of the parent `~/.insto` dir.
     """
     base = config_dir() / "batch-resume"
-    base.mkdir(parents=True, exist_ok=True)
+    base.mkdir(mode=0o700, parents=True, exist_ok=True)
+    base.chmod(0o700)
     return base / f"{sha}.jsonl"
 
 

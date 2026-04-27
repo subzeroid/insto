@@ -53,8 +53,9 @@ def _profile() -> Profile:
     return Profile(pk="42", username="alice", access="public", full_name="Alice Doe")
 
 
-def _user(pk: str, username: str, *, full_name: str = "", private: bool = False,
-          verified: bool = False) -> User:
+def _user(
+    pk: str, username: str, *, full_name: str = "", private: bool = False, verified: bool = False
+) -> User:
     return User(
         pk=pk,
         username=username,
@@ -193,9 +194,7 @@ async def test_followers_empty_prints_message(
 ) -> None:
     network_backend.followers = {}
     facade = OsintFacade(backend=network_backend, history=history, config=config)
-    out = await dispatch(
-        "/followers", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/followers", facade=facade, session=session, console=recording_console)
     assert out == []
     assert "no followers" in _captured(recording_console)
 
@@ -231,10 +230,30 @@ async def test_followers_csv_export_is_flat(
     assert out_path.exists()
     rows = list(csv.DictReader(out_path.read_text().splitlines()))
     assert len(rows) == 3
-    assert rows[0].keys() == {"rank", "pk", "username", "full_name",
-                              "is_private", "is_verified"}
+    assert rows[0].keys() == {"rank", "pk", "username", "full_name", "is_private", "is_verified"}
     assert rows[0]["rank"] == "1"
     assert rows[0]["pk"] == "u1"
+
+
+async def test_followers_maltego_export(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    await dispatch("/followers 3 --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "followers.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert len(rows) == 3
+    assert set(rows[0].keys()) == {"Type", "Value", "Weight", "Notes", "Properties"}
+    assert rows[0]["Type"] == "maltego.Person"
+    assert rows[0]["Value"] == "common1"
+    assert rows[0]["Weight"] == "1"
+    props = json.loads(rows[0]["Properties"])
+    assert props["pk"] == "u1"
+    assert props["rank"] == 1
 
 
 async def test_followers_csv_to_stdout(
@@ -248,7 +267,12 @@ async def test_followers_csv_to_stdout(
     await dispatch("/followers 2 --csv -", facade=facade, session=session)
     blob = capsysbinary.readouterr().out.decode("utf-8").splitlines()
     assert blob[0].split(",") == [
-        "rank", "pk", "username", "full_name", "is_private", "is_verified"
+        "rank",
+        "pk",
+        "username",
+        "full_name",
+        "is_private",
+        "is_verified",
     ]
     assert len(blob) == 3  # header + 2 rows
 
@@ -301,7 +325,10 @@ async def test_followings_csv_flat(
     out_path = config.output_dir / "alice" / "followings.csv"
     rows = list(csv.DictReader(out_path.read_text().splitlines()))
     assert {r["username"] for r in rows} == {
-        "common1", "common2", "common3", "following_only",
+        "common1",
+        "common2",
+        "common3",
+        "following_only",
     }
 
 
@@ -318,9 +345,7 @@ async def test_similar_renders_users(
     recording_console: Console,
 ) -> None:
     facade = OsintFacade(backend=network_backend, history=history, config=config)
-    out = await dispatch(
-        "/similar", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/similar", facade=facade, session=session, console=recording_console)
     assert [u.pk for u in out] == ["s1", "s2"]
     assert "similar to @alice" in _captured(recording_console)
 
@@ -334,9 +359,7 @@ async def test_similar_empty(
 ) -> None:
     network_backend.suggested = {}
     facade = OsintFacade(backend=network_backend, history=history, config=config)
-    out = await dispatch(
-        "/similar", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/similar", facade=facade, session=session, console=recording_console)
     assert out == []
     assert "no suggested" in _captured(recording_console)
 
@@ -391,9 +414,7 @@ async def test_mutuals_intersection_correct(
     recording_console: Console,
 ) -> None:
     facade = OsintFacade(backend=network_backend, history=history, config=config)
-    out = await dispatch(
-        "/mutuals", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/mutuals", facade=facade, session=session, console=recording_console)
     assert isinstance(out, MutualsResult)
     # The three "common*" users appear in both lists; sorted by username asc.
     assert [u.username for u in out.items] == ["common1", "common2", "common3"]
@@ -457,9 +478,7 @@ async def test_mutuals_no_truncated_warning_under_cap(
 ) -> None:
     """When neither side fills the cap, no truncation note appears."""
     facade = OsintFacade(backend=network_backend, history=history, config=config)
-    await dispatch(
-        "/mutuals", facade=facade, session=session, console=recording_console
-    )
+    await dispatch("/mutuals", facade=facade, session=session, console=recording_console)
     text = _captured(recording_console)
     assert "truncated" not in text
 
@@ -536,6 +555,21 @@ async def test_mutuals_csv_export_only_intersection(
     assert rows[0]["rank"] == "1"
 
 
+async def test_mutuals_maltego_export(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    await dispatch("/mutuals --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "mutuals.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert [r["Value"] for r in rows] == ["common1", "common2", "common3"]
+    assert all(r["Type"] == "maltego.Person" for r in rows)
+
+
 async def test_mutuals_empty_intersection(
     history: HistoryStore,
     config: Config,
@@ -548,9 +582,7 @@ async def test_mutuals_empty_intersection(
         following={"42": [_user("b", "beta")]},
     )
     facade = OsintFacade(backend=backend, history=history, config=config)
-    out = await dispatch(
-        "/mutuals", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/mutuals", facade=facade, session=session, console=recording_console)
     assert isinstance(out, MutualsResult)
     assert out.items == []
     assert "no mutuals" in _captured(recording_console)

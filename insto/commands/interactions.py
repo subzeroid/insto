@@ -224,6 +224,13 @@ async def comments_cmd(ctx: CommandContext, username: str) -> list[Comment]:
 # ---------------------------------------------------------------------------
 
 
+def _toplist_maltego_rows(result: TopList) -> list[dict[str, Any]]:
+    """Flatten a `TopList` into Maltego-friendly rows (`value` = key, weight = count)."""
+    return [
+        {"value": key, "weight": count, "rank": i} for i, (key, count) in enumerate(result.items, 1)
+    ]
+
+
 async def _emit_toplist(
     ctx: CommandContext,
     *,
@@ -248,6 +255,14 @@ async def _emit_toplist(
             command=command_name,
             target=result.target,
             dest=_resolve_dest(ctx, fmt="csv"),
+        )
+        return result
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _toplist_maltego_rows(result),
+            command=command_name,
+            entity_type="user",
+            target=result.target,
         )
         return result
 

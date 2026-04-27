@@ -33,6 +33,7 @@ import csv
 import dataclasses
 import io
 import json
+import logging
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,6 +57,38 @@ CSV_FLAT_COMMANDS: frozenset[str] = frozenset(
         "captions",
     }
 )
+
+# Subset of flat commands whose rows carry a single canonical entity per row
+# and therefore make sense as a Maltego entity-import CSV. `/captions`,
+# `/likes`, `/comments` are flat but row-shaped around posts/comments and
+# do not map cleanly to one Maltego entity per row.
+MALTEGO_COMMANDS: frozenset[str] = frozenset(
+    {
+        "followers",
+        "followings",
+        "mutuals",
+        "similar",
+        "wcommented",
+        "wtagged",
+        "hashtags",
+        "mentions",
+        "locations",
+    }
+)
+
+# Short kinds used by the command layer → Maltego built-in entity type
+# literals. Callers may also pass a `maltego.<Type>` literal directly,
+# which is forwarded unchanged.
+MALTEGO_ENTITY_TYPES: dict[str, str] = {
+    "user": "maltego.Person",
+    "mention": "maltego.Person",
+    "hashtag": "maltego.Phrase",
+    "location": "maltego.GPS",
+}
+
+MALTEGO_HEADER: tuple[str, ...] = ("Type", "Value", "Weight", "Notes", "Properties")
+
+_logger = logging.getLogger("insto.exporter")
 
 
 def _now_iso_utc() -> str:
@@ -147,6 +180,89 @@ def to_csv(
     writer.writeheader()
     for row in rows_list:
         writer.writerow({k: _csv_value(row.get(k)) for k in header})
+    return _write(buf.getvalue().encode("utf-8"), dest)
+
+
+def _resolve_maltego_type(entity_type: str) -> str:
+    """Resolve a short kind (`user`, `hashtag`, ...) into a Maltego type literal.
+
+    A literal already starting with `maltego.` is forwarded unchanged so
+    callers can pass a custom type. Anything else must be a known short
+    kind, otherwise `ValueError` is raised with the list of valid kinds.
+    """
+    if entity_type in MALTEGO_ENTITY_TYPES:
+        return MALTEGO_ENTITY_TYPES[entity_type]
+    if entity_type.startswith("maltego."):
+        return entity_type
+    valid = ", ".join(sorted(MALTEGO_ENTITY_TYPES))
+    raise ValueError(
+        f"unknown entity_type {entity_type!r}; expected a Maltego type "
+        f"literal (e.g. 'maltego.Person') or one of: {valid}"
+    )
+
+
+def to_maltego_csv(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    entity_type: str,
+    dest: Path | IO[bytes],
+) -> Path | None:
+    """Write `rows` as a Maltego entity-import CSV.
+
+    The CSV always has the same header: `Type, Value, Weight, Notes,
+    Properties`. Maltego's bulk-importer reads exactly those columns; the
+    Properties column is a JSON-encoded blob of every other key in the
+    source row, so analysts can re-create attributes without inventing a
+    new column per project.
+
+    Each row must carry a non-empty `value` key — that becomes the entity's
+    canonical value (a username, hashtag, location name, etc.). Reserved
+    keys `weight` (int, default 1) and `notes` (str, default empty) populate
+    their own columns. Every remaining key is sorted and JSON-dumped into
+    the `Properties` column.
+
+    Rows sharing a `value` are deduplicated (first occurrence wins). Each
+    drop is logged at WARNING so an analyst pulling overlapping windows
+    (e.g. followers + mutuals into one Maltego graph) can see what was
+    collapsed.
+    """
+    type_literal = _resolve_maltego_type(entity_type)
+    buf = io.StringIO(newline="")
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL)
+    writer.writerow(MALTEGO_HEADER)
+
+    seen: set[str] = set()
+    for raw in rows:
+        value = raw.get("value")
+        if value is None:
+            continue
+        value_str = str(value).strip()
+        if not value_str:
+            continue
+        if value_str in seen:
+            _logger.warning(
+                "to_maltego_csv: duplicate %s %r dropped (first occurrence kept)",
+                type_literal,
+                value_str,
+            )
+            continue
+        seen.add(value_str)
+        weight = raw.get("weight", 1)
+        weight_str = str(weight) if weight is not None else "1"
+        notes = raw.get("notes")
+        notes_str = "" if notes is None else str(notes)
+        props = {k: v for k, v in raw.items() if k not in {"value", "weight", "notes"}}
+        if props:
+            props_blob = json.dumps(
+                props,
+                default=_json_default,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        else:
+            props_blob = ""
+        writer.writerow([type_literal, value_str, weight_str, notes_str, props_blob])
+
     return _write(buf.getvalue().encode("utf-8"), dest)
 
 

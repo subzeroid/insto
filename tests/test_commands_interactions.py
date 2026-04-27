@@ -312,9 +312,7 @@ async def test_comments_json_export_aggregate(
     assert data["window"] == INTERACTIONS_DEFAULT_WINDOW
     assert data["analyzed_posts"] == 2
     assert data["post_code"] is None
-    assert {item["comment_pk"] for item in data["items"]} == {
-        "c1", "c2", "c3", "c4", "c5"
-    }
+    assert {item["comment_pk"] for item in data["items"]} == {"c1", "c2", "c3", "c4", "c5"}
 
 
 # ---------------------------------------------------------------------------
@@ -355,9 +353,7 @@ async def test_wcommented_limit_propagated(
     interactions_backend.request_log.clear()
     facade = OsintFacade(backend=interactions_backend, history=history, config=config)
     await dispatch("/wcommented --limit 1", facade=facade, session=session)
-    iter_posts = [
-        c for c in interactions_backend.request_log if c[0] == "iter_user_posts"
-    ]
+    iter_posts = [c for c in interactions_backend.request_log if c[0] == "iter_user_posts"]
     assert iter_posts[0][1] == ("42", 1)
 
 
@@ -374,6 +370,22 @@ async def test_wcommented_csv_export(
     assert rows[0]["user"] == "bob"
     assert rows[0]["count"] == "3"
     assert rows[0]["rank"] == "1"
+
+
+async def test_wcommented_maltego_export(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    await dispatch("/wcommented --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "wcommented.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert all(r["Type"] == "maltego.Person" for r in rows)
+    bob = next(r for r in rows if r["Value"] == "bob")
+    assert bob["Weight"] == "3"
 
 
 async def test_wcommented_json_export(
@@ -452,9 +464,7 @@ async def test_wtagged_limit_propagated(
     interactions_backend.request_log.clear()
     facade = OsintFacade(backend=interactions_backend, history=history, config=config)
     await dispatch("/wtagged --limit 2", facade=facade, session=session)
-    iter_tagged = [
-        c for c in interactions_backend.request_log if c[0] == "iter_user_tagged"
-    ]
+    iter_tagged = [c for c in interactions_backend.request_log if c[0] == "iter_user_tagged"]
     assert iter_tagged and iter_tagged[0][1] == ("42", 2)
 
 

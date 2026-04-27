@@ -259,6 +259,37 @@ async def test_hashtags_csv_export(
     assert rows[0]["count"] == "2"
 
 
+async def test_hashtags_maltego_export(
+    content_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=content_backend, history=history, config=config)
+    await dispatch("/hashtags --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "hashtags.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert all(r["Type"] == "maltego.Phrase" for r in rows)
+    assert {r["Value"] for r in rows} == {"travel", "food", "paris", "summer"}
+    travel = next(r for r in rows if r["Value"] == "travel")
+    assert travel["Weight"] == "2"
+
+
+async def test_locations_maltego_export(
+    content_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=content_backend, history=history, config=config)
+    await dispatch("/locations --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "locations.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert all(r["Type"] == "maltego.GPS" for r in rows)
+
+
 async def test_hashtags_empty_window_prints_message(
     history: HistoryStore,
     config: Config,

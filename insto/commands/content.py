@@ -82,6 +82,22 @@ def _toplist_envelope(result: TopList) -> dict[str, Any]:
     }
 
 
+_TOPLIST_MALTEGO_KIND: dict[str, str] = {
+    "hashtags": "hashtag",
+    "mentions": "mention",
+    "locations": "location",
+    "wcommented": "user",
+    "wtagged": "user",
+}
+
+
+def _toplist_maltego_rows(result: TopList) -> list[dict[str, Any]]:
+    """Flatten a `TopList` into Maltego-friendly rows (`value` = key, weight = count)."""
+    return [
+        {"value": key, "weight": count, "rank": i} for i, (key, count) in enumerate(result.items, 1)
+    ]
+
+
 async def _emit_toplist(
     ctx: CommandContext,
     *,
@@ -105,6 +121,14 @@ async def _emit_toplist(
             command=command_name,
             target=result.target,
             dest=_resolve_dest(ctx, fmt="csv"),
+        )
+        return result
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _toplist_maltego_rows(result),
+            command=command_name,
+            entity_type=_TOPLIST_MALTEGO_KIND[command_name],
+            target=result.target,
         )
         return result
 
@@ -139,9 +163,7 @@ async def _emit_toplist(
 async def hashtags_cmd(ctx: CommandContext, username: str) -> TopList:
     window = _resolve_window(ctx)
     result = await ctx.facade.hashtags(username, limit=window)
-    return await _emit_toplist(
-        ctx, result=result, command_name="hashtags", kind_title="Hashtags"
-    )
+    return await _emit_toplist(ctx, result=result, command_name="hashtags", kind_title="Hashtags")
 
 
 @command(
@@ -153,9 +175,7 @@ async def hashtags_cmd(ctx: CommandContext, username: str) -> TopList:
 async def mentions_cmd(ctx: CommandContext, username: str) -> TopList:
     window = _resolve_window(ctx)
     result = await ctx.facade.mentions(username, limit=window)
-    return await _emit_toplist(
-        ctx, result=result, command_name="mentions", kind_title="Mentions"
-    )
+    return await _emit_toplist(ctx, result=result, command_name="mentions", kind_title="Mentions")
 
 
 @command(
@@ -167,9 +187,7 @@ async def mentions_cmd(ctx: CommandContext, username: str) -> TopList:
 async def locations_cmd(ctx: CommandContext, username: str) -> TopList:
     window = _resolve_window(ctx)
     result = await ctx.facade.locations(username, limit=window)
-    return await _emit_toplist(
-        ctx, result=result, command_name="locations", kind_title="Locations"
-    )
+    return await _emit_toplist(ctx, result=result, command_name="locations", kind_title="Locations")
 
 
 # ---------------------------------------------------------------------------
@@ -283,9 +301,7 @@ async def likes_cmd(ctx: CommandContext, username: str) -> LikesStats:
                 "analyzed": stats.analyzed,
                 "total_likes": stats.total_likes,
                 "avg_likes": stats.avg_likes,
-                "top_posts": [
-                    {"code": c, "like_count": n} for c, n in stats.top_posts
-                ],
+                "top_posts": [{"code": c, "like_count": n} for c, n in stats.top_posts],
                 "empty": stats.empty,
             },
             command="likes",

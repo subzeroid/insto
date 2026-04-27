@@ -42,7 +42,12 @@ from insto.models import (
     User,
 )
 from insto.service import analytics
-from insto.service.exporter import default_export_path, to_csv, to_json
+from insto.service.exporter import (
+    default_export_path,
+    to_csv,
+    to_json,
+    to_maltego_csv,
+)
 from insto.service.history import HistoryStore
 from insto.service.watch import WatchManager
 
@@ -262,6 +267,28 @@ class OsintFacade:
             )
         )
         return to_csv(rows, command=command, target=target, dest=target_dest)
+
+    def export_maltego(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        command: str,
+        entity_type: str,
+        target: str | None,
+        dest: Path | IO[bytes] | None = None,
+    ) -> Path | None:
+        """Write Maltego entity-import CSV. Default path: `<cmd>.maltego.csv`."""
+        target_dest = (
+            dest
+            if dest is not None
+            else default_export_path(
+                command=command,
+                target=target,
+                ext="maltego.csv",
+                output_dir=self.config.output_dir,
+            )
+        )
+        return to_maltego_csv(rows, entity_type=entity_type, dest=target_dest)
 
     # -------------------------------------------------------------- downloads
 

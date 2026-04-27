@@ -91,6 +91,22 @@ def _user_rows(users: Sequence[User]) -> list[dict[str, Any]]:
     ]
 
 
+def _user_maltego_rows(users: Sequence[User]) -> list[dict[str, Any]]:
+    """Flatten users into Maltego-friendly rows (`value` = username)."""
+    return [
+        {
+            "value": u.username,
+            "weight": 1,
+            "notes": u.full_name,
+            "rank": i,
+            "pk": u.pk,
+            "is_private": u.is_private,
+            "is_verified": u.is_verified,
+        }
+        for i, u in enumerate(users, 1)
+    ]
+
+
 def _resolve_dest(ctx: CommandContext, *, fmt: str) -> Path | IO[bytes] | None:
     arg = ctx.args.json if fmt == "json" else ctx.args.csv
     return resolve_export_dest(arg if arg is not None else "")
@@ -119,6 +135,14 @@ def _export_users(
             command=command_name,
             target=target,
             dest=_resolve_dest(ctx, fmt="csv"),
+        )
+        return True
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _user_maltego_rows(users),
+            command=command_name,
+            entity_type="user",
+            target=target,
         )
         return True
     return False
@@ -259,14 +283,20 @@ async def mutuals_cmd(ctx: CommandContext, username: str) -> MutualsResult:
             dest=_resolve_dest(ctx, fmt="csv"),
         )
         return result
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _user_maltego_rows(result.items),
+            command="mutuals",
+            entity_type="user",
+            target=username,
+        )
+        return result
 
     if result.empty or not result.items:
         ctx.print(f"@{username} has no mutuals in the analysed window")
     else:
         ctx.print(
-            render_user_table(
-                result.items, title=f"mutuals of @{username} ({len(result.items)})"
-            )
+            render_user_table(result.items, title=f"mutuals of @{username} ({len(result.items)})")
         )
     note = _mutuals_truncated_note(result, side_limit=side_limit)
     if note is not None:

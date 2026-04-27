@@ -287,14 +287,18 @@ async def _safe_prune(facade: OsintFacade) -> None:
         await facade.history.prune_async()
 
 
-async def _safe_refresh_quota(facade: OsintFacade) -> None:
-    """Refresh backend quota in the background; swallow all errors."""
+async def _safe_refresh_quota(facade: OsintFacade, *, timeout: float = 2.0) -> None:
+    """Refresh backend quota; swallow all errors and bound by timeout.
+
+    Bounded so a dead network at startup adds at most `timeout` seconds to
+    REPL spin-up before the welcome banner falls back to "balance: pending".
+    """
     backend = facade.backend
     refresh = getattr(backend, "refresh_quota", None)
     if refresh is None:
         return
     with contextlib.suppress(Exception):
-        await refresh()
+        await asyncio.wait_for(refresh(), timeout=timeout)
 
 
 def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], Awaitable[None]]]:
@@ -347,23 +351,23 @@ def run_repl(config: Config | None = None, *, email: str | None = None) -> None:
     cfg = config if config is not None else facade.config
 
     async def _main() -> None:
+        # Refresh quota *before* the welcome screen renders, so the banner
+        # shows real numbers ("14.7M requests left · $4,417") instead of
+        # "balance: pending". The roundtrip costs ~200ms and is bounded by a
+        # short timeout in _safe_refresh_quota; if the network is dead, the
+        # banner falls back to the "pending" label and the REPL still opens.
+        await _safe_refresh_quota(facade)
+
         repl = Repl(facade=facade, config=cfg, email=email)
         # Best-effort retention prune on session start so the store does
         # not grow unbounded. Failures are non-fatal and silenced.
         prune_task = asyncio.create_task(_safe_prune(facade))
-        # Best-effort quota fetch — populates the BottomToolbar so it does
-        # not stay "quota: unknown" through the whole session. Failure is
-        # silent (HikerAPI may be down, network blocked, etc.).
-        quota_task = asyncio.create_task(_safe_refresh_quota(facade))
         try:
             await repl.run()
         finally:
             prune_task.cancel()
-            quota_task.cancel()
             with contextlib.suppress(BaseException):
                 await prune_task
-            with contextlib.suppress(BaseException):
-                await quota_task
             await cleanup()
 
     asyncio.run(_main())

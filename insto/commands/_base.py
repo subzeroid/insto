@@ -33,6 +33,8 @@ from typing import IO, TYPE_CHECKING, Any
 from insto.service.exporter import CSV_FLAT_COMMANDS
 
 if TYPE_CHECKING:  # avoid import cycle at runtime; only used for typing
+    from rich.console import Console, RenderableType
+
     from insto.service.facade import OsintFacade
 
 
@@ -162,6 +164,17 @@ class CommandContext:
     facade: OsintFacade
     args: argparse.Namespace
     session: Session
+    console: Console | None = None
+
+    def print(self, renderable: RenderableType) -> None:
+        """Print to the per-context console; no-op when no console is wired.
+
+        The CLI / REPL builds a `Console` once and passes it via this field;
+        unit tests usually pass an isolated `record=True` console so the
+        rendered output can be captured without writing to the real stdout.
+        """
+        if self.console is not None:
+            self.console.print(renderable)
 
     @property
     def no_download(self) -> bool:
@@ -267,9 +280,7 @@ def build_parser_for(spec: CommandSpec) -> argparse.ArgumentParser:
 def validate_global_flags(name: str, args: argparse.Namespace) -> None:
     """Apply mutual-exclusion rules and flat-only CSV check."""
     if args.json is not None and args.csv is not None:
-        raise CommandUsageError(
-            "--json and --csv are mutually exclusive; pick one"
-        )
+        raise CommandUsageError("--json and --csv are mutually exclusive; pick one")
     if args.maltego and args.output_format and args.output_format != "maltego":
         raise CommandUsageError(
             "--maltego conflicts with --output-format "
@@ -330,10 +341,11 @@ async def dispatch(
     *,
     facade: OsintFacade,
     session: Session,
+    console: Console | None = None,
 ) -> Any:
     """Parse `line` and execute the matching command. Returns its return value."""
     spec, args = parse_command_line(line)
-    ctx = CommandContext(facade=facade, args=args, session=session)
+    ctx = CommandContext(facade=facade, args=args, session=session, console=console)
     return await spec.fn(ctx)
 
 
@@ -355,9 +367,7 @@ def _extract_target(ctx: CommandContext) -> str:
             return cleaned
     if ctx.session.target:
         return ctx.session.target
-    raise CommandUsageError(
-        "no target set — pass a username or run /target <user> first"
-    )
+    raise CommandUsageError("no target set — pass a username or run /target <user> first")
 
 
 def with_target(

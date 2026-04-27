@@ -30,28 +30,22 @@ from insto._version import __version__
 if TYPE_CHECKING:  # pragma: no cover
     from insto.service.facade import OsintFacade
 
-# Each line below is a single chafa-rendered row. ANSI escape codes cannot be
-# split across Python source lines without breaking the rendered cell, so we
-# disable the line-length lint for this literal.
-# fmt: off
-# ruff: noqa: E501
-WASP_BANNER: str = (
-    "\x1b[0m\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m                             \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m        \x1b[90m▞\x1b[97;47m▆ \x1b[37;107m▂                 \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m       \x1b[30m▕▏ \x1b[37m▁▝\x1b[47m \x1b[107m     ▁          \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m       \x1b[37m▕\x1b[90;47m▍\x1b[37;107m▃▂ ▕\x1b[97;47m▞\x1b[37;107m▁  \x1b[90;47m▖\x1b[37;100m▊\x1b[107m▏         \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m   \x1b[90;47m▃\x1b[97;100m▆\x1b[30;107m▔\x1b[97;100m▆\x1b[90;47m▍\x1b[93;100m▗▄\x1b[33;47m▗\x1b[90m▃\x1b[37;107m▁ \x1b[97;47m▞\x1b[37;107m▏\x1b[97;100m▌\x1b[37;107m▏\x1b[100m▊\x1b[90;107m▏         \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m  \x1b[97;100m▊\x1b[90;47m▎\x1b[37;107m▁ ▁\x1b[90;47m▌\x1b[97;43m▂\x1b[33;103m▄\x1b[90;43m▃\x1b[103m \x1b[93;100m▆\x1b[33;47m▗\x1b[90m▁\x1b[97;100m▞▌\x1b[47m \x1b[90m▖\x1b[107m▄▄\x1b[47m▃\x1b[107m▅\x1b[47m▅\x1b[37;107m▏    \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m   \x1b[97;100m▆▅\x1b[47m \x1b[100m▆\x1b[90;107m▗\x1b[30;47m▅\x1b[90;40m▔ \x1b[30;43m▆\x1b[103m▃\x1b[43m \x1b[33;103m▔\x1b[93;100m▋\x1b[30;43m▖\x1b[93;100m▅\x1b[90;103m▝\x1b[97;100m▝\x1b[30;107m▁\x1b[90m▃▄▃\x1b[37m▂    \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m      \x1b[33;47m▗\x1b[40m▄▃\x1b[37m▁\x1b[90m▁ \x1b[33m▗▃\x1b[30;43m▗\x1b[90m▞\x1b[93m▞ \x1b[33;100m▔\x1b[90;103m▖\x1b[93;40m▆\x1b[100m▄\x1b[90;47m▖\x1b[107m▔\x1b[97;100m▄▃\x1b[47m \x1b[107m  \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m     \x1b[37m▕\x1b[90;43m▎\x1b[33;103m▁\x1b[30m▃\x1b[43m▄\x1b[47m▃▞\x1b[37;40m▂\x1b[90;43m▎\x1b[33;40m▌\x1b[31;103m▋\x1b[33;100m▎\x1b[37m▄\x1b[43m \x1b[93;40m▄\x1b[33;103m▘▕\x1b[93;100m▘\x1b[107m      \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m     \x1b[90m▕\x1b[30;43m▅\x1b[40m \x1b[33m▂\x1b[93m▄▄▄\x1b[97;100m▝▌\x1b[31;43m▝\x1b[33;103m▔\x1b[100m▍\x1b[97;43m▃▃\x1b[37m▃\x1b[90;103m▅▃\x1b[47m▞\x1b[107m      \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m      \x1b[37;40m▖\x1b[30;43m▌\x1b[33;103m▁\x1b[30m▃▅▅\x1b[43m▄\x1b[47m▖\x1b[93;43m▝\x1b[33;103m▝\x1b[30m▔\x1b[37;43m▕\x1b[90;107m▅\x1b[47m▔\x1b[37;100m▍\x1b[97m▆\x1b[90;107m▋      \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m      \x1b[37m▔\x1b[43m▖\x1b[33;40m▘ \x1b[93m▗▅▅\x1b[30;107m▋ \x1b[97;100m▆\x1b[43m▃\x1b[90;47m▋▖▗▘\x1b[107m▗▘      \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m        \x1b[97;100m▅\x1b[37;40m▂\x1b[31;103m▁\x1b[90m▗▆\x1b[47m▘\x1b[37;107m▖▃\x1b[90m▃\x1b[37m▔\x1b[97;100m▆\x1b[47m▅▅\x1b[100m▆\x1b[107m       \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m          \x1b[37m▔\x1b[90m▔\x1b[97;100m▆▅\x1b[47m \x1b[100m▅\x1b[90;107m▔            \x1b[0m\n"
-    "\x1b[7m\x1b[97m \x1b[0m\x1b[31;107m                             \x1b[0m\n"
-).rstrip("\n")
+# INSTO logotype (figlet "standard" font) baked at design time. The two-line
+# tagline below leans into the anagram: the same five letters of "OSINT" — open
+# source intelligence — rearranged into "insto", an Instagram-flavoured handle.
+LOGO_BANNER: str = r"""
+ ___ _   _ ____ _____ ___
+|_ _| \ | / ___|_   _/ _ \
+ | ||  \| \___ \ | || | | |
+ | || |\  |___) || || |_| |
+|___|_| \_|____/ |_| \___/
+""".strip("\n")
+
+LOGO_TAGLINE: str = "i n s t o   ⇋   o s i n t"
+LOGO_SUBTAGLINE: str = "instagram tool · open-source intel"
+
+# Backwards-compat alias for code/tests that still import the old name.
+WASP_BANNER: str = LOGO_BANNER
 
 
 _TIPS: tuple[tuple[str, str], ...] = (
@@ -61,13 +55,19 @@ _TIPS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _banner_text() -> Text:
-    """Return the wasp banner as `Text`. The string itself carries ANSI escape
-    codes (chafa block-output, 16 colours), so we parse them via
-    `Text.from_ansi` rather than restyling — the wasp keeps its yellow / black
-    stripes regardless of the surrounding theme.
+def _banner_text() -> RenderableType:
+    """Render the INSTO logotype + anagram tagline.
+
+    Three stacked Text blocks: bold accent INSTO figlet on top, dimmed `i n s t o
+    ⇋ o s i n t` line in the middle, even-dimmer subtagline at the bottom. No
+    image deps, no terminal-bg coupling — works on light *and* dark schemes.
     """
-    return Text.from_ansi(WASP_BANNER, no_wrap=True)
+    return Group(
+        Text(LOGO_BANNER, style="accent", no_wrap=True),
+        Text(""),
+        Text(LOGO_TAGLINE, style="value"),
+        Text(LOGO_SUBTAGLINE, style="muted"),
+    )
 
 
 def _tips_table() -> Table:

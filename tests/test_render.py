@@ -205,8 +205,8 @@ def test_welcome_wide_terminal_shows_two_columns(_facade: OsintFacade) -> None:
     # 100 remaining requests rendered as "100 requests left" (pay-per-call shape).
     assert "100 requests left" in out
     assert "me@example.com" in out
-    # wasp banner present (chafa block-pixel rendering uses unicode block glyphs)
-    assert "▆" in out
+    # logotype present (figlet INSTO block letters use vertical bars)
+    assert "|_ _|" in out  # signature row of figlet "I" letter
 
 
 def test_welcome_includes_recent_targets(_facade: OsintFacade) -> None:
@@ -219,7 +219,7 @@ def test_welcome_includes_recent_targets(_facade: OsintFacade) -> None:
 
 def test_welcome_narrow_terminal_drops_tips_panel(_facade: OsintFacade) -> None:
     out = _capture(render_welcome(_facade, width=80), width=80)
-    assert "▆" in out  # banner still rendered
+    assert "|_ _|" in out  # logotype still rendered
     assert "Tips for getting started" not in out
     assert "Recent activity" not in out
 
@@ -256,10 +256,10 @@ def test_make_console_attaches_theme() -> None:
     assert style.color is not None
 
 
-def test_wasp_banner_is_static_ansi_block_art() -> None:
-    """Banner is the chafa-rendered wasp (block-symbol pixel art with 16-color
-    ANSI codes), baked at build time so the runtime has zero image deps."""
-    # Carries ANSI escape sequences (chafa output, not bare ASCII).
-    assert "\x1b[" in WASP_BANNER
-    # ~15 rows, matching the 30x16 chafa render baked from wasp.webp.
-    assert WASP_BANNER.count("\n") >= 12
+def test_wasp_banner_is_static_logotype() -> None:
+    """Banner is the figlet INSTO logotype, baked at build time. Plain ASCII so
+    it renders identically on light/dark schemes and never depends on chafa."""
+    # All bytes printable ASCII (no escape codes, no unicode block glyphs).
+    WASP_BANNER.encode("ascii")
+    # ~5 figlet rows + a leading newline strip = at least 4 internal newlines.
+    assert WASP_BANNER.count("\n") >= 4

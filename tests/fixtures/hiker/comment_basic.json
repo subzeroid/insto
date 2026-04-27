@@ -1,0 +1,16 @@
+{
+  "pk": "17900000000000001",
+  "text": "love this!",
+  "type": 0,
+  "created_at": 1714210900,
+  "comment_like_count": 5,
+  "has_liked_comment": false,
+  "user": {
+    "pk": "55555555",
+    "username": "follower_one",
+    "full_name": "Follower One",
+    "is_private": false,
+    "is_verified": false,
+    "profile_pic_url": "https://scontent-iad3-1.cdninstagram.com/v/f1.jpg"
+  }
+}

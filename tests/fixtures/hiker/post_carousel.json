@@ -1,0 +1,33 @@
+{
+  "pk": "3000000000000000003",
+  "id": "3000000000000000003_12345678",
+  "code": "CARousel333",
+  "taken_at": 1714383600,
+  "media_type": 8,
+  "product_type": "feed",
+  "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/cover.jpg",
+  "video_url": null,
+  "caption_text": "trip recap",
+  "like_count": 410,
+  "comment_count": 20,
+  "location": null,
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public"
+  },
+  "resources": [
+    {
+      "pk": "3000000000000001003",
+      "media_type": 1,
+      "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/c1.jpg",
+      "video_url": null
+    },
+    {
+      "pk": "3000000000000002003",
+      "media_type": 2,
+      "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/c2_thumb.jpg",
+      "video_url": "https://scontent-iad3-1.cdninstagram.com/v/c2.mp4"
+    }
+  ]
+}

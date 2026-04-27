@@ -1,0 +1,22 @@
+{
+  "pk": "22222222",
+  "pk_id": "22222222",
+  "username": "deactivated_user",
+  "full_name": "",
+  "is_private": false,
+  "is_verified": false,
+  "is_business": false,
+  "biography": "",
+  "external_url": null,
+  "media_count": 0,
+  "follower_count": 0,
+  "following_count": 0,
+  "profile_pic_url": null,
+  "profile_pic_url_hd": null,
+  "public_email": null,
+  "public_phone_number": null,
+  "business_category_name": null,
+  "category_name": null,
+  "account_type": 0,
+  "is_active": false
+}

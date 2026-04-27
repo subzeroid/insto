@@ -1,0 +1,15 @@
+{
+  "pk": "3100000000000000002",
+  "id": "3100000000000000002_12345678",
+  "taken_at": 1714210900,
+  "expiring_at": 1714297300,
+  "media_type": 2,
+  "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/story2_thumb.jpg",
+  "video_url": "https://scontent-iad3-1.cdninstagram.com/v/story2.mp4",
+  "video_duration": 9.8,
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public"
+  }
+}

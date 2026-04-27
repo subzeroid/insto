@@ -1,0 +1,18 @@
+{
+  "pk": "highlight:17900000000000010",
+  "id": "highlight:17900000000000010",
+  "title": "Travels",
+  "media_count": 12,
+  "cover_media": {
+    "cropped_image_version": {
+      "url": "https://scontent-iad3-1.cdninstagram.com/v/cover_travels.jpg",
+      "width": 480,
+      "height": 480
+    }
+  },
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public"
+  }
+}

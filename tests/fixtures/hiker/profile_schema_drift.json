@@ -1,0 +1,11 @@
+{
+  "pk": "33333333",
+  "pk_id": "33333333",
+  "full_name": "Missing Username",
+  "is_private": false,
+  "is_verified": false,
+  "biography": "username field intentionally absent to simulate schema drift",
+  "media_count": 1,
+  "follower_count": 1,
+  "following_count": 1
+}

@@ -1,0 +1,10 @@
+{
+  "pk": "17900000000000099",
+  "type": 0,
+  "created_at": 1714210999,
+  "comment_like_count": 0,
+  "user": {
+    "pk": "55555555",
+    "username": "follower_one"
+  }
+}

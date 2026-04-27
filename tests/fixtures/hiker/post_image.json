@@ -1,0 +1,23 @@
+{
+  "pk": "3000000000000000001",
+  "id": "3000000000000000001_12345678",
+  "code": "ABCdef12345",
+  "taken_at": 1714210800,
+  "media_type": 1,
+  "product_type": "feed",
+  "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/post1.jpg",
+  "video_url": null,
+  "caption_text": "morning light #coffee #sunrise @friend",
+  "like_count": 250,
+  "comment_count": 8,
+  "location": {
+    "pk": "987654",
+    "name": "San Francisco, California"
+  },
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public"
+  },
+  "resources": []
+}

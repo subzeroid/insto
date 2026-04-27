@@ -1,0 +1,21 @@
+{
+  "pk": "12345678",
+  "pk_id": "12345678",
+  "username": "alice_public",
+  "full_name": "Alice Public",
+  "is_private": false,
+  "is_verified": true,
+  "is_business": false,
+  "biography": "OSINT enthusiast | she/her",
+  "external_url": "https://alice.example",
+  "media_count": 42,
+  "follower_count": 12500,
+  "following_count": 432,
+  "profile_pic_url": "https://scontent-iad3-1.cdninstagram.com/v/avatar.jpg",
+  "profile_pic_url_hd": "https://scontent-iad3-1.cdninstagram.com/v/avatar_hd.jpg",
+  "public_email": "alice@example.com",
+  "public_phone_number": "+15555550100",
+  "business_category_name": null,
+  "category_name": null,
+  "account_type": 1
+}

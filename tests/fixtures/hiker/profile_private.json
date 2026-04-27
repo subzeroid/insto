@@ -1,0 +1,21 @@
+{
+  "pk": "98765432",
+  "pk_id": "98765432",
+  "username": "bob_private",
+  "full_name": "Bob Private",
+  "is_private": true,
+  "is_verified": false,
+  "is_business": false,
+  "biography": "",
+  "external_url": null,
+  "media_count": 100,
+  "follower_count": 50,
+  "following_count": 30,
+  "profile_pic_url": "https://scontent-iad3-1.cdninstagram.com/v/bob.jpg",
+  "profile_pic_url_hd": "https://scontent-iad3-1.cdninstagram.com/v/bob_hd.jpg",
+  "public_email": null,
+  "public_phone_number": null,
+  "business_category_name": null,
+  "category_name": null,
+  "account_type": 1
+}

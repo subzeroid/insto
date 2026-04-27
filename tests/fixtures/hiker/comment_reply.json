@@ -1,0 +1,17 @@
+{
+  "pk": "17900000000000002",
+  "text": "thanks!",
+  "type": 2,
+  "created_at": 1714210950,
+  "comment_like_count": 0,
+  "has_liked_comment": false,
+  "replied_to_comment_id": "17900000000000001",
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public",
+    "is_private": false,
+    "is_verified": true,
+    "profile_pic_url": "https://scontent-iad3-1.cdninstagram.com/v/avatar.jpg"
+  }
+}

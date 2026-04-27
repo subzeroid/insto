@@ -1,0 +1,21 @@
+{
+  "pk": "3000000000000000002",
+  "id": "3000000000000000002_12345678",
+  "code": "VIDcode22222",
+  "taken_at": 1714297200,
+  "media_type": 2,
+  "product_type": "clips",
+  "thumbnail_url": "https://scontent-iad3-1.cdninstagram.com/v/post2_thumb.jpg",
+  "video_url": "https://scontent-iad3-1.cdninstagram.com/v/post2.mp4",
+  "video_duration": 15.5,
+  "caption_text": "behind the scenes",
+  "like_count": 1024,
+  "comment_count": 64,
+  "location": null,
+  "user": {
+    "pk": "12345678",
+    "username": "alice_public",
+    "full_name": "Alice Public"
+  },
+  "resources": []
+}

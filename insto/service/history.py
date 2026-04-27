@@ -270,6 +270,20 @@ class HistoryStore:
     async def recent_targets_async(self, n: int = 5) -> list[str]:
         return await asyncio.to_thread(self.recent_targets, n)
 
+    def recent_commands(self, n: int = 25) -> list[dict[str, Any]]:
+        """Return the last `n` cli_history rows, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT cmd, target, ts FROM cli_history ORDER BY ts DESC LIMIT ?",
+                (n,),
+            ).fetchall()
+        return [
+            {"cmd": r["cmd"], "target": r["target"], "ts": r["ts"]} for r in rows
+        ]
+
+    async def recent_commands_async(self, n: int = 25) -> list[dict[str, Any]]:
+        return await asyncio.to_thread(self.recent_commands, n)
+
     # ---------------------------------------------------------------- snapshots
 
     def add_snapshot(self, snapshot: Snapshot) -> None:

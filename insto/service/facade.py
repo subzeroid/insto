@@ -44,6 +44,7 @@ from insto.models import (
 from insto.service import analytics
 from insto.service.exporter import default_export_path, to_csv, to_json
 from insto.service.history import HistoryStore
+from insto.service.watch import WatchManager
 
 
 class OsintFacade:
@@ -62,6 +63,7 @@ class OsintFacade:
         self.config = config
         self._cdn_client = cdn_client
         self._pk_cache: dict[str, str] = {}
+        self.watches = WatchManager()
 
     @property
     def db_connection(self) -> sqlite3.Connection:
@@ -318,7 +320,8 @@ class OsintFacade:
         await self.history.record_command_async(cmd, target)
 
     async def aclose(self) -> None:
-        """Release backend / cdn resources (history is owned by the caller)."""
+        """Release backend / cdn / watch resources (history is owned by the caller)."""
+        await self.watches.cancel_all()
         if self._cdn_client is not None:
             await self._cdn_client.aclose()
             self._cdn_client = None

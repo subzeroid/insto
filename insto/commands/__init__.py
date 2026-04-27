@@ -19,6 +19,7 @@ from insto.commands import media as _media  # noqa: F401  (registers commands)
 from insto.commands import network as _network  # noqa: F401  (registers commands)
 from insto.commands import profile as _profile  # noqa: F401  (registers commands)
 from insto.commands import target as _target  # noqa: F401  (registers commands)
+from insto.commands import watch as _watch  # noqa: F401  (registers commands)
 from insto.commands._base import (
     COMMANDS,
     CommandContext,

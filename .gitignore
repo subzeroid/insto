@@ -3,3 +3,21 @@ docs/plans/
 docs/internal/
 .context/
 .claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# insto runtime artifacts
+output/
+.insto-test-home/

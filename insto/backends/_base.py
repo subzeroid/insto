@@ -40,6 +40,13 @@ class OSINTBackend(ABC):
     in parallel). They are NOT required to be process-safe.
     """
 
+    # Capability tokens this backend exposes. Commands declare what they need
+    # via `@command(..., requires=("followed",))`; the dispatcher rejects the
+    # call when the active backend does not advertise the required tokens.
+    # HikerAPI exposes only public OSINT, so the default is empty; an
+    # `aiograpi` backend would extend this with `{"followed", ...}`.
+    capabilities: frozenset[str] = frozenset()
+
     @abstractmethod
     async def resolve_target(self, username: str) -> str:
         """Return the stable `pk` for `username`, or raise `ProfileNotFound`."""

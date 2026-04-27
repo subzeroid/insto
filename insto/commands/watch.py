@@ -28,6 +28,7 @@ from typing import Any
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
+    _validate_username,
     command,
     resolve_export_dest,
     with_target,
@@ -142,6 +143,7 @@ async def watch_cmd(ctx: CommandContext) -> dict[str, Any]:
         raise CommandUsageError("no target set — pass a username or run /target <user> first")
     if not username:
         raise CommandUsageError("usage: /watch <username> [interval-seconds]")
+    username = _validate_username(username)
 
     interval = (
         int(ctx.args.interval) if ctx.args.interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
@@ -189,6 +191,7 @@ async def unwatch_cmd(ctx: CommandContext) -> bool:
     username = str(raw).lstrip("@").strip()
     if not username:
         raise CommandUsageError("usage: /unwatch <username>")
+    username = _validate_username(username)
     removed = ctx.facade.watches.remove(username)
     if not removed:
         ctx.print(f"@{username} is not being watched")

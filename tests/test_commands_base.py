@@ -377,6 +377,23 @@ async def test_dispatch_calls_registered_function(
     assert seen == {"limit": 10, "yes": True}
 
 
+async def test_dispatch_rejects_command_requiring_missing_capability(
+    isolated_registry: dict[str, CommandSpec],
+    facade: OsintFacade,
+    session: Session,
+) -> None:
+    """Commands declaring `requires=("followed",)` fail clearly on a backend
+    that does not advertise the capability (e.g. HikerBackend / FakeBackend),
+    matching the spec promise that v0.2 lands as a pure addition."""
+
+    @command("dms", "h", requires=("followed",))
+    async def fn(ctx: CommandContext) -> str:
+        return "should-not-run"
+
+    with pytest.raises(CommandUsageError, match="missing capability: followed"):
+        await dispatch("/dms", facade=facade, session=session)
+
+
 # ---------------------------------------------------------------------------
 # resolve_export_dest
 # ---------------------------------------------------------------------------

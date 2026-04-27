@@ -175,6 +175,24 @@ def test_effective_config_report_origins(monkeypatch: pytest.MonkeyPatch) -> Non
     assert rows["cli_history_path"]["origin"] == "default"
 
 
+def test_effective_config_report_masks_proxy_userinfo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Proxy URLs with `user:pass@host` userinfo must not echo the credentials
+    when displayed via `/config`. The host/port stays visible so the operator
+    can still verify the proxy."""
+    monkeypatch.setenv(cfgmod.ENV_PROXY, "http://alice:hunter2@proxy.example.com:3128")
+    cfg = load_config()
+
+    rows = {row["key"]: row for row in effective_config_report(cfg)}
+
+    value = rows["hiker.proxy"]["value"]
+    assert "alice" not in value
+    assert "hunter2" not in value
+    assert "proxy.example.com:3128" in value
+    assert "***:***@" in value
+
+
 def test_effective_config_report_defaults_when_unset() -> None:
     cfg = load_config()
     rows = {row["key"]: row for row in effective_config_report(cfg)}

@@ -346,6 +346,12 @@ async def dispatch(
 ) -> Any:
     """Parse `line` and execute the matching command. Returns its return value."""
     spec, args = parse_command_line(line)
+    if spec.requires:
+        missing = tuple(c for c in spec.requires if c not in facade.backend.capabilities)
+        if missing:
+            raise CommandUsageError(
+                f"/{spec.name} needs aiograpi backend (missing capability: {', '.join(missing)})"
+            )
     ctx = CommandContext(facade=facade, args=args, session=session, console=console)
     return await spec.fn(ctx)
 

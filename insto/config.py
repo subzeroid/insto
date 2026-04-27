@@ -20,7 +20,7 @@ from typing import Any, Literal
 
 import tomli_w
 
-from insto._redact import register_secret
+from insto._redact import _PROXY_USERINFO_RE, register_secret
 from insto.exceptions import BackendError
 
 CONFIG_HOME_ENV = "INSTO_HOME"
@@ -228,6 +228,11 @@ def effective_config_report(config: Config) -> list[dict[str, Any]]:
             display = None
         elif key in redacted_keys:
             display = _redact(str(value))
+        elif key == "hiker.proxy":
+            # Proxy URLs may carry `user:pass@host:port` userinfo. Mask the
+            # credentials but keep the host/port visible so the operator can
+            # still verify which proxy is configured.
+            display = _PROXY_USERINFO_RE.sub(r"\1***:***@", str(value))
         else:
             display = value
         rows.append(

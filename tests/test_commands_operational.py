@@ -249,6 +249,37 @@ async def test_purge_snapshots_with_user_filter(
     assert facade.history.last_snapshot("2") is not None
 
 
+async def test_purge_snapshots_with_username_filter(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    """`--user <username>` resolves via the captured username field, not just
+    the numeric pk — users typically know the @handle, not the internal pk."""
+    snap = Snapshot(
+        target_pk="1",
+        captured_at=1700000000,
+        profile_fields={"username": "alice"},
+        last_post_pks=[],
+    )
+    other = Snapshot(
+        target_pk="2",
+        captured_at=1700000001,
+        profile_fields={"username": "bob"},
+        last_post_pks=[],
+    )
+    facade.history.add_snapshot(snap)
+    facade.history.add_snapshot(other)
+
+    result = await dispatch(
+        "/purge snapshots --user alice --yes",
+        facade=facade,
+        session=session,
+        console=console,
+    )
+    assert result["deleted"] == 1
+    assert facade.history.last_snapshot("1") is None
+    assert facade.history.last_snapshot("2") is not None
+
+
 async def test_purge_cache_wipes_output_dir(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:

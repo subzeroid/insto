@@ -312,10 +312,10 @@ async def _stream_response(
                                 "CDN content-type mismatch: "
                                 f"header={declared_ct} sniff={sniffed[1]}"
                             )
+                if total + len(chunk) > byte_budget:
+                    raise BackendError(f"CDN response exceeded byte budget {byte_budget}")
                 fh.write(chunk)
                 total += len(chunk)
-                if total > byte_budget:
-                    raise BackendError(f"CDN response exceeded byte budget {byte_budget}")
 
             if sniffed is None:
                 if not sniff_buf:

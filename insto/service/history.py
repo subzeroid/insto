@@ -548,7 +548,13 @@ class HistoryStore:
                 if user is None:
                     cur = self._conn.execute("DELETE FROM snapshots")
                 else:
-                    cur = self._conn.execute("DELETE FROM snapshots WHERE target_pk = ?", (user,))
+                    # Match either the numeric pk or the captured username
+                    # — users typically know the latter.
+                    cur = self._conn.execute(
+                        "DELETE FROM snapshots WHERE target_pk = ? "
+                        "OR json_extract(profile_fields_json, '$.username') = ?",
+                        (user, user),
+                    )
                 return cur.rowcount
 
         return _with_lock_retry(_do)

@@ -144,7 +144,7 @@ def _add_purge_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--user",
         default=None,
-        help="restrict snapshot purge to one target_pk (snapshots only)",
+        help="restrict snapshot purge to one username or pk (snapshots only)",
     )
 
 

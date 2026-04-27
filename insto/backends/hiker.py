@@ -224,11 +224,18 @@ class HikerBackend(OSINTBackend):
         self._proxy = proxy
         self._max_pages = max_pages
 
+        # When a proxy is configured we replace the SDK's auto-created
+        # `httpx.AsyncClient` with a proxied one. The original instance has
+        # never been used for a request, but its connection pool / file
+        # descriptors still need to be closed — track it so `aclose()` can
+        # release it deterministically.
+        self._discarded_client: httpx.AsyncClient | None = None
         if client is None:
             sdk = hikerapi.AsyncClient(token=token, timeout=timeout)
             if proxy is not None:
                 proxied = httpx.AsyncClient(base_url=sdk._url, timeout=timeout, proxy=proxy)
                 proxied.headers.update(sdk._headers)
+                self._discarded_client = sdk._client
                 sdk._client = proxied
             self._client: hikerapi.AsyncClient = sdk
         else:
@@ -555,3 +562,6 @@ class HikerBackend(OSINTBackend):
         """Close the underlying SDK client."""
 
         await self._client.aclose()
+        if self._discarded_client is not None:
+            await self._discarded_client.aclose()
+            self._discarded_client = None

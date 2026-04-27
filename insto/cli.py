@@ -360,7 +360,14 @@ async def _run_oneshot(
     cli_overrides: dict[str, Any] = {}
     if proxy is not None:
         cli_overrides["hiker_proxy"] = proxy
-    config = load_config(cli_overrides)
+    try:
+        config = load_config(cli_overrides)
+    except BackendError as exc:
+        # `load_config` raises BackendError for security-relevant failures
+        # (e.g. group/world-readable config). Surface the redacted message
+        # instead of letting a raw traceback escape from `asyncio.run`.
+        print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
+        return 1
     if not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         return 1

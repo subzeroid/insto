@@ -396,6 +396,12 @@ class HikerBackend(OSINTBackend):
                     mapped = mapper(raw)
                 except SchemaDrift as exc:
                     raise self._record_drift(exc) from None
+                except (ValueError, TypeError) as exc:
+                    # Mapper int()/str() coercions can blow up on payloads that
+                    # technically have the right keys but the wrong shape (e.g.
+                    # `media_type` returned as the literal string "none"). Treat
+                    # these as schema drift rather than letting the iterator die.
+                    raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
                 yield mapped
                 yielded += 1
                 if limit is not None and yielded >= limit:
@@ -422,6 +428,8 @@ class HikerBackend(OSINTBackend):
                 mapped = mapper(raw)
             except SchemaDrift as exc:
                 raise self._record_drift(exc) from None
+            except (ValueError, TypeError) as exc:
+                raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
             yield mapped
             if limit is not None and index + 1 >= limit:
                 return

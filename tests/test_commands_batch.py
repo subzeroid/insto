@@ -53,9 +53,15 @@ from tests.fakes import FakeBackend
 
 
 @pytest.fixture(autouse=True)
-def _no_stagger(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disable the inter-worker stagger so the suite runs quickly."""
+def _no_stagger(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Disable the inter-worker stagger so the suite runs quickly.
+
+    Also pin ``INSTO_HOME`` to a tmp dir so the batch resume file (which
+    lives under ``~/.insto/batch-resume/``) does not leak between tests
+    or pollute the developer's real home directory.
+    """
     monkeypatch.setattr(batch_module, "START_DELAY", 0.0)
+    monkeypatch.setenv("INSTO_HOME", str(tmp_path / ".insto"))
 
 
 @pytest.fixture
@@ -497,7 +503,7 @@ async def test_batch_quota_exhausted_stops_cleanly(
     assert "u3" not in seen
     # Resume file should record u1, u2 (not u3 — it failed).
     sha = batch_module._input_sha([f"u{i}" for i in range(1, 8)])
-    resume_path = config.output_dir / f".batch-{sha}.jsonl"
+    resume_path = batch_module._resume_path(sha)
     assert resume_path.exists()
     done = batch_module._read_resume(resume_path)
     assert "u1" in done and "u2" in done
@@ -692,7 +698,7 @@ async def test_batch_resume_file_format_is_jsonl(
         session=session,
     )
     sha = batch_module._input_sha(["alice"])
-    resume_path = config.output_dir / f".batch-{sha}.jsonl"
+    resume_path = batch_module._resume_path(sha)
     rec: dict[str, Any] = json.loads(resume_path.read_text().strip())
     assert rec["target"] == "alice"
     assert isinstance(rec["ts"], int)

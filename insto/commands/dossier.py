@@ -187,7 +187,7 @@ async def _do_posts(
 
 async def _do_network_bundle(
     facade: OsintFacade, username: str, limit: int, dossier_dir: Path
-) -> tuple[SectionResult, SectionResult, SectionResult]:
+) -> tuple[SectionResult, SectionResult, SectionResult, BaseException | None]:
     """Fetch followers + following exactly once, derive mutuals locally.
 
     The previous implementation called `facade.mutuals(...)` from a third
@@ -271,13 +271,17 @@ async def _do_network_bundle(
         facade.export_csv(_user_rows(result.items), command="mutuals", target=username, dest=path)
         mutuals_section = SectionResult(name="mutuals", file=path, count=len(result.items))
 
-    # Re-raise hard limits so the outer guard can flip the abort flag for
-    # remaining sibling sections.
+    # Surface hard limits so the outer guard can flip the abort flag for
+    # remaining sibling sections — but return whatever sections we *did*
+    # write, so a successful followers.csv isn't overwritten in the manifest
+    # by a quota-exhausted following fetch.
+    abort_exc: BaseException | None = None
     for r in (followers_res, followings_res):
         if isinstance(r, (QuotaExhausted, AuthInvalid, Banned)):
-            raise r
+            abort_exc = r
+            break
 
-    return followers_section, following_section, mutuals_section
+    return followers_section, following_section, mutuals_section, abort_exc
 
 
 async def _do_hashtags(
@@ -466,10 +470,17 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
         if abort.is_set():
             return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
         try:
-            return await _do_network_bundle(ctx.facade, username, network_n, dossier_dir)
+            followers_s, following_s, mutuals_s, abort_exc = await _do_network_bundle(
+                ctx.facade, username, network_n, dossier_dir
+            )
         except (QuotaExhausted, AuthInvalid, Banned) as exc:
             abort.set()
             return exc
+        if abort_exc is not None:
+            # Hard-limit hit mid-bundle: keep partial sections (followers.csv
+            # may already exist on disk), but signal sibling-abort to outer.
+            abort.set()
+        return followers_s, following_s, mutuals_s
 
     coros = [
         _guarded(_do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)),

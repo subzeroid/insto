@@ -242,26 +242,24 @@ class HistoryStore:
         await asyncio.to_thread(self.record_command, cmd, target)
 
     def recent_targets(self, n: int = 5) -> list[str]:
-        """Return the most recent N distinct non-null targets, newest first."""
+        """Return the most recent N distinct non-null targets, newest first.
+
+        Aggregates in SQL (`GROUP BY ... ORDER BY MAX(ts) DESC LIMIT n`) so a
+        90-day cli_history retention window is not pulled into Python on every
+        welcome banner render.
+        """
         with self._lock:
             rows = self._conn.execute(
                 """
                 SELECT target FROM cli_history
                 WHERE target IS NOT NULL AND target != ''
-                ORDER BY ts DESC
-                """
+                GROUP BY target
+                ORDER BY MAX(ts) DESC, MAX(rowid) DESC
+                LIMIT ?
+                """,
+                (n,),
             ).fetchall()
-        seen: set[str] = set()
-        out: list[str] = []
-        for row in rows:
-            t = row["target"]
-            if t in seen:
-                continue
-            seen.add(t)
-            out.append(t)
-            if len(out) >= n:
-                break
-        return out
+        return [row["target"] for row in rows]
 
     async def recent_targets_async(self, n: int = 5) -> list[str]:
         return await asyncio.to_thread(self.recent_targets, n)

@@ -17,10 +17,11 @@ Concurrency / pacing:
 Resume:
 
 - A SHA256 of the canonical (sorted, deduplicated) target list keys a
-  resume file at `<output_dir>/.batch-<sha>.jsonl`. After each successful
+  resume file at `~/.insto/batch-resume/<sha>.jsonl`. After each successful
   target the worker appends one JSON line; a follow-up `/batch` invocation
   with the same input skips already-done targets. `--restart` deletes the
-  resume file before starting.
+  resume file before starting. Stored under the config dir (not the output
+  dir) so `/purge cache` does not silently delete in-progress resume state.
 
 Graceful failure:
 
@@ -52,6 +53,7 @@ from insto.commands._base import (
     dispatch,
     parse_command_line,
 )
+from insto.config import config_dir
 from insto.exceptions import QuotaExhausted
 
 MAX_CONCURRENCY = 10
@@ -158,9 +160,17 @@ def _input_sha(targets: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _resume_path(output_dir: Path, sha: str) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir / f".batch-{sha}.jsonl"
+def _resume_path(sha: str) -> Path:
+    """Resume jsonl path under `~/.insto/batch-resume/`.
+
+    Lives under the config dir (not the output dir) so `/purge cache` —
+    which recursively wipes the output dir — never silently destroys
+    in-progress batch state. The directory is created with mode 0700
+    inherited from `~/.insto`.
+    """
+    base = config_dir() / "batch-resume"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / f"{sha}.jsonl"
 
 
 def _read_resume(path: Path) -> set[str]:
@@ -279,7 +289,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
         )
 
     sha = _input_sha(targets)
-    resume_file = _resume_path(ctx.facade.config.output_dir, sha)
+    resume_file = _resume_path(sha)
     if ctx.args.restart and resume_file.exists():
         resume_file.unlink()
 

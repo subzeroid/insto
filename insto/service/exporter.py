@@ -302,11 +302,16 @@ def _csv_value(value: Any) -> Any:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return value
     if isinstance(value, (list, tuple)):
         return _escape_formula(",".join(str(v) for v in value))
     if isinstance(value, str):
         return _escape_formula(value)
-    return value
+    # Defensive: any other scalar (datetime, custom DTO with __str__) flows
+    # through DictWriter's implicit `str()` — formula-escape it explicitly so
+    # adding a new flat-row command can't reopen the CSV-injection hole.
+    return _escape_formula(str(value))
 
 
 def _write(blob: bytes, dest: Path | IO[bytes]) -> Path | None:

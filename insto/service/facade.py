@@ -22,6 +22,7 @@ returns the path actually written so the command can render it.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import re
 import sqlite3
@@ -80,6 +81,7 @@ class OsintFacade:
         self.watches = WatchManager()
         self._command_byte_budget: int = self.DEFAULT_COMMAND_BYTE_BUDGET
         self._command_bytes_used: int = 0
+        self._budget_lock = asyncio.Lock()
 
     def reset_command_budget(self, total: int | None = None) -> None:
         """Start a fresh per-command CDN byte budget.
@@ -374,23 +376,38 @@ class OsintFacade:
     ) -> Path:
         # Per-command byte budget (spec §12: 5 GB / command). The
         # per-resource 500 MB cap still lives inside `_cdn.stream_to_file`.
-        remaining = self._command_byte_budget - self._command_bytes_used
-        if remaining <= 0:
-            raise BackendError(
-                "command exceeded byte budget "
-                f"{self._command_byte_budget} (used {self._command_bytes_used})"
+        # Concurrent `_stream` calls (e.g. /batch fan-out) race on the
+        # counter, so reserve pessimistically before the await and
+        # reconcile after — protected by a lock so two callers can't
+        # observe the same `remaining` and double-spend.
+        async with self._budget_lock:
+            remaining = self._command_byte_budget - self._command_bytes_used
+            if remaining <= 0:
+                raise BackendError(
+                    "command exceeded byte budget "
+                    f"{self._command_byte_budget} (used {self._command_bytes_used})"
+                )
+            reservation = min(CDN_PER_RESOURCE_BUDGET, remaining)
+            self._command_bytes_used += reservation
+        try:
+            path = await stream_to_file(
+                url,
+                dest,
+                taken_at=taken_at,
+                client=self._cdn_client,
+                byte_budget=reservation,
             )
-        path = await stream_to_file(
-            url,
-            dest,
-            taken_at=taken_at,
-            client=self._cdn_client,
-            byte_budget=min(CDN_PER_RESOURCE_BUDGET, remaining),
-        )
+        except BaseException:
+            async with self._budget_lock:
+                self._command_bytes_used -= reservation
+            raise
+        actual = 0
         with contextlib.suppress(OSError):
-            # If stat fails the budget stays accurate enough — the streamer
-            # has already enforced the per-resource cap on the just-written file.
-            self._command_bytes_used += path.stat().st_size
+            actual = path.stat().st_size
+        async with self._budget_lock:
+            # actual ≤ reservation by construction — the streamer enforces
+            # `byte_budget=reservation` so anything larger would have raised.
+            self._command_bytes_used += actual - reservation
         return path
 
     # ------------------------------------------------------------------- log

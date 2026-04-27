@@ -376,7 +376,16 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
                 return
             try:
                 session = Session(target=target)
-                await dispatch(cmd_line, facade=ctx.facade, session=session, console=ctx.console)
+                # `reset_budget=False`: all workers share the spec §12
+                # 5 GB CDN budget that was reset for the outer `/batch`.
+                # Per-worker resets would race and wipe each other.
+                await dispatch(
+                    cmd_line,
+                    facade=ctx.facade,
+                    session=session,
+                    console=ctx.console,
+                    reset_budget=False,
+                )
             except QuotaExhausted as exc:
                 quota_hit.set()
                 _emit_status(

@@ -343,8 +343,17 @@ async def dispatch(
     facade: OsintFacade,
     session: Session,
     console: Console | None = None,
+    reset_budget: bool = True,
 ) -> Any:
-    """Parse `line` and execute the matching command. Returns its return value."""
+    """Parse `line` and execute the matching command. Returns its return value.
+
+    `reset_budget` defaults True so each top-level command gets a fresh
+    spec §12 5 GB CDN byte budget. `/batch` passes `reset_budget=False`
+    on its child dispatches so all batch workers share the budget that
+    was reset for the outer `/batch` itself — concurrent worker resets
+    would otherwise wipe each other's running tally and silently bypass
+    the cap.
+    """
     spec, args = parse_command_line(line)
     if spec.requires:
         missing = tuple(c for c in spec.requires if c not in facade.backend.capabilities)
@@ -352,10 +361,8 @@ async def dispatch(
             raise CommandUsageError(
                 f"/{spec.name} needs aiograpi backend (missing capability: {', '.join(missing)})"
             )
-    # Reset the spec §12 per-command CDN byte budget. /batch keeps the same
-    # facade for the whole batch but each child invocation goes through
-    # `dispatch()` and gets its own fresh 5 GB budget.
-    facade.reset_command_budget()
+    if reset_budget:
+        facade.reset_command_budget()
     ctx = CommandContext(facade=facade, args=args, session=session, console=console)
     return await spec.fn(ctx)
 

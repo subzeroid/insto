@@ -95,9 +95,7 @@ def _validate_proxy_url(url: str) -> None:
         raise BackendError(f"invalid proxy URL: {url!r}") from exc
     if parsed.scheme not in _VALID_PROXY_SCHEMES:
         allowed = sorted(_VALID_PROXY_SCHEMES)
-        raise BackendError(
-            f"invalid proxy URL {url!r}: scheme must be one of {allowed}"
-        )
+        raise BackendError(f"invalid proxy URL {url!r}: scheme must be one of {allowed}")
     if not parsed.netloc:
         raise BackendError(f"invalid proxy URL {url!r}: missing host")
 
@@ -218,9 +216,7 @@ class HikerBackend(OSINTBackend):
         proxy: str | None = None,
         client: hikerapi.AsyncClient | None = None,
         max_pages: int = DEFAULT_MAX_PAGES,
-        retry_decorator: Callable[
-            [Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]
-        ]
+        retry_decorator: Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]
         | None = None,
     ) -> None:
         if proxy is not None:
@@ -231,9 +227,7 @@ class HikerBackend(OSINTBackend):
         if client is None:
             sdk = hikerapi.AsyncClient(token=token, timeout=timeout)
             if proxy is not None:
-                proxied = httpx.AsyncClient(
-                    base_url=sdk._url, timeout=timeout, proxy=proxy
-                )
+                proxied = httpx.AsyncClient(base_url=sdk._url, timeout=timeout, proxy=proxy)
                 proxied.headers.update(sdk._headers)
                 sdk._client = proxied
             self._client: hikerapi.AsyncClient = sdk
@@ -291,9 +285,7 @@ class HikerBackend(OSINTBackend):
             self._last_error = exc
             raise
 
-    def _raise_not_found(
-        self, mapped: BackendError, original: BaseException
-    ) -> NoReturn:
+    def _raise_not_found(self, mapped: BackendError, original: BaseException) -> NoReturn:
         """Map an internal `_NotFoundError` to a public typed error and remember it."""
 
         self._last_error = mapped
@@ -303,9 +295,7 @@ class HikerBackend(OSINTBackend):
 
     async def resolve_target(self, username: str) -> str:
         try:
-            payload = await self._call(
-                lambda: self._client.user_by_username_v2(username=username)
-            )
+            payload = await self._call(lambda: self._client.user_by_username_v2(username=username))
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(username), exc)
         user = self._unwrap_user(payload, endpoint="user_by_username_v2")
@@ -392,13 +382,9 @@ class HikerBackend(OSINTBackend):
 
     # ------------------------------------------------------------- iter_posts
 
-    async def iter_user_posts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_posts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.user_medias_chunk_v1(
-                user_id=pk, end_cursor=cursor
-            )
+            return await self._client.user_medias_chunk_v1(user_id=pk, end_cursor=cursor)
 
         try:
             async for post in self._iter_chunks(
@@ -412,9 +398,7 @@ class HikerBackend(OSINTBackend):
         self, pk: str, *, limit: int | None = None
     ) -> AsyncIterator[User]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.user_followers_chunk_v1(
-                user_id=pk, max_id=cursor
-            )
+            return await self._client.user_followers_chunk_v1(user_id=pk, max_id=cursor)
 
         try:
             async for user in self._iter_chunks(
@@ -428,9 +412,7 @@ class HikerBackend(OSINTBackend):
         self, pk: str, *, limit: int | None = None
     ) -> AsyncIterator[User]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.user_following_chunk_v1(
-                user_id=pk, max_id=cursor
-            )
+            return await self._client.user_following_chunk_v1(user_id=pk, max_id=cursor)
 
         try:
             async for user in self._iter_chunks(
@@ -440,13 +422,9 @@ class HikerBackend(OSINTBackend):
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(pk), exc)
 
-    async def iter_user_tagged(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_tagged(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.user_tag_medias_chunk_v1(
-                user_id=pk, max_id=cursor
-            )
+            return await self._client.user_tag_medias_chunk_v1(user_id=pk, max_id=cursor)
 
         try:
             async for post in self._iter_chunks(
@@ -475,9 +453,7 @@ class HikerBackend(OSINTBackend):
         self, highlight_id: str, *, limit: int | None = None
     ) -> AsyncIterator[HighlightItem]:
         try:
-            payload = await self._call(
-                lambda: self._client.highlight_by_id_v2(id=highlight_id)
-            )
+            payload = await self._call(lambda: self._client.highlight_by_id_v2(id=highlight_id))
         except _NotFoundError as exc:
             self._raise_not_found(PostNotFound(highlight_id), exc)
 
@@ -504,9 +480,7 @@ class HikerBackend(OSINTBackend):
         self, media_pk: str, *, limit: int | None = None
     ) -> AsyncIterator[Comment]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.media_comments_chunk_v1(
-                id=media_pk, max_id=cursor
-            )
+            return await self._client.media_comments_chunk_v1(id=media_pk, max_id=cursor)
 
         mapper = partial(map_comment, media_pk=str(media_pk))
         try:
@@ -532,9 +506,7 @@ class HikerBackend(OSINTBackend):
         except _NotFoundError as exc:
             self._raise_not_found(PostNotFound(media_pk), exc)
 
-    async def iter_user_stories(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Story]:
+    async def iter_user_stories(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Story]:
         try:
             async for story in self._iter_single_page(
                 fetch=lambda: self._client.user_stories_v2(user_id=pk),
@@ -549,9 +521,7 @@ class HikerBackend(OSINTBackend):
 
     async def get_suggested(self, pk: str) -> list[User]:
         try:
-            payload = await self._call(
-                lambda: self._client.user_suggested_profiles_v2(user_id=pk)
-            )
+            payload = await self._call(lambda: self._client.user_suggested_profiles_v2(user_id=pk))
         except _NotFoundError as exc:
             self._raise_not_found(ProfileNotFound(pk), exc)
         items = _extract_single_list(payload, keys=("suggested", "users", "items"))
@@ -561,9 +531,7 @@ class HikerBackend(OSINTBackend):
         self, tag: str, *, limit: int | None = None
     ) -> AsyncIterator[Post]:
         async def fetch(cursor: str | None) -> Any:
-            return await self._client.hashtag_medias_recent_v2(
-                name=tag, page_id=cursor
-            )
+            return await self._client.hashtag_medias_recent_v2(name=tag, page_id=cursor)
 
         async for post in self._iter_chunks(
             fetch, endpoint="hashtag_medias_recent_v2", limit=limit, mapper=map_post

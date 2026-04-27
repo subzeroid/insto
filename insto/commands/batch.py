@@ -286,9 +286,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
     pending = [t for t in targets if t not in done]
 
     if done and pending:
-        ctx.print(
-            f"resuming: {len(done)} already done, {len(pending)} remaining (sha={sha})"
-        )
+        ctx.print(f"resuming: {len(done)} already done, {len(pending)} remaining (sha={sha})")
     elif done and not pending:
         ctx.print(f"all {len(done)} targets already complete (sha={sha}); nothing to do")
         return {
@@ -336,14 +334,10 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
                 return
             try:
                 session = Session(target=target)
-                await dispatch(
-                    cmd_line, facade=ctx.facade, session=session, console=ctx.console
-                )
+                await dispatch(cmd_line, facade=ctx.facade, session=session, console=ctx.console)
             except QuotaExhausted as exc:
                 quota_hit.set()
-                ctx.print(
-                    f"quota exhausted at @{target}: {exc}; saving progress and exiting"
-                )
+                ctx.print(f"quota exhausted at @{target}: {exc}; saving progress and exiting")
                 return
             except Exception as exc:
                 async with state_lock:

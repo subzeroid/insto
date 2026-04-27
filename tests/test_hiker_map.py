@@ -44,6 +44,7 @@ def _load(name: str) -> dict:
 
 # ---- map_profile -----------------------------------------------------------
 
+
 def test_map_profile_public_full_payload() -> None:
     profile = map_profile(_load("profile_public.json"))
     assert isinstance(profile, Profile)
@@ -113,6 +114,7 @@ def test_map_profile_schema_drift_pk_explicitly_null() -> None:
 
 # ---- map_user --------------------------------------------------------------
 
+
 def test_map_user_short_full_payload() -> None:
     user = map_user(_load("user_short.json"))
     assert isinstance(user, User)
@@ -138,6 +140,7 @@ def test_map_user_short_missing_pk_raises_schema_drift() -> None:
 
 # ---- map_post --------------------------------------------------------------
 
+
 def test_map_post_image() -> None:
     post = map_post(_load("post_image.json"))
     assert isinstance(post, Post)
@@ -151,9 +154,7 @@ def test_map_post_image() -> None:
     assert post.location_pk == "987654"
     assert post.hashtags == ["coffee", "sunrise"]
     assert post.mentions == ["friend"]
-    assert post.media_urls == [
-        "https://scontent-iad3-1.cdninstagram.com/v/post1.jpg"
-    ]
+    assert post.media_urls == ["https://scontent-iad3-1.cdninstagram.com/v/post1.jpg"]
     assert post.owner_pk == "12345678"
     assert post.owner_username == "alice_public"
 
@@ -161,9 +162,7 @@ def test_map_post_image() -> None:
 def test_map_post_video_uses_video_url() -> None:
     post = map_post(_load("post_video.json"))
     assert post.media_type == "video"
-    assert post.media_urls == [
-        "https://scontent-iad3-1.cdninstagram.com/v/post2.mp4"
-    ]
+    assert post.media_urls == ["https://scontent-iad3-1.cdninstagram.com/v/post2.mp4"]
     assert post.thumbnail_url == "https://scontent-iad3-1.cdninstagram.com/v/post2_thumb.jpg"
     assert post.location_name is None
 
@@ -203,6 +202,7 @@ def test_map_post_caption_missing_means_empty_string_no_hashtags() -> None:
 
 
 # ---- map_comment -----------------------------------------------------------
+
 
 def test_map_comment_basic() -> None:
     comment = map_comment(_load("comment_basic.json"), media_pk="3000000000000000001")
@@ -248,6 +248,7 @@ def test_map_comment_user_missing_username_raises_schema_drift() -> None:
 
 # ---- map_story -------------------------------------------------------------
 
+
 def test_map_story_image() -> None:
     story = map_story(_load("story_image.json"))
     assert isinstance(story, Story)
@@ -289,6 +290,7 @@ def test_map_story_unknown_media_type_raises_schema_drift() -> None:
 
 
 # ---- map_highlight ---------------------------------------------------------
+
 
 def test_map_highlight_basic() -> None:
     highlight = map_highlight(_load("highlight_basic.json"))

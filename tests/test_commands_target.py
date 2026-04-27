@@ -48,9 +48,7 @@ def backend() -> FakeBackend:
 
 
 @pytest.fixture
-def facade(
-    backend: FakeBackend, history: HistoryStore, config: Config
-) -> OsintFacade:
+def facade(backend: FakeBackend, history: HistoryStore, config: Config) -> OsintFacade:
     return OsintFacade(backend=backend, history=history, config=config)
 
 
@@ -79,40 +77,30 @@ async def test_target_pre_resolves_pk(
     assert cached == "42"
 
 
-async def test_target_unknown_username_raises(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_target_unknown_username_raises(facade: OsintFacade, session: Session) -> None:
     with pytest.raises(ProfileNotFound):
         await dispatch("/target ghost", facade=facade, session=session)
     # Session must remain untouched on failure.
     assert session.target is None
 
 
-async def test_target_without_arg_errors(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_target_without_arg_errors(facade: OsintFacade, session: Session) -> None:
     with pytest.raises(CommandUsageError, match="usage: /target <username>"):
         await dispatch("/target", facade=facade, session=session)
 
 
-async def test_target_blank_arg_errors(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_target_blank_arg_errors(facade: OsintFacade, session: Session) -> None:
     with pytest.raises(CommandUsageError, match="usage: /target <username>"):
         await dispatch("/target @", facade=facade, session=session)
 
 
-async def test_current_returns_active_target(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_current_returns_active_target(facade: OsintFacade, session: Session) -> None:
     await dispatch("/target alice", facade=facade, session=session)
     current = await dispatch("/current", facade=facade, session=session)
     assert current == "alice"
 
 
-async def test_current_returns_none_when_unset(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_current_returns_none_when_unset(facade: OsintFacade, session: Session) -> None:
     current = await dispatch("/current", facade=facade, session=session)
     assert current is None
 
@@ -128,18 +116,14 @@ async def test_clear_drops_session_and_pk_cache(
     assert "alice" not in facade._pk_cache
 
 
-async def test_clear_when_unset_is_noop(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_clear_when_unset_is_noop(facade: OsintFacade, session: Session) -> None:
     # Should not raise when called with nothing to clear.
     result = await dispatch("/clear", facade=facade, session=session)
     assert result is None
     assert session.target is None
 
 
-async def test_target_replaces_previous(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_target_replaces_previous(facade: OsintFacade, session: Session) -> None:
     await dispatch("/target alice", facade=facade, session=session)
     await dispatch("/target bob", facade=facade, session=session)
     assert session.target == "bob"

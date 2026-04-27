@@ -39,9 +39,7 @@ def test_default_export_path_strips_at_and_handles_none() -> None:
 
 
 def test_default_export_path_custom_output_dir(tmp_path: Path) -> None:
-    p = default_export_path(
-        command="posts", target="@u", ext="json", output_dir=tmp_path
-    )
+    p = default_export_path(command="posts", target="@u", ext="json", output_dir=tmp_path)
     assert p == tmp_path / "u" / "posts.json"
 
 
@@ -60,9 +58,9 @@ def test_to_json_captured_at_is_iso_utc(tmp_path: Path) -> None:
     dest = tmp_path / "out.json"
     to_json({}, command="info", target="@n", dest=dest)
     blob = json.loads(dest.read_text("utf-8"))
-    assert re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", blob["captured_at"]
-    ), blob["captured_at"]
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", blob["captured_at"]), blob[
+        "captured_at"
+    ]
 
 
 def test_to_json_serializes_dataclass(tmp_path: Path) -> None:

@@ -118,9 +118,7 @@ def test_extract_locations_skips_empty_and_keeps_window() -> None:
 
 
 def test_window_header_carries_target_and_window() -> None:
-    res = extract_hashtags(
-        [_post("1", hashtags=["x"])], target="alice", limit=50
-    )
+    res = extract_hashtags([_post("1", hashtags=["x"])], target="alice", limit=50)
     header = f"Hashtags from @{res.target} (last {res.window} posts):"
     assert header == "Hashtags from @alice (last 50 posts):"
 
@@ -151,7 +149,9 @@ def test_compute_mutuals_intersection_sorted() -> None:
     followers = [_user("bob"), _user("carol"), _user("dave"), _user("eve")]
     following = [_user("dave"), _user("Bob"), _user("frank")]
     res = compute_mutuals(
-        followers, following, target="alice",
+        followers,
+        following,
+        target="alice",
     )
     assert isinstance(res, MutualsResult)
     usernames = [u.username for u in res.items]
@@ -178,8 +178,11 @@ def test_compute_mutuals_window_caps_each_side() -> None:
     followers = [_user(f"u{i}", pk=f"p{i}") for i in range(2000)]
     following = [_user(f"u{i}", pk=f"p{i}") for i in range(2000)]
     res = compute_mutuals(
-        followers, following, target="alice",
-        follower_limit=100, following_limit=50,
+        followers,
+        following,
+        target="alice",
+        follower_limit=100,
+        following_limit=50,
     )
     assert res.follower_analyzed == 100
     assert res.following_analyzed == 50

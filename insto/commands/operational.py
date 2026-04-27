@@ -166,9 +166,7 @@ async def purge_cmd(ctx: CommandContext) -> dict[str, Any]:
 
     target_label = "snapshots for that user" if user_filter else f"all {kind} entries"
     if not ctx.yes:
-        confirmed = await _confirm(
-            ctx, f"about to permanently delete {target_label}; continue?"
-        )
+        confirmed = await _confirm(ctx, f"about to permanently delete {target_label}; continue?")
         if not confirmed:
             ctx.print("aborted")
             return {"kind": kind, "deleted": 0, "aborted": True}

@@ -100,9 +100,7 @@ class LikesStats:
     empty: bool = False
 
 
-def _top_from_counter(
-    counter: Counter[str], top: int | None
-) -> list[tuple[str, int]]:
+def _top_from_counter(counter: Counter[str], top: int | None) -> list[tuple[str, int]]:
     """Sort `counter` by (count desc, key asc) and take `top` if given."""
     ordered = sorted(counter.items(), key=lambda kv: (-kv[1], kv[0]))
     if top is not None and top > 0:

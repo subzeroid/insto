@@ -94,15 +94,12 @@ class WatchManager:
             raise WatchError(f"already watching @{user}")
         if len(self._entries) >= self._max:
             raise WatchError(
-                f"too many active watches (max {self._max}); "
-                "drop one with /unwatch first"
+                f"too many active watches (max {self._max}); drop one with /unwatch first"
             )
         entry = _Entry(user=user, interval_seconds=interval_seconds, tick=tick)
         self._entries[user] = entry
         if start:
-            entry.task = asyncio.create_task(
-                self._loop(entry), name=f"insto-watch:{user}"
-            )
+            entry.task = asyncio.create_task(self._loop(entry), name=f"insto-watch:{user}")
         return entry.to_spec()
 
     def remove(self, user: str) -> bool:

@@ -61,9 +61,9 @@ def test_creates_db_and_schema(tmp_path: Path) -> None:
         assert s.schema_version() == 1
         # All three tables present.
         with sqlite3.connect(str(db)) as raw:
-            tables = {row[0] for row in raw.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            )}
+            tables = {
+                row[0] for row in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
         assert {"cli_history", "watches", "snapshots", "_meta"} <= tables
     finally:
         s.close()
@@ -342,9 +342,7 @@ async def test_async_wrappers_round_trip(store: HistoryStore) -> None:
     targets = await store.recent_targets_async(5)
     assert targets == ["@alice"]
 
-    await store.add_snapshot_async(
-        store.snapshot_from_profile(_make_profile(pk="42"), post_pks=[])
-    )
+    await store.add_snapshot_async(store.snapshot_from_profile(_make_profile(pk="42"), post_pks=[]))
     assert store.last_snapshot("42") is not None
 
     summary = await store.prune_async()

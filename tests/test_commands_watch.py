@@ -126,9 +126,7 @@ async def test_watch_rejects_duplicate_user(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
     try:
-        await dispatch(
-            "/watch alice 600", facade=facade, session=session, console=console
-        )
+        await dispatch("/watch alice 600", facade=facade, session=session, console=console)
         with pytest.raises(CommandUsageError, match="already watching"):
             await dispatch(
                 "/watch alice 600",
@@ -161,9 +159,7 @@ async def test_unwatch_removes_active_watch(
 ) -> None:
     try:
         await dispatch("/watch alice 600", facade=facade, session=session, console=console)
-        result = await dispatch(
-            "/unwatch alice", facade=facade, session=session, console=console
-        )
+        result = await dispatch("/unwatch alice", facade=facade, session=session, console=console)
         assert result is True
         assert "alice" not in facade.watches
     finally:
@@ -173,9 +169,7 @@ async def test_unwatch_removes_active_watch(
 async def test_unwatch_unknown_returns_false(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    result = await dispatch(
-        "/unwatch ghost", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/unwatch ghost", facade=facade, session=session, console=console)
     assert result is False
 
 
@@ -185,21 +179,15 @@ async def test_watching_lists_active_watches(
     try:
         await dispatch("/watch alice 600", facade=facade, session=session, console=console)
         await dispatch("/watch bob 900", facade=facade, session=session, console=console)
-        rows = await dispatch(
-            "/watching", facade=facade, session=session, console=console
-        )
+        rows = await dispatch("/watching", facade=facade, session=session, console=console)
         users = sorted(r["user"] for r in rows)
         assert users == ["alice", "bob"]
     finally:
         await facade.watches.cancel_all()
 
 
-async def test_watching_when_empty(
-    facade: OsintFacade, session: Session, console: Console
-) -> None:
-    rows = await dispatch(
-        "/watching", facade=facade, session=session, console=console
-    )
+async def test_watching_when_empty(facade: OsintFacade, session: Session, console: Console) -> None:
+    rows = await dispatch("/watching", facade=facade, session=session, console=console)
     assert rows == []
     assert "no active watches" in console.export_text()
 
@@ -294,9 +282,7 @@ async def test_cancel_all_drains_running_loop_tasks_quickly() -> None:
 async def test_diff_first_seen_when_no_prior_snapshot(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    result = await dispatch(
-        "/diff alice", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/diff alice", facade=facade, session=session, console=console)
     assert result["first_seen"] is True
     assert result["changes"] == {}
 
@@ -311,9 +297,7 @@ async def test_diff_picks_up_username_rename_into_previous_usernames(
     backend.profiles["1"] = _profile("1", "alice2")
     facade.clear_target_cache("alice")
 
-    result = await dispatch(
-        "/diff alice2", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/diff alice2", facade=facade, session=session, console=console)
     assert result["first_seen"] is False
     assert "alice" in result["previous_usernames"]
     assert "username" in result["changes"]
@@ -332,9 +316,7 @@ async def test_history_reads_recent_cli_history_rows(
     await facade.history.record_command_async("/posts", "alice")
     await facade.history.record_command_async("/info", "bob")
 
-    rows = await dispatch(
-        "/history 2", facade=facade, session=session, console=console
-    )
+    rows = await dispatch("/history 2", facade=facade, session=session, console=console)
     assert len(rows) == 2
     # Most recent first.
     assert rows[0]["cmd"] == "/info"
@@ -344,8 +326,6 @@ async def test_history_reads_recent_cli_history_rows(
 async def test_history_empty_prints_note(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    rows = await dispatch(
-        "/history", facade=facade, session=session, console=console
-    )
+    rows = await dispatch("/history", facade=facade, session=session, console=console)
     assert rows == []
     assert "no recorded commands yet" in console.export_text()

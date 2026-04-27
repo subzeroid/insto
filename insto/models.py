@@ -156,8 +156,9 @@ class Quota:
     reset_at: int | None = None
 
     @classmethod
-    def with_remaining(cls, remaining: int, *, limit: int | None = None,
-                       reset_at: int | None = None) -> Quota:
+    def with_remaining(
+        cls, remaining: int, *, limit: int | None = None, reset_at: int | None = None
+    ) -> Quota:
         """Build a Quota from a parsed `X-Quota-Remaining` header."""
         return cls(remaining=remaining, limit=limit, reset_at=reset_at)
 

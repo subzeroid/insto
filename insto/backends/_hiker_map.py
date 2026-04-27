@@ -100,6 +100,7 @@ def _post_media_urls(d: dict[str, Any], media_type: str) -> list[str]:
 
 # ---- profile / user --------------------------------------------------------
 
+
 def map_profile(d: dict[str, Any]) -> Profile:
     """Map a HikerAPI `user` payload to a `Profile` DTO.
 
@@ -122,12 +123,8 @@ def map_profile(d: dict[str, Any]) -> Profile:
         is_business=bool(d.get("is_business", False)),
         is_private=is_private,
         public_email=_opt_str(d.get("public_email")),
-        public_phone=_opt_str(
-            d.get("public_phone_number") or d.get("contact_phone_number")
-        ),
-        business_category=_opt_str(
-            d.get("business_category_name") or d.get("category_name")
-        ),
+        public_phone=_opt_str(d.get("public_phone_number") or d.get("contact_phone_number")),
+        business_category=_opt_str(d.get("business_category_name") or d.get("category_name")),
         follower_count=int(d.get("follower_count") or 0),
         following_count=int(d.get("following_count") or 0),
         media_count=int(d.get("media_count") or 0),
@@ -149,6 +146,7 @@ def map_user(d: dict[str, Any]) -> User:
 
 
 # ---- post ------------------------------------------------------------------
+
 
 def map_post(d: dict[str, Any]) -> Post:
     """Map a HikerAPI `media` payload to a `Post` DTO.
@@ -190,6 +188,7 @@ def map_post(d: dict[str, Any]) -> Post:
 
 # ---- comment ---------------------------------------------------------------
 
+
 def map_comment(d: dict[str, Any], *, media_pk: str) -> Comment:
     """Map a HikerAPI comment payload. `media_pk` is supplied by the caller.
 
@@ -220,6 +219,7 @@ def map_comment(d: dict[str, Any], *, media_pk: str) -> Comment:
 
 # ---- story -----------------------------------------------------------------
 
+
 def map_story(d: dict[str, Any]) -> Story:
     """Map a HikerAPI story payload to a `Story` DTO.
 
@@ -235,8 +235,10 @@ def map_story(d: dict[str, Any]) -> Story:
 
     expires_at = int(d.get("expiring_at") or d.get("expires_at") or (taken_at + 86400))
     media_url = (
-        d.get("video_url") if media_type == "video" else d.get("thumbnail_url")
-    ) or d.get("thumbnail_url") or ""
+        (d.get("video_url") if media_type == "video" else d.get("thumbnail_url"))
+        or d.get("thumbnail_url")
+        or ""
+    )
     user = d.get("user") if isinstance(d.get("user"), dict) else None
 
     return Story(
@@ -252,6 +254,7 @@ def map_story(d: dict[str, Any]) -> Story:
 
 
 # ---- highlight -------------------------------------------------------------
+
 
 def map_highlight(d: dict[str, Any]) -> Highlight:
     """Map a HikerAPI highlight reel payload to a `Highlight` DTO.
@@ -298,8 +301,10 @@ def map_highlight_item(d: dict[str, Any], *, highlight_pk: str) -> HighlightItem
     if media_type is None:
         raise SchemaDrift("highlight_item", "media_type")
     media_url = (
-        d.get("video_url") if media_type == "video" else d.get("thumbnail_url")
-    ) or d.get("thumbnail_url") or ""
+        (d.get("video_url") if media_type == "video" else d.get("thumbnail_url"))
+        or d.get("thumbnail_url")
+        or ""
+    )
     return HighlightItem(
         pk=str(pk),
         highlight_pk=str(highlight_pk),

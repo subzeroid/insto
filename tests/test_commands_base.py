@@ -438,9 +438,7 @@ async def test_download_or_print_url_streams_when_enabled(
 
     transport = httpx.MockTransport(handler)
     client = httpx.AsyncClient(transport=transport)
-    facade = OsintFacade(
-        backend=backend, history=history, config=config, cdn_client=client
-    )
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
     try:
         out = await download_or_print_url(
             facade,
@@ -465,9 +463,7 @@ def _ctx(facade: OsintFacade, session: Session, **flags: object) -> CommandConte
     return CommandContext(facade=facade, args=args, session=session)
 
 
-async def test_with_target_uses_session(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_with_target_uses_session(facade: OsintFacade, session: Session) -> None:
     session.set_target("alice")
 
     @with_target
@@ -478,9 +474,7 @@ async def test_with_target_uses_session(
     assert result == "alice"
 
 
-async def test_with_target_uses_positional(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_with_target_uses_positional(facade: OsintFacade, session: Session) -> None:
     @with_target
     async def fn(ctx: CommandContext, username: str) -> str:
         return username
@@ -502,9 +496,7 @@ async def test_with_target_positional_overrides_session(
     assert result == "bob"
 
 
-async def test_with_target_raises_when_unset(
-    facade: OsintFacade, session: Session
-) -> None:
+async def test_with_target_raises_when_unset(facade: OsintFacade, session: Session) -> None:
     @with_target
     async def fn(ctx: CommandContext, username: str) -> str:
         return username
@@ -562,9 +554,7 @@ def test_session_rejects_blank_target() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_context_output_format_priority(
-    facade: OsintFacade, session: Session
-) -> None:
+def test_context_output_format_priority(facade: OsintFacade, session: Session) -> None:
     ctx = _ctx(facade, session, output_format="json")
     assert ctx.output_format() == "json"
     ctx = _ctx(facade, session, maltego=True)

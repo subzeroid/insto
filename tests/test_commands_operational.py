@@ -124,9 +124,7 @@ async def test_quota_json_export_writes_envelope(
     facade: OsintFacade, session: Session, console: Console, tmp_path: Path
 ) -> None:
     dest = tmp_path / "quota.json"
-    await dispatch(
-        f"/quota --json {dest}", facade=facade, session=session, console=console
-    )
+    await dispatch(f"/quota --json {dest}", facade=facade, session=session, console=console)
     body = json.loads(dest.read_text())
     assert body["command"] == "quota"
     assert body["data"] == {"remaining": 42, "limit": 100, "reset_at": 1700000000}
@@ -140,9 +138,7 @@ async def test_quota_json_export_writes_envelope(
 async def test_health_reports_backend_quota_and_no_error(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    payload = await dispatch(
-        "/health", facade=facade, session=session, console=console
-    )
+    payload = await dispatch("/health", facade=facade, session=session, console=console)
     assert payload["backend"] == "FakeBackend"
     assert payload["quota"] == {
         "remaining": 42,
@@ -162,9 +158,7 @@ async def test_health_surfaces_last_error_and_drift_counter(
     facade = OsintFacade(backend=backend, history=history, config=config)
     try:
         console = Console(record=True, color_system=None, width=160)
-        payload = await dispatch(
-            "/health", facade=facade, session=Session(), console=console
-        )
+        payload = await dispatch("/health", facade=facade, session=Session(), console=console)
         assert payload["schema_drifts"] == 1
         assert "SchemaDrift" in payload["last_error"]
         assert "missing field" in payload["last_error"]
@@ -180,9 +174,7 @@ async def test_health_surfaces_last_error_and_drift_counter(
 async def test_config_reports_each_key_with_origin(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    rows = await dispatch(
-        "/config", facade=facade, session=session, console=console
-    )
+    rows = await dispatch("/config", facade=facade, session=session, console=console)
     keys = {r["key"] for r in rows}
     assert {
         "hiker.token",
@@ -203,9 +195,7 @@ async def test_config_json_export_round_trip(
     facade: OsintFacade, session: Session, console: Console, tmp_path: Path
 ) -> None:
     dest = tmp_path / "cfg.json"
-    await dispatch(
-        f"/config --json {dest}", facade=facade, session=session, console=console
-    )
+    await dispatch(f"/config --json {dest}", facade=facade, session=session, console=console)
     body = json.loads(dest.read_text())
     assert body["command"] == "config"
     assert isinstance(body["data"], list)
@@ -223,9 +213,7 @@ async def test_purge_history_with_yes_flag_skips_confirmation(
     await facade.history.record_command_async("/info", "alice")
     await facade.history.record_command_async("/posts", "alice")
 
-    result = await dispatch(
-        "/purge history --yes", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/purge history --yes", facade=facade, session=session, console=console)
     assert result == {"kind": "history", "deleted": 2}
     assert facade.history.recent_commands(50) == []
 
@@ -274,9 +262,7 @@ async def test_purge_cache_wipes_history_and_snapshots(
         )
     )
 
-    result = await dispatch(
-        "/purge cache --yes", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/purge cache --yes", facade=facade, session=session, console=console)
     assert result["kind"] == "cache"
     assert result["cli_history_deleted"] == 1
     assert result["snapshots_deleted"] == 1
@@ -318,9 +304,7 @@ async def test_purge_aborts_when_user_declines(
         return False
 
     monkeypatch.setattr(op_module, "_confirm", decline)
-    result = await dispatch(
-        "/purge history", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/purge history", facade=facade, session=session, console=console)
     assert result == {"kind": "history", "deleted": 0, "aborted": True}
     assert facade.history.recent_commands(50)  # untouched
 
@@ -337,9 +321,7 @@ async def test_purge_proceeds_when_user_confirms(
         return True
 
     monkeypatch.setattr(op_module, "_confirm", accept)
-    result = await dispatch(
-        "/purge history", facade=facade, session=session, console=console
-    )
+    result = await dispatch("/purge history", facade=facade, session=session, console=console)
     assert result["kind"] == "history"
     assert result["deleted"] == 1
     assert facade.history.recent_commands(50) == []

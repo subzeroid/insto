@@ -160,9 +160,7 @@ class FakeBackend(OSINTBackend):
             if limit is not None and emitted >= limit:
                 return
 
-    async def iter_user_posts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_posts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         self.request_log.append(("iter_user_posts", (pk, limit)))
         self._consume_error("iter_user_posts")
         async for item in self._paged("iter_user_posts", self.posts.get(pk, []), limit):
@@ -173,9 +171,7 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[User]:
         self.request_log.append(("iter_user_followers", (pk, limit)))
         self._consume_error("iter_user_followers")
-        async for item in self._paged(
-            "iter_user_followers", self.followers.get(pk, []), limit
-        ):
+        async for item in self._paged("iter_user_followers", self.followers.get(pk, []), limit):
             yield item
 
     async def iter_user_following(
@@ -183,19 +179,13 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[User]:
         self.request_log.append(("iter_user_following", (pk, limit)))
         self._consume_error("iter_user_following")
-        async for item in self._paged(
-            "iter_user_following", self.following.get(pk, []), limit
-        ):
+        async for item in self._paged("iter_user_following", self.following.get(pk, []), limit):
             yield item
 
-    async def iter_user_tagged(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_tagged(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         self.request_log.append(("iter_user_tagged", (pk, limit)))
         self._consume_error("iter_user_tagged")
-        async for item in self._paged(
-            "iter_user_tagged", self.tagged.get(pk, []), limit
-        ):
+        async for item in self._paged("iter_user_tagged", self.tagged.get(pk, []), limit):
             yield item
 
     async def iter_user_highlights(
@@ -203,9 +193,7 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[Highlight]:
         self.request_log.append(("iter_user_highlights", (pk, limit)))
         self._consume_error("iter_user_highlights")
-        async for item in self._paged(
-            "iter_user_highlights", self.highlights.get(pk, []), limit
-        ):
+        async for item in self._paged("iter_user_highlights", self.highlights.get(pk, []), limit):
             yield item
 
     async def iter_highlight_items(
@@ -225,9 +213,7 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[Comment]:
         self.request_log.append(("iter_post_comments", (media_pk, limit)))
         self._consume_error("iter_post_comments")
-        async for item in self._paged(
-            "iter_post_comments", self.comments.get(media_pk, []), limit
-        ):
+        async for item in self._paged("iter_post_comments", self.comments.get(media_pk, []), limit):
             yield item
 
     async def iter_post_likers(
@@ -235,19 +221,13 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[User]:
         self.request_log.append(("iter_post_likers", (media_pk, limit)))
         self._consume_error("iter_post_likers")
-        async for item in self._paged(
-            "iter_post_likers", self.likers.get(media_pk, []), limit
-        ):
+        async for item in self._paged("iter_post_likers", self.likers.get(media_pk, []), limit):
             yield item
 
-    async def iter_user_stories(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Story]:
+    async def iter_user_stories(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Story]:
         self.request_log.append(("iter_user_stories", (pk, limit)))
         self._consume_error("iter_user_stories")
-        async for item in self._paged(
-            "iter_user_stories", self.stories.get(pk, []), limit
-        ):
+        async for item in self._paged("iter_user_stories", self.stories.get(pk, []), limit):
             yield item
 
     async def get_suggested(self, pk: str) -> list[User]:
@@ -260,9 +240,7 @@ class FakeBackend(OSINTBackend):
     ) -> AsyncIterator[Post]:
         self.request_log.append(("iter_hashtag_posts", (tag, limit)))
         self._consume_error("iter_hashtag_posts")
-        async for item in self._paged(
-            "iter_hashtag_posts", self.hashtag_posts.get(tag, []), limit
-        ):
+        async for item in self._paged("iter_hashtag_posts", self.hashtag_posts.get(tag, []), limit):
             yield item
 
     def get_quota(self) -> Quota:

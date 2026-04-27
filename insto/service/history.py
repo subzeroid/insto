@@ -105,9 +105,7 @@ def _with_lock_retry(func: Callable[[], T]) -> T:
             if "locked" not in str(exc).lower():
                 raise
             last_exc = exc
-    raise BackendError(
-        "sqlite is locked — another insto session running?"
-    ) from last_exc
+    raise BackendError("sqlite is locked — another insto session running?") from last_exc
 
 
 class HistoryStore:
@@ -208,9 +206,7 @@ class HistoryStore:
                         for v in range(current + 1, _SCHEMA_VERSION + 1):
                             sql = _MIGRATIONS.get(v)
                             if sql is None:
-                                raise BackendError(
-                                    f"missing migration for schema version {v}"
-                                )
+                                raise BackendError(f"missing migration for schema version {v}")
                             cur.executescript(sql)
                         cur.execute(
                             "UPDATE _meta SET value = ? WHERE key = 'schema_version'",
@@ -277,9 +273,7 @@ class HistoryStore:
                 "SELECT cmd, target, ts FROM cli_history ORDER BY ts DESC LIMIT ?",
                 (n,),
             ).fetchall()
-        return [
-            {"cmd": r["cmd"], "target": r["target"], "ts": r["ts"]} for r in rows
-        ]
+        return [{"cmd": r["cmd"], "target": r["target"], "ts": r["ts"]} for r in rows]
 
     async def recent_commands_async(self, n: int = 25) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self.recent_commands, n)
@@ -366,9 +360,7 @@ class HistoryStore:
         `target_pk` that does not equal `current.username`, oldest first).
         """
         last = self.last_snapshot(target_pk)
-        prior_names = [
-            n for n in self._all_snapshot_usernames(target_pk) if n != current.username
-        ]
+        prior_names = [n for n in self._all_snapshot_usernames(target_pk) if n != current.username]
         if last is None:
             return {
                 "first_seen": True,
@@ -486,9 +478,7 @@ class HistoryStore:
     def delete_watch(self, user: str) -> bool:
         def _do() -> int:
             with self._lock:
-                cur = self._conn.execute(
-                    "DELETE FROM watches WHERE user = ?", (user,)
-                )
+                cur = self._conn.execute("DELETE FROM watches WHERE user = ?", (user,))
                 return cur.rowcount
 
         return _with_lock_retry(_do) > 0
@@ -505,9 +495,7 @@ class HistoryStore:
                 cur = self._conn.cursor()
                 cur.execute("BEGIN IMMEDIATE")
                 try:
-                    cur.execute(
-                        "DELETE FROM cli_history WHERE ts < ?", (cutoff_history,)
-                    )
+                    cur.execute("DELETE FROM cli_history WHERE ts < ?", (cutoff_history,))
                     history_deleted = cur.rowcount
                     cur.execute(
                         "DELETE FROM snapshots WHERE captured_at < ?",
@@ -560,9 +548,7 @@ class HistoryStore:
                 if user is None:
                     cur = self._conn.execute("DELETE FROM snapshots")
                 else:
-                    cur = self._conn.execute(
-                        "DELETE FROM snapshots WHERE target_pk = ?", (user,)
-                    )
+                    cur = self._conn.execute("DELETE FROM snapshots WHERE target_pk = ?", (user,))
                 return cur.rowcount
 
         return _with_lock_retry(_do)

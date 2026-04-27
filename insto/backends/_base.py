@@ -53,27 +53,19 @@ class OSINTBackend(ABC):
         """Fetch the `user_about` payload (verification, dates, links)."""
 
     @abstractmethod
-    def iter_user_posts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_user_posts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate the user's feed posts in reverse chronological order."""
 
     @abstractmethod
-    def iter_user_followers(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[User]:
+    def iter_user_followers(self, pk: str, *, limit: int | None = None) -> AsyncIterator[User]:
         """Iterate the user's followers."""
 
     @abstractmethod
-    def iter_user_following(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[User]:
+    def iter_user_following(self, pk: str, *, limit: int | None = None) -> AsyncIterator[User]:
         """Iterate accounts the user is following."""
 
     @abstractmethod
-    def iter_user_tagged(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_user_tagged(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate posts the user is tagged in."""
 
     @abstractmethod
@@ -95,15 +87,11 @@ class OSINTBackend(ABC):
         """Iterate comments on a post."""
 
     @abstractmethod
-    def iter_post_likers(
-        self, media_pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[User]:
+    def iter_post_likers(self, media_pk: str, *, limit: int | None = None) -> AsyncIterator[User]:
         """Iterate users who liked a post."""
 
     @abstractmethod
-    def iter_user_stories(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Story]:
+    def iter_user_stories(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Story]:
         """Iterate currently-active stories of a user."""
 
     @abstractmethod
@@ -111,9 +99,7 @@ class OSINTBackend(ABC):
         """Fetch accounts suggested as similar to `pk`."""
 
     @abstractmethod
-    def iter_hashtag_posts(
-        self, tag: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_hashtag_posts(self, tag: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate top / recent posts under a hashtag."""
 
     @abstractmethod

@@ -72,8 +72,7 @@ def config(tmp_path: Path) -> Config:
 
 @pytest.fixture
 def backend() -> FakeBackend:
-    profiles = {str(i): Profile(pk=str(i), username=f"u{i}", access="public")
-                for i in range(1, 60)}
+    profiles = {str(i): Profile(pk=str(i), username=f"u{i}", access="public") for i in range(1, 60)}
     return FakeBackend(profiles=profiles)
 
 
@@ -263,9 +262,7 @@ async def test_batch_concurrency_is_capped(
 ) -> None:
     counters: dict[str, int] = {"current": 0, "max": 0}
     _register_counter_cmd(isolated_registry, counters=counters, delay=0.05)
-    targets_file = _file_with_targets(
-        tmp_path, [f"u{i}" for i in range(1, 13)]
-    )
+    targets_file = _file_with_targets(tmp_path, [f"u{i}" for i in range(1, 13)])
 
     await dispatch(
         f"/batch --concurrency 3 {targets_file} noop",
@@ -284,9 +281,7 @@ async def test_batch_clamps_concurrency_to_ceiling(
 ) -> None:
     counters: dict[str, int] = {"current": 0, "max": 0}
     _register_counter_cmd(isolated_registry, counters=counters, delay=0.02)
-    targets_file = _file_with_targets(
-        tmp_path, [f"u{i}" for i in range(1, 30)]
-    )
+    targets_file = _file_with_targets(tmp_path, [f"u{i}" for i in range(1, 30)])
 
     await dispatch(
         f"/batch --concurrency 50 --yes {targets_file} noop",

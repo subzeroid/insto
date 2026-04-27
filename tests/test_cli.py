@@ -198,9 +198,7 @@ def test_format_error_redacts_env_token(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_format_error_redacts_query_string() -> None:
-    err = BackendError(
-        "fetch failed: https://cdn.example.com/x.jpg?signature=abcDEFsig123&size=1"
-    )
+    err = BackendError("fetch failed: https://cdn.example.com/x.jpg?signature=abcDEFsig123&size=1")
     out = _format_error(err)
     assert "abcDEFsig123" not in out
     assert "signature=***" in out
@@ -246,9 +244,7 @@ def test_setup_writes_0600_with_token_and_proxy(capsys: pytest.CaptureFixture[st
 
 def test_setup_keeps_existing_token_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:
     cfgmod.write_config({"hiker": {"token": "existing-token-9999"}})
-    rc = _run_setup(
-        prompt=_scripted_prompt(["", "", "", ""])
-    )
+    rc = _run_setup(prompt=_scripted_prompt(["", "", "", ""]))
     assert rc == 0
     cfg = load_config()
     assert cfg.hiker_token == "existing-token-9999"
@@ -350,9 +346,7 @@ def test_setup_logging_info_skips_debug(tmp_path: Path) -> None:
     assert "visible info" in contents
 
 
-def test_log_redaction_strips_secrets(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_log_redaction_strips_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HIKERAPI_TOKEN", "log-token-1234567890")
     log_dir = tmp_path / "logs"
     log_path = setup_logging(logging.DEBUG, log_dir=log_dir)

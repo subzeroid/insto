@@ -198,9 +198,7 @@ async def highlights_cmd(ctx: CommandContext, username: str) -> Any:
 
     n = int(ctx.args.download)
     if n < 1 or n > len(highlights):
-        raise CommandUsageError(
-            f"--download {n}: out of range (have {len(highlights)} highlights)"
-        )
+        raise CommandUsageError(f"--download {n}: out of range (have {len(highlights)} highlights)")
     chosen = highlights[n - 1]
     items = await ctx.facade.highlight_items(chosen.pk)
 

@@ -55,9 +55,7 @@ def _load(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES / f"{name}.json").read_text())
 
 
-def _no_retry() -> Callable[
-    [Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]
-]:
+def _no_retry() -> Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]:
     async def _instant_sleep(_: float) -> None:  # pragma: no cover - never sleeps
         return None
 
@@ -78,6 +76,7 @@ def _make_backend(
 
 
 # ---------------------------------------------------------------- proxy URL
+
 
 def test_validate_proxy_url_accepts_http_https_socks() -> None:
     for url in (
@@ -130,6 +129,7 @@ def test_constructor_threads_proxy_into_httpx_client(monkeypatch: pytest.MonkeyP
 
 # ------------------------------------------------------------ chunk extractor
 
+
 def test_extract_chunk_list_form() -> None:
     items, cursor = _extract_chunk([[{"pk": "1"}, {"pk": "2"}], "next-x"])
     assert [i["pk"] for i in items] == ["1", "2"]
@@ -157,6 +157,7 @@ def test_extract_chunk_terminates_when_cursor_falsy() -> None:
 
 
 # ------------------------------------------------------------ resolve_target
+
 
 @pytest.mark.asyncio
 async def test_resolve_target_returns_pk_from_payload() -> None:
@@ -217,9 +218,7 @@ async def test_resolve_target_403_maps_to_banned() -> None:
 @pytest.mark.asyncio
 async def test_resolve_target_429_maps_to_rate_limited_with_retry_after() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            429, json={"detail": "slow down"}, headers={"retry-after": "12"}
-        )
+        return httpx.Response(429, json={"detail": "slow down"}, headers={"retry-after": "12"})
 
     backend = _make_backend(handler)
     with pytest.raises(RateLimited) as exc:
@@ -261,6 +260,7 @@ async def test_resolve_target_schema_drift_when_pk_missing() -> None:
 
 # ----------------------------------------------------------------- get_profile
 
+
 @pytest.mark.asyncio
 async def test_get_profile_maps_dto() -> None:
     profile = _load("profile_public")
@@ -288,6 +288,7 @@ async def test_get_user_about_returns_payload_dict() -> None:
 
 
 # ---------------------------------------------------------------- quota header
+
 
 @pytest.mark.asyncio
 async def test_quota_header_parsed_from_response() -> None:
@@ -331,14 +332,15 @@ async def test_quota_header_parsed_from_ratelimit_aliases() -> None:
 
 # -------------------------------------------------------------- iter cursoring
 
+
 @pytest.mark.asyncio
 async def test_iter_user_posts_advances_cursor_and_terminates() -> None:
     """Two pages of 12 then an empty page → 24 items, cursor flow honoured."""
 
-    page_a = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1}
-              for i in range(12)]
-    page_b = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1}
-              for i in range(12, 24)]
+    page_a = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1} for i in range(12)]
+    page_b = [
+        {"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1} for i in range(12, 24)
+    ]
     cursors_seen: list[str | None] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -360,12 +362,13 @@ async def test_iter_user_posts_advances_cursor_and_terminates() -> None:
 async def test_iter_user_posts_respects_limit_and_does_not_overfetch() -> None:
     """`limit=15` should fetch page 1 (12 items) + page 2 (3 items needed) only."""
 
-    page_a = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1}
-              for i in range(12)]
-    page_b = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1}
-              for i in range(12, 24)]
-    page_c = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1}
-              for i in range(24, 36)]
+    page_a = [{"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1} for i in range(12)]
+    page_b = [
+        {"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1} for i in range(12, 24)
+    ]
+    page_c = [
+        {"pk": str(i), "code": f"c{i}", "taken_at": 1, "media_type": 1} for i in range(24, 36)
+    ]
     requests_made = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -412,9 +415,7 @@ async def test_iter_user_followers_uses_max_id_cursor() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         cursors_seen.append(request.url.params.get("max_id") or None)
         if cursors_seen[-1] is None:
-            return httpx.Response(
-                200, json={"users": [user_short], "next_max_id": "next-1"}
-            )
+            return httpx.Response(200, json={"users": [user_short], "next_max_id": "next-1"})
         return httpx.Response(200, json={"users": [], "next_max_id": None})
 
     backend = _make_backend(handler)
@@ -478,6 +479,7 @@ async def test_iter_chunks_skips_non_dict_item_with_schema_drift() -> None:
 
 # ---------------------------------------------------------------- post mapping
 
+
 @pytest.mark.asyncio
 async def test_iter_user_posts_maps_post_dto_correctly() -> None:
     post_image = _load("post_image")
@@ -494,6 +496,7 @@ async def test_iter_user_posts_maps_post_dto_correctly() -> None:
 
 
 # --------------------------------------------------------------- last_error
+
 
 @pytest.mark.asyncio
 async def test_last_error_records_taxonomy_error() -> None:

@@ -181,15 +181,15 @@ def _make_sample(cls: type) -> object:
     if cls is Post:
         return Post(pk="1", code="A", taken_at=0, media_type="image")
     if cls is Comment:
-        return Comment(pk="1", media_pk="m", user_pk="u", user_username="x", text="t",
-                       created_at=0)
+        return Comment(pk="1", media_pk="m", user_pk="u", user_username="x", text="t", created_at=0)
     if cls is Story:
         return Story(pk="1", taken_at=0, expires_at=1, media_type="image", media_url="u")
     if cls is Highlight:
         return Highlight(pk="1", title="t")
     if cls is HighlightItem:
-        return HighlightItem(pk="1", highlight_pk="h", taken_at=0, media_type="image",
-                             media_url="u")
+        return HighlightItem(
+            pk="1", highlight_pk="h", taken_at=0, media_type="image", media_url="u"
+        )
     if cls is Quota:
         return Quota(remaining=None)
     if cls is WatchSpec:

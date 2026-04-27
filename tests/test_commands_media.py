@@ -62,10 +62,7 @@ def _profile() -> Profile:
 
 
 def _post(pk: str, *, code: str, mt: str = "image", taken_at: int = 1_700_000_000) -> Post:
-    url = (
-        "https://scontent.cdninstagram.com/"
-        f"{pk}.{'mp4' if mt == 'video' else 'jpg'}"
-    )
+    url = f"https://scontent.cdninstagram.com/{pk}.{'mp4' if mt == 'video' else 'jpg'}"
     return Post(
         pk=pk,
         code=code,
@@ -90,8 +87,9 @@ def _story(pk: str, *, taken_at: int = 1_700_000_000) -> Story:
 
 
 def _highlight(pk: str, *, title: str = "h", item_count: int = 0) -> Highlight:
-    return Highlight(pk=pk, title=title, item_count=item_count, owner_pk="42",
-                     owner_username="alice")
+    return Highlight(
+        pk=pk, title=title, item_count=item_count, owner_pk="42", owner_username="alice"
+    )
 
 
 def _highlight_item(pk: str, highlight_pk: str, *, taken_at: int = 1_700_000_000) -> HighlightItem:
@@ -115,8 +113,10 @@ def backend() -> FakeBackend:
     ]
     tagged = [_post("t1", code="T1"), _post("t2", code="T2")]
     stories = [_story("s1"), _story("s2")]
-    highlights = [_highlight("h1", title="travels", item_count=2),
-                  _highlight("h2", title="food", item_count=1)]
+    highlights = [
+        _highlight("h1", title="travels", item_count=2),
+        _highlight("h2", title="food", item_count=1),
+    ]
     items = {
         "h1": [_highlight_item("hi1", "h1"), _highlight_item("hi2", "h1")],
         "h2": [_highlight_item("hi3", "h2")],
@@ -229,9 +229,7 @@ async def test_stories_downloads_to_correct_dir_with_taken_at_mtime(
 ) -> None:
     facade = _make_cdn_facade(backend, history, config)
     try:
-        out = await dispatch(
-            "/stories", facade=facade, session=session, console=recording_console
-        )
+        out = await dispatch("/stories", facade=facade, session=session, console=recording_console)
     finally:
         await facade.aclose()
     assert isinstance(out, list) and len(out) == 2
@@ -252,9 +250,7 @@ async def test_stories_empty_reports_friendly_message(
 ) -> None:
     backend.stories = {}
     facade = OsintFacade(backend=backend, history=history, config=config)
-    out = await dispatch(
-        "/stories", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/stories", facade=facade, session=session, console=recording_console)
     assert out == []
     assert "no active stories" in _captured(recording_console)
 
@@ -288,9 +284,7 @@ async def test_highlights_default_renders_tree(
     recording_console: Console,
 ) -> None:
     facade = OsintFacade(backend=backend, history=history, config=config)
-    out = await dispatch(
-        "/highlights", facade=facade, session=session, console=recording_console
-    )
+    out = await dispatch("/highlights", facade=facade, session=session, console=recording_console)
     assert isinstance(out, list) and len(out) == 2
     text = _captured(recording_console)
     assert "travels" in text
@@ -342,9 +336,7 @@ async def test_highlights_download_no_download_prints_urls(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     facade = OsintFacade(backend=backend, history=history, config=config)
-    await dispatch(
-        "/highlights --download 1 --no-download", facade=facade, session=session
-    )
+    await dispatch("/highlights --download 1 --no-download", facade=facade, session=session)
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines == [
         "https://scontent.cdninstagram.com/hi_hi1.jpg",
@@ -427,9 +419,7 @@ async def test_posts_downloads_to_disk_with_correct_layout(
 
     facade = _make_cdn_facade(backend, history, config, handler=handler)
     try:
-        out = await dispatch(
-            "/posts 2", facade=facade, session=session, console=recording_console
-        )
+        out = await dispatch("/posts 2", facade=facade, session=session, console=recording_console)
     finally:
         await facade.aclose()
     paths: list[Path] = list(out)
@@ -501,9 +491,7 @@ async def test_posts_per_resource_byte_budget_propagates(
     facade._stream = small_budget_stream  # type: ignore[method-assign]
     try:
         with pytest.raises(BackendError, match="byte budget"):
-            await dispatch(
-                "/posts 1", facade=facade, session=session, console=recording_console
-            )
+            await dispatch("/posts 1", facade=facade, session=session, console=recording_console)
     finally:
         facade._stream = original_stream  # type: ignore[method-assign]
         await facade.aclose()
@@ -605,9 +593,7 @@ async def test_tagged_downloads_to_owner_username_dir(
 ) -> None:
     facade = _make_cdn_facade(backend, history, config)
     try:
-        out = await dispatch(
-            "/tagged 1", facade=facade, session=session, console=recording_console
-        )
+        out = await dispatch("/tagged 1", facade=facade, session=session, console=recording_console)
     finally:
         await facade.aclose()
     paths: list[Path] = list(out)

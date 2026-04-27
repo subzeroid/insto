@@ -139,21 +139,16 @@ async def watch_cmd(ctx: CommandContext) -> dict[str, Any]:
     elif ctx.session.target:
         username = ctx.session.target
     else:
-        raise CommandUsageError(
-            "no target set — pass a username or run /target <user> first"
-        )
+        raise CommandUsageError("no target set — pass a username or run /target <user> first")
     if not username:
         raise CommandUsageError("usage: /watch <username> [interval-seconds]")
 
     interval = (
-        int(ctx.args.interval)
-        if ctx.args.interval is not None
-        else DEFAULT_WATCH_INTERVAL_SECONDS
+        int(ctx.args.interval) if ctx.args.interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
     )
     if interval < MIN_WATCH_INTERVAL_SECONDS:
         raise CommandUsageError(
-            f"interval must be at least {MIN_WATCH_INTERVAL_SECONDS} seconds "
-            f"(got {interval})"
+            f"interval must be at least {MIN_WATCH_INTERVAL_SECONDS} seconds (got {interval})"
         )
 
     tick = _build_tick(ctx, username)

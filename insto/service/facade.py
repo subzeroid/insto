@@ -401,7 +401,11 @@ class OsintFacade:
             async with self._budget_lock:
                 self._command_bytes_used -= reservation
             raise
-        actual = 0
+        # Default to the full reservation if stat() fails: bytes were
+        # written (stream_to_file returned a path), so refunding to 0
+        # would silently disable the per-command byte budget across
+        # repeated stat failures. Pessimistic accounting is correct here.
+        actual = reservation
         with contextlib.suppress(OSError):
             actual = path.stat().st_size
         async with self._budget_lock:

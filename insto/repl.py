@@ -248,25 +248,33 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     """Construct facade + cleanup closure. Separated so tests can stub it."""
     cfg = config if config is not None else load_config()
 
-    from insto.backends import make_backend
-    from insto.service.facade import OsintFacade
-    from insto.service.history import HistoryStore
-
-    backend = make_backend("hiker", token=cfg.hiker_token, proxy=cfg.hiker_proxy)
-    history = HistoryStore(cfg.db_path)
     # Reuse a single httpx client across CDN downloads so HTTP/2 connection
     # reuse + TLS session resumption work for the whole REPL session. The
     # facade owns the client and closes it via aclose(). Same proxy as the
     # backend API client — see cli._run_oneshot for the rationale.
     import httpx as _httpx
 
+    from insto.backends import make_backend
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
+    from insto.service.facade import OsintFacade
+    from insto.service.history import HistoryStore
 
-    cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
-    if cfg.hiker_proxy:
-        cdn_kwargs["proxy"] = cfg.hiker_proxy
-    cdn_client = _httpx.AsyncClient(**cdn_kwargs)
-    facade = OsintFacade(backend=backend, history=history, config=cfg, cdn_client=cdn_client)
+    # Open the sqlite store first: it is the most likely step to raise
+    # (permissions, disk, schema migration) and is the only resource that
+    # needs sync cleanup. Backend and cdn clients are constructed last so
+    # a `HistoryStore(...)` failure does not leak network sockets.
+    history = HistoryStore(cfg.db_path)
+    try:
+        backend = make_backend("hiker", token=cfg.hiker_token, proxy=cfg.hiker_proxy)
+        cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
+        if cfg.hiker_proxy:
+            cdn_kwargs["proxy"] = cfg.hiker_proxy
+        cdn_client = _httpx.AsyncClient(**cdn_kwargs)
+        facade = OsintFacade(backend=backend, history=history, config=cfg, cdn_client=cdn_client)
+    except BaseException:
+        with contextlib.suppress(Exception):
+            history.close()
+        raise
 
     async def cleanup() -> None:
         # Cancel watches and close the backend BEFORE the history store —

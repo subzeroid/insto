@@ -469,7 +469,7 @@ async def test_export_rejects_maltego(
     session: Session,
 ) -> None:
     session.set_target("alice")
-    with pytest.raises(CommandUsageError, match="only supports JSON"):
+    with pytest.raises(CommandUsageError, match="cannot be exported as Maltego"):
         await dispatch("/export --maltego", facade=facade, session=session)
 
 

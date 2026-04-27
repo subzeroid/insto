@@ -404,10 +404,17 @@ async def _run_oneshot(
     # so an OSError from the sqlite open (disk full, EACCES, read-only FS) or
     # a constructor failure does not escape `asyncio.run` as a raw traceback —
     # which would bypass `redact_secrets` and could leak path/secret info.
+    # Open sqlite first — it is the only step likely to fail with a real
+    # I/O error (permissions / disk / schema migration). Constructing the
+    # backend and cdn clients afterwards means a HistoryStore failure does
+    # not leak network sockets, and a later failure can be cleaned up with
+    # the async aclose() calls below since we are already in an event loop.
     history: HistoryStore | None = None
+    backend: Any = None
+    cdn_client: Any = None
     try:
-        backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
         history = HistoryStore(config.db_path)
+        backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
         cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
         if config.hiker_proxy:
             cdn_kwargs["proxy"] = config.hiker_proxy
@@ -416,6 +423,12 @@ async def _run_oneshot(
     except Exception as exc:
         log.exception("one-shot bootstrap failed")
         print(_format_error(exc), file=sys.stderr)
+        if cdn_client is not None:
+            with contextlib.suppress(Exception):
+                await cdn_client.aclose()
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                await backend.aclose()
         if history is not None:
             with contextlib.suppress(Exception):
                 history.close()

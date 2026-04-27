@@ -245,9 +245,26 @@ def test_validate_rejects_csv_on_non_flat_via_output_format() -> None:
         validate_global_flags("info", _ns(output_format="csv"))
 
 
-def test_validate_allows_maltego_on_any_command() -> None:
-    validate_global_flags("info", _ns(maltego=True))  # no raise
-    validate_global_flags("info", _ns(output_format="maltego"))  # no raise
+def test_validate_rejects_maltego_on_non_eligible_command() -> None:
+    with pytest.raises(CommandUsageError, match="cannot be exported as Maltego"):
+        validate_global_flags("info", _ns(maltego=True))
+    with pytest.raises(CommandUsageError, match="cannot be exported as Maltego"):
+        validate_global_flags("info", _ns(output_format="maltego"))
+
+
+def test_validate_allows_maltego_on_eligible_command() -> None:
+    validate_global_flags("followers", _ns(maltego=True))  # no raise
+    validate_global_flags("hashtags", _ns(output_format="maltego"))  # no raise
+
+
+def test_validate_rejects_negative_limit() -> None:
+    with pytest.raises(CommandUsageError, match="--limit must be >= 0"):
+        validate_global_flags("info", _ns(limit=-1))
+
+
+def test_validate_allows_zero_and_positive_limit() -> None:
+    validate_global_flags("info", _ns(limit=0))  # no raise (0 = no cap)
+    validate_global_flags("info", _ns(limit=10))  # no raise
 
 
 # ---------------------------------------------------------------------------

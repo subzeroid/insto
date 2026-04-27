@@ -31,7 +31,7 @@ from difflib import get_close_matches
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from insto.service.exporter import CSV_FLAT_COMMANDS
+from insto.service.exporter import CSV_FLAT_COMMANDS, MALTEGO_COMMANDS
 
 if TYPE_CHECKING:  # avoid import cycle at runtime; only used for typing
     from rich.console import Console, RenderableType
@@ -279,7 +279,7 @@ def build_parser_for(spec: CommandSpec) -> argparse.ArgumentParser:
 
 
 def validate_global_flags(name: str, args: argparse.Namespace) -> None:
-    """Apply mutual-exclusion rules and flat-only CSV check."""
+    """Apply mutual-exclusion rules and flat-only CSV / Maltego checks."""
     if args.json is not None and args.csv is not None:
         raise CommandUsageError("--json and --csv are mutually exclusive; pick one")
     if args.maltego and args.output_format and args.output_format != "maltego":
@@ -287,6 +287,8 @@ def validate_global_flags(name: str, args: argparse.Namespace) -> None:
             "--maltego conflicts with --output-format "
             f"{args.output_format!r}; --maltego is short for --output-format maltego"
         )
+    if getattr(args, "limit", None) is not None and args.limit < 0:
+        raise CommandUsageError("--limit must be >= 0 (0 means no cap)")
     fmt = args.output_format
     if args.maltego:
         fmt = "maltego"
@@ -299,6 +301,12 @@ def validate_global_flags(name: str, args: argparse.Namespace) -> None:
         raise CommandUsageError(
             f"/{name} cannot be exported as CSV (output is not flat). "
             f"Use --json instead. Flat-row commands: {flat}"
+        )
+    if fmt == "maltego" and name not in MALTEGO_COMMANDS:
+        eligible = ", ".join(sorted(MALTEGO_COMMANDS))
+        raise CommandUsageError(
+            f"/{name} cannot be exported as Maltego CSV (no canonical entity per row). "
+            f"Maltego-eligible commands: {eligible}"
         )
 
 

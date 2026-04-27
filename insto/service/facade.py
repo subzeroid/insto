@@ -22,6 +22,7 @@ returns the path actually written so the command can render it.
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from pathlib import Path
 from typing import IO, Any
@@ -321,7 +322,7 @@ class OsintFacade:
         return await self._stream(item.media_url, dest_dir / item.pk, taken_at=item.taken_at)
 
     def _media_dir(self, username: str, kind: str) -> Path:
-        cleaned = username.lstrip("@") or "_"
+        cleaned = _safe_path_segment(username.lstrip("@")) or "_"
         path = self.config.output_dir / cleaned / kind
         path.mkdir(parents=True, exist_ok=True)
         return path
@@ -352,3 +353,24 @@ class OsintFacade:
         if self._cdn_client is not None:
             await self._cdn_client.aclose()
             self._cdn_client = None
+
+
+_SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _safe_path_segment(value: str) -> str:
+    """Return `value` if it is safe to use as a single filesystem path segment.
+
+    Defense-in-depth: backend DTO fields (e.g. `Profile.username`,
+    `Post.owner_username`, `Post.pk`) flow into `<output>/<user>/...`
+    paths. Instagram constrains usernames server-side, but the rest of the
+    codebase rejects path-meta characters at the user-input boundary; we
+    apply the same guard at the backend boundary so a hostile / drifted
+    payload can never escape `output_dir`. Returns `""` if the value is not
+    safe — the caller should substitute `_` in that case.
+    """
+    if not value or value in (".", ".."):
+        return ""
+    if not _SAFE_SEGMENT_RE.fullmatch(value):
+        return ""
+    return value

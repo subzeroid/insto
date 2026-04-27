@@ -84,7 +84,11 @@ async def propic_cmd(ctx: CommandContext, username: str) -> Path | None:
     if not profile.avatar_url:
         ctx.print(f"@{username} has no profile picture URL")
         return None
-    dest_dir = ctx.facade._media_dir(profile.username, "propic")
+    # Use the already-validated `username` rather than the network-sourced
+    # `profile.username` as the path segment. The two are identical for any
+    # well-formed Instagram response; passing the validated one keeps the
+    # path-traversal guard at the user-input boundary.
+    dest_dir = ctx.facade._media_dir(username, "propic")
     dest = dest_dir / profile.pk
     out = await download_or_print_url(
         ctx.facade,

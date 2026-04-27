@@ -55,6 +55,7 @@ CSV_FLAT_COMMANDS: frozenset[str] = frozenset(
         "mentions",
         "locations",
         "captions",
+        "posts",
     }
 )
 

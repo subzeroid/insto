@@ -74,6 +74,23 @@ def _export_json(
     )
 
 
+def _post_to_flat_row(post: Post) -> dict[str, Any]:
+    return {
+        "pk": post.pk,
+        "code": post.code,
+        "taken_at": post.taken_at,
+        "media_type": post.media_type,
+        "owner_username": post.owner_username or "",
+        "like_count": post.like_count,
+        "comment_count": post.comment_count,
+        "caption": post.caption,
+        "location_name": post.location_name or "",
+        "hashtags": post.hashtags,
+        "mentions": post.mentions,
+        "media_urls": post.media_urls,
+    }
+
+
 async def _emit_posts(
     ctx: CommandContext,
     *,
@@ -84,14 +101,30 @@ async def _emit_posts(
 ) -> Any:
     """Shared output path for `/posts`, `/reels`, `/tagged`.
 
-    Three modes, picked in this order:
+    Four modes, picked in this order:
 
-      1. `--json`           → write JSON envelope, no render, no download.
-      2. `--no-download`    → print one URL per media file, no render.
-      3. default            → render media grid, then download every URL via
+      1. `--csv`            → flatten to one row per post and write CSV.
+      2. `--json`           → write JSON envelope, no render, no download.
+      3. `--no-download`    → print one URL per media file, no render.
+      4. default            → render media grid, then download every URL via
                               the facade CDN streamer.
+
+    CSV is only declared flat for `posts` in `CSV_FLAT_COMMANDS`; reels /
+    tagged still reject `--csv` at the global-flag check.
     """
-    if ctx.output_format() == "json":
+    fmt = ctx.output_format()
+    if fmt == "csv":
+        rows = [_post_to_flat_row(p) for p in posts]
+        dest_arg = ctx.args.csv if ctx.args.csv is not None else ""
+        ctx.facade.export_csv(
+            rows,
+            command=command_name,
+            target=username,
+            dest=resolve_export_dest(dest_arg),
+        )
+        return posts
+
+    if fmt == "json":
         _export_json(
             ctx,
             [dataclasses.asdict(p) for p in posts],
@@ -224,6 +257,7 @@ async def highlights_cmd(ctx: CommandContext, username: str) -> Any:
     "posts",
     "Fetch the last N feed posts of the active target (default 12)",
     add_args=_add_count_arg(12),
+    csv=True,
 )
 @with_target
 async def posts_cmd(ctx: CommandContext, username: str) -> Any:

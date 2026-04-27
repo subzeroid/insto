@@ -371,6 +371,30 @@ async def test_download_propic_no_avatar_returns_none(facade: OsintFacade) -> No
     assert await facade.download_propic(profile) is None
 
 
+async def test_download_propic_rejects_traversal_in_dto_username(
+    backend: FakeBackend, history: HistoryStore, config: Config
+) -> None:
+    """Defense-in-depth: a hostile/drifted DTO username must not escape output_dir."""
+    profile = _profile(pk="42", username="../../etc/passwd", avatar_url=f"https://{CDN_HOST}/a")
+
+    body = _pad(JPEG_MAGIC)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=body)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=client)
+    try:
+        out = await facade.download_propic(profile)
+    finally:
+        await facade.aclose()
+
+    assert out is not None
+    # The unsafe segment is replaced with `_`; final path stays under output_dir.
+    assert out.is_relative_to(config.output_dir)
+    assert ".." not in out.parts
+
+
 async def test_download_post_media_multi_url(
     backend: FakeBackend, history: HistoryStore, config: Config
 ) -> None:

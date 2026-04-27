@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 import tomli_w
 
+from insto._redact import register_secret
 from insto.exceptions import BackendError
 
 CONFIG_HOME_ENV = "INSTO_HOME"
@@ -150,6 +151,16 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         cli, "db_path", ENV_DB_PATH, toml_data.get("db_path"), str(db_path())
     )
     sources["cli_history_path"] = "default"
+
+    # Register the resolved token / proxy with the redaction set so any error
+    # message that happens to echo them (SDK exception strings, httpx logs,
+    # tracebacks containing constructor args) is scrubbed before reaching
+    # stderr or the rotating log file. `register_secret` is a no-op for
+    # values shorter than 4 chars, so empty/short fixtures are safe.
+    if isinstance(token, str):
+        register_secret(token)
+    if isinstance(proxy, str):
+        register_secret(proxy)
 
     return Config(
         hiker_token=token,

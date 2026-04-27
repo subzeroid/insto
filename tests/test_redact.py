@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from insto._redact import redact_secrets
+from insto._redact import clear_registered_secrets, redact_secrets, register_secret
+
+
+@pytest.fixture(autouse=True)
+def _reset_registered_secrets() -> None:
+    clear_registered_secrets()
 
 
 def test_no_secrets_passthrough() -> None:
@@ -51,3 +56,34 @@ def test_short_env_token_not_substituted(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_no_env_token_no_change(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HIKERAPI_TOKEN", raising=False)
     assert redact_secrets("nothing here") == "nothing here"
+
+
+def test_registered_token_is_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A token loaded from config.toml (not from $HIKERAPI_TOKEN) must redact."""
+    monkeypatch.delenv("HIKERAPI_TOKEN", raising=False)
+    register_secret("toml-token-9876543210")
+    text = "auth failed for token toml-token-9876543210 in handler"
+    out = redact_secrets(text)
+    assert "toml-token-9876543210" not in out
+    assert "***" in out
+
+
+def test_registered_short_value_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("HIKERAPI_TOKEN", raising=False)
+    register_secret("abc")
+    assert redact_secrets("abc xyz abc") == "abc xyz abc"
+
+
+def test_proxy_userinfo_is_redacted() -> None:
+    text = "proxy connect failed for socks5://alice:hunter2@proxy.example.com:1080"
+    out = redact_secrets(text)
+    assert "alice" not in out
+    assert "hunter2" not in out
+    assert "***:***@proxy.example.com:1080" in out
+
+
+def test_clear_registered_secrets() -> None:
+    register_secret("removable-secret-1234")
+    assert "***" in redact_secrets("see removable-secret-1234 here")
+    clear_registered_secrets()
+    assert redact_secrets("see removable-secret-1234 here") == "see removable-secret-1234 here"

@@ -553,13 +553,6 @@ class HistoryStore:
 
         return _with_lock_retry(_do)
 
-    def purge_cache(self) -> dict[str, int]:
-        """Drop history + snapshots; keep watches (they are user intent, not cache)."""
-        return {
-            "cli_history_deleted": self.purge_history(),
-            "snapshots_deleted": self.purge_snapshots(),
-        }
-
 
 def _row_to_watchspec(row: sqlite3.Row) -> WatchSpec:
     status = row["status"] if row["status"] in ("active", "paused") else "active"

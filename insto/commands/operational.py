@@ -7,12 +7,12 @@ and they never download media.
 
 `/purge` is the only mutating command. It refuses to run without an
 interactive `y/N` confirmation unless `--yes` is passed (which the global
-parser already exposes), and it dispatches to the relevant `HistoryStore`
-purge method based on the positional `kind` argument:
+parser already exposes), and it dispatches to the relevant store based on
+the positional `kind` argument:
 
     /purge history    → wipe `cli_history`
     /purge snapshots  → wipe `snapshots` (optionally for one --user)
-    /purge cache      → wipe both `cli_history` and `snapshots`
+    /purge cache      → wipe `./output/` (downloaded media + exports)
 
 Watches are intentionally not purgeable here — they are user-declared
 intent, not cache, and the user already has `/unwatch` for that.
@@ -23,6 +23,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import dataclasses
+import shutil
+from pathlib import Path
 from typing import Any
 
 from insto.commands._base import (
@@ -153,6 +155,25 @@ async def _confirm(ctx: CommandContext, message: str) -> bool:
     return answer.strip().lower() in {"y", "yes"}
 
 
+def _purge_output_dir(output_dir: Path) -> int:
+    """Recursively remove every entry directly under `output_dir`.
+
+    The directory itself is preserved so subsequent commands keep a stable
+    write target. Returns the number of top-level entries removed. Missing
+    or empty trees count as zero deletions, never as errors.
+    """
+    if not output_dir.exists() or not output_dir.is_dir():
+        return 0
+    removed = 0
+    for entry in output_dir.iterdir():
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.rmtree(entry)
+        else:
+            entry.unlink()
+        removed += 1
+    return removed
+
+
 @command(
     "purge",
     "Wipe sqlite-backed history, snapshots, or both (cache)",
@@ -181,13 +202,11 @@ async def purge_cmd(ctx: CommandContext) -> dict[str, Any]:
         result = {"kind": "snapshots", "deleted": deleted, "user": user_filter}
         scope = f" for {user_filter}" if user_filter else ""
         ctx.print(f"deleted {deleted} snapshot row(s){scope}")
-    else:  # cache
-        counts = await asyncio.to_thread(history.purge_cache)
-        result = {"kind": "cache", **counts}
-        ctx.print(
-            f"deleted {counts['cli_history_deleted']} cli_history row(s) "
-            f"and {counts['snapshots_deleted']} snapshot row(s)"
-        )
+    else:  # cache — wipe the on-disk media/export tree per spec §10
+        output_dir = ctx.facade.config.output_dir
+        deleted = await asyncio.to_thread(_purge_output_dir, output_dir)
+        result = {"kind": "cache", "deleted": deleted, "output_dir": str(output_dir)}
+        ctx.print(f"deleted {deleted} entr(ies) under {output_dir}")
 
     fmt = ctx.output_format()
     if fmt == "json":

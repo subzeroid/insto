@@ -294,17 +294,6 @@ def test_purge_snapshots_specific_user(store: HistoryStore) -> None:
     assert store.last_snapshot("B") is not None
 
 
-def test_purge_cache_keeps_watches(store: HistoryStore) -> None:
-    store.record_command("/info", "@alice")
-    store.add_snapshot(store.snapshot_from_profile(_make_profile(pk="X"), post_pks=[]))
-    store.add_watch(WatchSpec(user="@alice", interval_seconds=600))
-
-    summary = store.purge_cache()
-    assert summary["cli_history_deleted"] >= 1
-    assert summary["snapshots_deleted"] >= 1
-    assert store.list_watches() != []  # watches survive
-
-
 @pytest.mark.asyncio
 async def test_async_record_does_not_block_loop(store: HistoryStore) -> None:
     """An async wrapper that runs a slow sync op via to_thread must not block.

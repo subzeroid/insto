@@ -513,6 +513,25 @@ async def test_posts_json_export_writes_default_path(
     assert payload["data"][0]["pk"] == "p1"
 
 
+async def test_posts_csv_export_writes_flat_rows(
+    backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    await dispatch("/posts 2 --csv", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "posts.csv"
+    assert out_path.exists()
+    body = out_path.read_text()
+    header = body.splitlines()[0].split(",")
+    assert "pk" in header
+    assert "media_type" in header
+    assert "owner_username" in header
+    # Two data rows besides the header.
+    assert len(body.strip().splitlines()) == 3
+
+
 # ---------------------------------------------------------------------------
 # /reels
 # ---------------------------------------------------------------------------

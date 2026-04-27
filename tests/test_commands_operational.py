@@ -249,7 +249,46 @@ async def test_purge_snapshots_with_user_filter(
     assert facade.history.last_snapshot("2") is not None
 
 
-async def test_purge_cache_wipes_history_and_snapshots(
+async def test_purge_cache_wipes_output_dir(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    out = facade.config.output_dir
+    out.mkdir(parents=True, exist_ok=True)
+    user_dir = out / "alice"
+    user_dir.mkdir()
+    (user_dir / "info.json").write_text("{}")
+    (out / "loose.csv").write_text("a,b\n")
+
+    result = await dispatch("/purge cache --yes", facade=facade, session=session, console=console)
+
+    assert result["kind"] == "cache"
+    assert result["deleted"] == 2
+    assert out.exists() and out.is_dir()
+    assert list(out.iterdir()) == []
+
+
+async def test_purge_cache_handles_missing_output_dir(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    out = facade.config.output_dir
+    if out.exists():
+        for child in out.iterdir():
+            if child.is_dir():
+                import shutil as _sh
+
+                _sh.rmtree(child)
+            else:
+                child.unlink()
+        out.rmdir()
+    assert not out.exists()
+
+    result = await dispatch("/purge cache --yes", facade=facade, session=session, console=console)
+
+    assert result["kind"] == "cache"
+    assert result["deleted"] == 0
+
+
+async def test_purge_cache_does_not_touch_sqlite(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
     await facade.history.record_command_async("/info", "alice")
@@ -262,10 +301,9 @@ async def test_purge_cache_wipes_history_and_snapshots(
         )
     )
 
-    result = await dispatch("/purge cache --yes", facade=facade, session=session, console=console)
-    assert result["kind"] == "cache"
-    assert result["cli_history_deleted"] == 1
-    assert result["snapshots_deleted"] == 1
+    await dispatch("/purge cache --yes", facade=facade, session=session, console=console)
+
+    assert facade.history.last_snapshot("1") is not None
 
 
 async def test_purge_user_filter_rejected_for_history(

@@ -34,6 +34,7 @@ from insto.backends.hiker import (
     HikerBackend,
     _extract_chunk,
     _normalise_cursor,
+    _parse_retry_after,
     _validate_proxy_url,
 )
 from insto.exceptions import (
@@ -252,6 +253,24 @@ async def test_resolve_target_429_maps_to_rate_limited_with_retry_after() -> Non
     with pytest.raises(RateLimited) as exc:
         await backend.resolve_target("anyone")
     assert exc.value.retry_after == pytest.approx(12.0)
+
+
+def test_parse_retry_after_treats_reset_header_as_absolute_timestamp() -> None:
+    # `x-quota-reset` / `x-ratelimit-reset` are absolute Unix timestamps;
+    # they must be converted to a relative delta, not interpreted as seconds.
+    headers = httpx.Headers({"x-quota-reset": "1700000045"})
+    delta = _parse_retry_after(headers, now=1700000000.0)
+    assert delta == pytest.approx(45.0)
+
+
+def test_parse_retry_after_prefers_retry_after_over_reset() -> None:
+    headers = httpx.Headers({"retry-after": "5", "x-quota-reset": "1700000045"})
+    assert _parse_retry_after(headers, now=1700000000.0) == pytest.approx(5.0)
+
+
+def test_parse_retry_after_clamps_past_reset_to_zero() -> None:
+    headers = httpx.Headers({"x-ratelimit-reset": "1700000000"})
+    assert _parse_retry_after(headers, now=1700001000.0) == 0.0
 
 
 @pytest.mark.asyncio

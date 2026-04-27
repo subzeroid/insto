@@ -317,7 +317,7 @@ async def test_batch_dedups_with_warning(
     result = await spec.fn(ctx)
 
     assert sorted(seen) == ["alice", "bob"]
-    assert "removed 2 duplicate" in buf.getvalue()
+    assert "removed 2 duplicate" in capsys.readouterr().err
     assert sorted(result["completed"]) == ["alice", "bob"]
 
 
@@ -326,6 +326,7 @@ async def test_batch_warns_on_blank_lines(
     facade: OsintFacade,
     session: Session,
     tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     _register_counter_cmd(isolated_registry, delay=0.0)
     p = tmp_path / "t.txt"
@@ -340,7 +341,7 @@ async def test_batch_warns_on_blank_lines(
     result = await spec.fn(ctx)
 
     assert sorted(result["completed"]) == ["alice", "bob"]
-    assert "skipped 2 empty" in buf.getvalue()
+    assert "skipped 2 empty" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -627,6 +628,68 @@ async def test_batch_invalid_subcommand_errors(
     p = _file_with_targets(tmp_path, ["alice"])
     with pytest.raises(CommandUsageError, match="invalid sub-command"):
         await dispatch(f"/batch {p} not-a-real-command", facade=facade, session=session)
+
+
+async def test_batch_rejects_child_json_stdout(
+    isolated_registry: dict[str, CommandSpec],
+    facade: OsintFacade,
+    session: Session,
+    tmp_path: Path,
+) -> None:
+    """`/batch ... --json -` would concatenate per-target JSON docs into
+    a single shared `sys.stdout.buffer`, producing nondeterministic
+    unparseable output. Must be rejected up front."""
+    _register_counter_cmd(isolated_registry, delay=0.0)
+    p = _file_with_targets(tmp_path, ["alice", "bob"])
+    with pytest.raises(CommandUsageError, match="cannot fan out a child export to stdout"):
+        await dispatch(f"/batch {p} noop --json -", facade=facade, session=session)
+
+
+async def test_batch_rejects_child_csv_stdout(
+    isolated_registry: dict[str, CommandSpec],
+    facade: OsintFacade,
+    session: Session,
+    tmp_path: Path,
+) -> None:
+    """Same hazard as `--json -` but for `--csv -` against a flat-eligible command.
+
+    Uses `/posts` because `validate_global_flags` rejects `--csv` on
+    non-flat commands earlier in parse — so we need a real flat-row
+    command to exercise the batch-level check.
+    """
+    p = _file_with_targets(tmp_path, ["alice", "bob"])
+    with pytest.raises(CommandUsageError, match="cannot fan out a child export to stdout"):
+        await dispatch(f"/batch {p} posts --csv -", facade=facade, session=session)
+
+
+async def test_batch_confirmation_prompt_goes_to_stderr(
+    isolated_registry: dict[str, CommandSpec],
+    facade: OsintFacade,
+    session: Session,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The >25-target confirmation prompt must go to stderr so that
+    piping a child export (or even just stdout) is not corrupted by
+    the prompt line."""
+    _register_counter_cmd(isolated_registry, delay=0.0)
+    targets_file = _file_with_targets(
+        tmp_path, [f"u{i}" for i in range(1, batch_module.CONFIRM_THRESHOLD + 5)]
+    )
+
+    # Decline the confirmation deterministically by feeding "n" to input().
+    monkeypatch.setattr("builtins.input", lambda _="": "n")
+
+    await dispatch(
+        f"/batch --concurrency 1 {targets_file} noop",
+        facade=facade,
+        session=session,
+    )
+
+    captured = capsys.readouterr()
+    assert "[y/N]" in captured.err
+    assert "[y/N]" not in captured.out
 
 
 # ---------------------------------------------------------------------------

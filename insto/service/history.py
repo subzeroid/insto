@@ -373,9 +373,9 @@ class HistoryStore:
                 changes[f] = {"old": old, "new": new}
         cur_avatar = current.avatar_url_hash or hash_url(current.avatar_url)
         cur_banner = current.banner_url_hash or hash_url(current.banner_url)
-        if last.avatar_url_hash and cur_avatar and last.avatar_url_hash != cur_avatar:
+        if last.avatar_url_hash != cur_avatar:
             changes["avatar"] = {"old": last.avatar_url_hash, "new": cur_avatar}
-        if last.banner_url_hash and cur_banner and last.banner_url_hash != cur_banner:
+        if last.banner_url_hash != cur_banner:
             changes["banner"] = {"old": last.banner_url_hash, "new": cur_banner}
         return {
             "first_seen": False,

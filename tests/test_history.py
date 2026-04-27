@@ -171,6 +171,30 @@ def test_diff_avatar_banner_hash_change(store: HistoryStore) -> None:
     assert d["changes"]["banner"] == {"old": "hashB", "new": "hashB2"}
 
 
+def test_diff_emits_avatar_banner_set_to_unset(store: HistoryStore) -> None:
+    p = _make_profile(pk="42", avatar_url_hash="hashA", banner_url_hash="hashB")
+    store.add_snapshot(store.snapshot_from_profile(p, post_pks=[]))
+
+    p.avatar_url_hash = None
+    p.avatar_url = None
+    p.banner_url_hash = None
+    p.banner_url = None
+    d = store.diff("42", p)
+    assert d["changes"]["avatar"] == {"old": "hashA", "new": None}
+    assert d["changes"]["banner"] == {"old": "hashB", "new": None}
+
+
+def test_diff_emits_avatar_banner_unset_to_set(store: HistoryStore) -> None:
+    p = _make_profile(pk="42")
+    store.add_snapshot(store.snapshot_from_profile(p, post_pks=[]))
+
+    p.avatar_url_hash = "hashA"
+    p.banner_url_hash = "hashB"
+    d = store.diff("42", p)
+    assert d["changes"]["avatar"] == {"old": None, "new": "hashA"}
+    assert d["changes"]["banner"] == {"old": None, "new": "hashB"}
+
+
 def test_url_hashing_helper() -> None:
     assert hash_url(None) is None
     assert hash_url("") is None

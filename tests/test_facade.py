@@ -272,6 +272,96 @@ async def test_wcommented_merges_across_posts(facade: OsintFacade) -> None:
     assert counts == {"bob": 2, "carol": 1}
 
 
+async def test_wcommented_does_not_starve_later_posts(
+    history: HistoryStore, config: Config
+) -> None:
+    # Post `p1` has many comments. With a global cap on merged comments, those
+    # alone would fill the budget and starve later posts entirely.
+    profile = _profile(pk="42", username="alice")
+    posts = [_post("p1"), _post("p2"), _post("p3")]
+    p1_comments = [
+        Comment(
+            pk=f"c{i}",
+            media_pk="p1",
+            user_pk="100",
+            user_username="bob",
+            text="hi",
+            created_at=i,
+        )
+        for i in range(20)
+    ]
+    p2_comments = [
+        Comment(
+            pk="c-p2",
+            media_pk="p2",
+            user_pk="101",
+            user_username="carol",
+            text="hi",
+            created_at=100,
+        ),
+    ]
+    p3_comments = [
+        Comment(
+            pk="c-p3",
+            media_pk="p3",
+            user_pk="102",
+            user_username="dave",
+            text="hi",
+            created_at=200,
+        ),
+    ]
+    backend = FakeBackend(
+        profiles={"42": profile},
+        posts={"42": posts},
+        comments={"p1": p1_comments, "p2": p2_comments, "p3": p3_comments},
+    )
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    top = await facade.wcommented("alice", limit=3)
+    counts = dict(top.items)
+    # The fix: later posts must not be starved by an early-post comment flood.
+    assert counts.get("carol") == 1
+    assert counts.get("dave") == 1
+    assert counts["bob"] >= 1
+
+
+async def test_wcommented_limit_is_post_window_not_per_post_comment_cap(
+    history: HistoryStore, config: Config
+) -> None:
+    # `--limit` is documented as the post-window bound only. Per-post comments
+    # must be bounded by the facade default (50/post), not by the user's
+    # window — otherwise `--limit 1` undercounts comments on the single post,
+    # and large `--limit N` over-fetches N comments per post.
+    profile = _profile(pk="42", username="alice")
+    posts = [_post("p1")]
+    p1_comments = [
+        Comment(
+            pk=f"c{i}",
+            media_pk="p1",
+            user_pk=str(100 + i),
+            user_username=f"u{i}",
+            text="hi",
+            created_at=i,
+        )
+        for i in range(10)
+    ]
+    backend = FakeBackend(
+        profiles={"42": profile},
+        posts={"42": posts},
+        comments={"p1": p1_comments},
+    )
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    top = await facade.wcommented("alice", limit=1)
+    # All 10 commenters are distinct, so the analytic should see all of them
+    # within the single-post window — not be artificially clamped to 1.
+    assert len(dict(top.items)) == 10
+    # Verify the per-post limit passed to the backend is the facade default
+    # (50), independent of the user's window arg.
+    comment_calls = [c for c in backend.request_log if c[0] == "iter_post_comments"]
+    assert comment_calls, "expected iter_post_comments to be invoked"
+    for _, (_, lim) in comment_calls:
+        assert lim == 50
+
+
 async def test_wtagged_owners(facade: OsintFacade) -> None:
     top = await facade.wtagged("alice", limit=10)
     assert dict(top.items) == {"bob": 2}

@@ -202,15 +202,14 @@ class OsintFacade:
         return analytics.aggregate_likes(posts, target=username, limit=limit)
 
     async def wcommented(self, username: str, *, limit: int = 50) -> analytics.TopList:
+        # `limit` is the *post* window only. Per-post comments are bounded by
+        # the facade default (50/post) — the same cap `/comments` aggregate
+        # mode uses — so the spec §9 bounded-window guarantee holds without
+        # `--limit` doubling as a per-post comment cap.
         posts = await self.user_posts(username, limit=limit)
         merged: list[Comment] = []
         for post in posts:
-            async for c in self.backend.iter_post_comments(post.pk, limit=limit):
-                merged.append(c)
-                if len(merged) >= limit:
-                    break
-            if len(merged) >= limit:
-                break
+            merged.extend(await self.post_comments(post.pk))
         return analytics.count_wcommented(merged, target=username, limit=limit)
 
     async def wtagged(self, username: str, *, limit: int = 50) -> analytics.TopList:

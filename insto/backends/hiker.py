@@ -22,6 +22,7 @@ module when `name == "hiker"`.
 
 from __future__ import annotations
 
+import time
 import urllib.parse
 from collections.abc import AsyncIterator, Awaitable, Callable
 from functools import partial
@@ -70,7 +71,9 @@ DEFAULT_MAX_PAGES = 1000
 _QUOTA_REMAINING_HEADERS: tuple[str, ...] = ("x-quota-remaining", "x-ratelimit-remaining")
 _QUOTA_LIMIT_HEADERS: tuple[str, ...] = ("x-quota-limit", "x-ratelimit-limit")
 _QUOTA_RESET_HEADERS: tuple[str, ...] = ("x-quota-reset", "x-ratelimit-reset")
-_RETRY_AFTER_HEADERS: tuple[str, ...] = ("retry-after", "x-ratelimit-reset", "x-quota-reset")
+# Headers that carry an absolute Unix timestamp at which the limit resets.
+# Different from `Retry-After`, which is a relative delay.
+_RESET_HEADERS: tuple[str, ...] = ("x-ratelimit-reset", "x-quota-reset")
 
 _VALID_PROXY_SCHEMES: frozenset[str] = frozenset({"http", "https", "socks5", "socks5h"})
 
@@ -112,15 +115,25 @@ def _parse_int_header(headers: httpx.Headers, names: tuple[str, ...]) -> int | N
     return None
 
 
-def _parse_retry_after(headers: httpx.Headers) -> float:
-    for name in _RETRY_AFTER_HEADERS:
+def _parse_retry_after(headers: httpx.Headers, *, now: float | None = None) -> float:
+    raw = headers.get("retry-after")
+    if raw is not None:
+        try:
+            return max(0.0, float(raw))
+        except (TypeError, ValueError):
+            pass
+    # `x-ratelimit-reset` / `x-quota-reset` are absolute Unix timestamps —
+    # convert to a relative delay so callers can sleep on it.
+    current = time.time() if now is None else now
+    for name in _RESET_HEADERS:
         raw = headers.get(name)
         if raw is None:
             continue
         try:
-            return float(raw)
+            reset_at = float(raw)
         except (TypeError, ValueError):
             continue
+        return max(0.0, reset_at - current)
     return 60.0
 
 

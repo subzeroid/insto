@@ -250,17 +250,17 @@ def count_wcommented(
     limit: int = 50,
     top: int | None = 20,
 ) -> TopList:
-    """Count distinct commenters across the first `limit` comments.
+    """Count distinct commenters across `comments`.
 
-    Maps `count[user_username] += 1` for each comment in the window. If the
-    same user comments multiple times, they accumulate. Useful as
-    "who comments most often on @target's posts" when the caller has
-    pre-merged comments across N recent posts of the target.
+    Maps `count[user_username] += 1` for each comment. If the same user
+    comments multiple times, they accumulate. The caller is expected to
+    pre-merge comments across the last `limit` posts of the target;
+    `limit` here is only the post-window label surfaced via `window`.
     """
     _check_limit(limit)
-    window = _take(comments, limit)
+    materialised = list(comments)
     counter: Counter[str] = Counter()
-    for comment in window:
+    for comment in materialised:
         username = comment.user_username.strip()
         if username:
             counter[username] += 1
@@ -268,9 +268,9 @@ def count_wcommented(
         target=target,
         kind="wcommented",
         window=limit,
-        analyzed=len(window),
+        analyzed=len(materialised),
         items=_top_from_counter(counter, top),
-        empty=len(window) == 0,
+        empty=len(materialised) == 0,
     )
 
 

@@ -63,6 +63,16 @@ JITTER_FRACTION = 0.25
 START_DELAY = 1.0
 
 
+def _emit_status(msg: str) -> None:
+    """Write a batch status line to stderr.
+
+    Children can be told to export to stdout via `--json -` / `--csv -`,
+    so batch's own progress/warning/summary lines must never collide with
+    that pipeline.
+    """
+    print(msg, file=sys.stderr, flush=True)
+
+
 def _add_batch_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "file",
@@ -205,8 +215,14 @@ def _append_resume(path: Path, target: str) -> None:
 
 
 async def _confirm(ctx: CommandContext, message: str) -> bool:
-    """Interactive y/N prompt. Caller must short-circuit on `--yes` first."""
-    ctx.print(message + " [y/N]")
+    """Interactive y/N prompt. Caller must short-circuit on `--yes` first.
+
+    The prompt is emitted on stderr (not via `ctx.print`) so that piping a
+    child export through `--json -` / `--csv -` is not corrupted by the
+    confirmation line. Above the threshold a non-`--yes` invocation is
+    interactive anyway, so stderr is the right channel.
+    """
+    _emit_status(message + " [y/N]")
     answer = await asyncio.to_thread(input, "")
     return answer.strip().lower() in {"y", "yes"}
 
@@ -267,9 +283,21 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
 
     cmd_line = shlex.join(cmd_tokens)
     try:
-        parse_command_line(cmd_line)
+        _, child_args = parse_command_line(cmd_line)
     except CommandUsageError as exc:
         raise CommandUsageError(f"invalid sub-command: {exc}") from exc
+
+    # /batch fans out N child commands across N targets. If a child exports
+    # to `--json -` or `--csv -`, every worker would write its document to
+    # the shared `sys.stdout.buffer`, producing a non-deterministic
+    # concatenation of JSON blobs (or repeated CSV headers) that no
+    # downstream tool can parse. Reject the combination up front.
+    if getattr(child_args, "json", None) == "-" or getattr(child_args, "csv", None) == "-":
+        raise CommandUsageError(
+            "/batch cannot fan out a child export to stdout (--json - / --csv -): "
+            "per-target outputs would concatenate into an unparseable stream. "
+            "Pass a directory (e.g. --json out/) or omit the dash."
+        )
 
     raw, blank_skipped = _read_targets(file_arg, yes=ctx.yes)
     if not raw:
@@ -277,16 +305,16 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
             raise CommandUsageError("no targets provided on stdin")
         raise CommandUsageError(f"no targets found in {file_arg}")
     if blank_skipped:
-        ctx.print(f"warning: skipped {blank_skipped} empty/whitespace-only line(s)")
+        _emit_status(f"warning: skipped {blank_skipped} empty/whitespace-only line(s)")
 
     targets, dup_count = _dedup(raw)
     if dup_count:
-        ctx.print(f"warning: removed {dup_count} duplicate target(s)")
+        _emit_status(f"warning: removed {dup_count} duplicate target(s)")
 
     requested = int(ctx.args.concurrency)
     concurrency = max(1, min(requested, MAX_CONCURRENCY))
     if requested > MAX_CONCURRENCY:
-        ctx.print(
+        _emit_status(
             f"warning: --concurrency {requested} exceeds ceiling {MAX_CONCURRENCY}; "
             f"clamped to {MAX_CONCURRENCY}"
         )
@@ -300,9 +328,9 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
     pending = [t for t in targets if t not in done]
 
     if done and pending:
-        ctx.print(f"resuming: {len(done)} already done, {len(pending)} remaining (sha={sha})")
+        _emit_status(f"resuming: {len(done)} already done, {len(pending)} remaining (sha={sha})")
     elif done and not pending:
-        ctx.print(f"all {len(done)} targets already complete (sha={sha}); nothing to do")
+        _emit_status(f"all {len(done)} targets already complete (sha={sha}); nothing to do")
         return {
             "completed": list(done),
             "skipped_done": len(done),
@@ -320,7 +348,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
             f"quota remaining: {remaining_q}, estimated cost: ~{len(pending)} call(s)"
         )
         if not await _confirm(ctx, msg):
-            ctx.print("aborted")
+            _emit_status("aborted")
             return {
                 "completed": list(done),
                 "skipped_done": len(done),
@@ -351,7 +379,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
                 await dispatch(cmd_line, facade=ctx.facade, session=session, console=ctx.console)
             except QuotaExhausted as exc:
                 quota_hit.set()
-                ctx.print(
+                _emit_status(
                     f"quota exhausted at @{target}: {redact_secrets(str(exc))}; "
                     "saving progress and exiting"
                 )
@@ -360,7 +388,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
                 safe_msg = redact_secrets(str(exc))
                 async with state_lock:
                     failed.append((target, safe_msg))
-                ctx.print(f"@{target}: failed — {safe_msg}")
+                _emit_status(f"@{target}: failed — {safe_msg}")
                 return
             async with state_lock:
                 _append_resume(resume_file, target)
@@ -380,7 +408,7 @@ async def batch_cmd(ctx: CommandContext) -> dict[str, object]:
         "sha": sha,
         "quota_exhausted": quota_hit.is_set(),
     }
-    ctx.print(
+    _emit_status(
         f"batch done: {len(completed)} ok, {len(failed)} failed, "
         f"{len(remaining)} not run (sha={sha})"
     )

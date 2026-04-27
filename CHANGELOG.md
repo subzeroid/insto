@@ -2,6 +2,39 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.1.1] - 2026-04-28
+
+### Fixed
+
+- `_hiker_map` now accepts ISO-8601 strings (`2026-04-17T17:45:12Z`) for `taken_at` / `created_at` / `expiring_at` in addition to unix integers. HikerAPI's `user_medias_chunk_v1` returns the ISO shape, so `/posts`, `/dossier`, `/reels`, `/tagged` were previously raising `SchemaDrift` on every live call.
+- REPL welcome banner now refreshes the HikerAPI balance synchronously before render, so the bottom toolbar shows real numbers ("14.7M requests left · $4,417 · 15 rps cap") on first paint instead of "balance: pending".
+- Setup wizard resolves `output_dir` and `db_path` to absolute paths, so behaviour no longer depends on the CWD where `insto` is later invoked.
+
+### Added
+
+- Inline target on every single-target slash command (`/info instagram`, `/posts instagram`, `/dossier instagram`...) without mutating the active session target.
+- Slash popup styling: typing `/` opens a Claude-Code-like popup of all commands with help-text in the right column. `complete_style=COLUMN`, `reserve_space_for_menu=10`, dedicated dark-slate Style for the menu.
+- `/info`-style commands now thread an optional positional `target` through `with_target` / `with_pk` via the new `add_target_arg` and `compose_args` helpers in `commands/_base.py`.
+- Setup wizard prompt for proxy now lists supported schemes inline: `proxy URL (http://, https://, socks5h://) (optional, '-' to clear)`.
+
+### Changed
+
+- Welcome banner: replaced the chafa pixel-art wasp with a typographic INSTO logotype (figlet "standard") plus the tagline `i n s t o ⇋ o s i n t · instagram tool · open-source intel`. No image deps, identical rendering on light and dark schemes, no third-party watermark to mask.
+- `Quota` model gained `rate`, `amount`, `currency` fields populated from `/sys/balance`. `HikerBackend.refresh_quota()` is the new entry point; `/quota` always re-fetches before rendering.
+
+### Documentation
+
+- Full mkdocs Material site at https://subzeroid.github.io/insto/ — index, installation, basic-usage, cli-reference, backends, architecture, troubleshooting, contributing, changelog.
+- LICENSE (MIT), CHANGELOG.md, SECURITY.md, CONTRIBUTING.md added at the repo root.
+- `pyproject.toml` populated with classifiers, keywords, project URLs, and `[docs]` extras.
+
+### CI
+
+- `release.yml` — tag-driven build + trusted-publish to PyPI + GitHub release.
+- `release-please.yml` — Conventional Commits → CHANGELOG automation.
+- `docs.yml` — mkdocs deploy to GitHub Pages on `main`.
+- `pr-title.yml` — semantic PR title gate.
+
 ## [0.1.0] - 2026-04-27
 
 ### Added

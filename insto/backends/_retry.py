@@ -29,6 +29,11 @@ R = TypeVar("R")
 DEFAULT_MAX_ATTEMPTS = 5
 DEFAULT_BASE_DELAY = 0.5
 DEFAULT_MAX_DELAY = 30.0
+# Hard ceiling on Retry-After honoring. A misbehaving (or hostile) backend
+# can claim a multi-day cooldown via header injection; cap so a worker
+# never sleeps for an absurd interval. Five minutes covers every legitimate
+# 429 we expect from HikerAPI.
+DEFAULT_MAX_RATE_LIMIT_DELAY = 300.0
 
 
 def _transient_delay(
@@ -49,6 +54,7 @@ def with_retry(
     max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     base_delay: float = DEFAULT_BASE_DELAY,
     max_delay: float = DEFAULT_MAX_DELAY,
+    max_rate_limit_delay: float = DEFAULT_MAX_RATE_LIMIT_DELAY,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     rng: random.Random | None = None,
 ) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
@@ -83,7 +89,8 @@ def with_retry(
                 except RateLimited as exc:
                     if attempt >= max_attempts:
                         raise
-                    delay = max(0.0, exc.retry_after) + jitter_rng.uniform(0.0, 0.25)
+                    base = min(max(0.0, exc.retry_after), max_rate_limit_delay)
+                    delay = base + jitter_rng.uniform(0.0, 0.25)
                     await sleep(delay)
                 except Transient:
                     if attempt >= max_attempts:

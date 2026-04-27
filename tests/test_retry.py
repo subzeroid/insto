@@ -64,6 +64,24 @@ async def test_rate_limited_retries_then_succeeds() -> None:
         assert 2.0 <= delay <= 2.25 + 1e-9
 
 
+async def test_rate_limited_huge_retry_after_is_capped() -> None:
+    sleep = _SleepRecorder()
+    calls = 0
+
+    @with_retry(sleep=sleep, rng=_fixed_rng(), max_rate_limit_delay=10.0)
+    async def op() -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RateLimited(retry_after=999_999.0)
+        return "ok"
+
+    assert await op() == "ok"
+    assert len(sleep.delays) == 1
+    # capped to 10.0 + jitter (<= 0.25)
+    assert sleep.delays[0] <= 10.0 + 0.25 + 1e-9
+
+
 async def test_rate_limited_negative_retry_after_is_clamped() -> None:
     sleep = _SleepRecorder()
     calls = 0

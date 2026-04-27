@@ -381,8 +381,12 @@ async def _run_oneshot(
         if head:
             with contextlib.suppress(Exception):
                 await facade.record_command(head, session.target)
-        history.close()
-        await facade.aclose()
+        # Close backend (cancels any pending tasks that may still touch
+        # history) before tearing down the sqlite store.
+        with contextlib.suppress(Exception):
+            await facade.aclose()
+        with contextlib.suppress(Exception):
+            history.close()
 
 
 # ---------------------------------------------------------------------------

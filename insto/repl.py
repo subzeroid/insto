@@ -253,10 +253,13 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     facade = OsintFacade(backend=backend, history=history, config=cfg)
 
     async def cleanup() -> None:
-        with contextlib.suppress(Exception):
-            history.close()
+        # Cancel watches and close the backend BEFORE the history store —
+        # an in-flight tick may still call into history.add_snapshot_async,
+        # and closing the sqlite connection underneath it would error.
         with contextlib.suppress(Exception):
             await facade.aclose()
+        with contextlib.suppress(Exception):
+            history.close()
 
     return facade, cleanup
 

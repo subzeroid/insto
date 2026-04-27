@@ -4,8 +4,6 @@ Each registered watch owns one `asyncio.Task` running a periodic loop. The
 loop sleeps `interval_seconds`, then invokes a per-watch `tick` callable.
 A tick has its own retry-once-then-fail policy:
 
-- the call is wrapped in `asyncio.shield` so a cancellation of the loop
-  task lets the in-flight tick complete before the task exits;
 - on first exception, the tick is retried once (unless the exception is a
   hard non-retriable `Banned` / `AuthInvalid`, which pauses immediately);
 - two consecutive failed ticks (or one hard error) flip the watch status
@@ -13,8 +11,10 @@ A tick has its own retry-once-then-fail policy:
 
 `WatchManager` is owned by the facade and lives for the REPL session only —
 watches are not persisted across restarts. `cancel_all()` is awaited from
-the REPL shutdown path; it cancels every task and joins them via
-`gather(..., return_exceptions=True)` so the event loop can close cleanly.
+the REPL shutdown path; it cancels every loop task AND any in-flight tick
+task, then joins them via `gather(..., return_exceptions=True)` so the
+event loop can close cleanly without leaving detached coroutines that
+would write to a closed history store.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ class _Entry:
     last_error: str | None = None
     consecutive_errors: int = 0
     task: asyncio.Task[None] | None = field(default=None, repr=False)
+    invoke_task: asyncio.Task[None] | None = field(default=None, repr=False)
 
     def to_spec(self) -> WatchSpec:
         return WatchSpec(
@@ -127,13 +128,13 @@ class WatchManager:
         return len(self._entries)
 
     async def cancel_all(self) -> None:
-        """Cancel every watch task and await its termination."""
+        """Cancel every watch loop and any in-flight tick, then await them."""
         tasks: list[asyncio.Task[None]] = []
         for entry in self._entries.values():
-            t = entry.task
-            if t is not None and not t.done():
-                t.cancel()
-                tasks.append(t)
+            for t in (entry.task, entry.invoke_task):
+                if t is not None and not t.done():
+                    t.cancel()
+                    tasks.append(t)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._entries.clear()
@@ -158,7 +159,7 @@ class WatchManager:
 
     async def _do_tick(self, entry: _Entry) -> None:
         try:
-            await asyncio.shield(self._invoke(entry))
+            await self._run_tick(entry)
         except asyncio.CancelledError:
             raise
         except (Banned, AuthInvalid) as exc:
@@ -175,7 +176,7 @@ class WatchManager:
 
         # single retry on tick
         try:
-            await asyncio.shield(self._invoke(entry))
+            await self._run_tick(entry)
         except asyncio.CancelledError:
             raise
         except (Banned, AuthInvalid) as exc:
@@ -193,6 +194,18 @@ class WatchManager:
             entry.last_ok = _now_ts()
             entry.last_error = None
             entry.consecutive_errors = 0
+
+    async def _run_tick(self, entry: _Entry) -> None:
+        # Run the tick in a tracked child task so `cancel_all()` can drain
+        # it explicitly. Without tracking, a cancellation of the loop task
+        # would leave the inner coroutine running detached and racing with
+        # facade / history teardown.
+        invoke = asyncio.create_task(self._invoke(entry), name=f"insto-tick:{entry.user}")
+        entry.invoke_task = invoke
+        try:
+            await invoke
+        finally:
+            entry.invoke_task = None
 
     async def _invoke(self, entry: _Entry) -> None:
         await entry.tick()

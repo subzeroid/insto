@@ -9,6 +9,7 @@ sleeping in its 5-minute interval and `aclose()` cancels them.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
@@ -272,6 +273,37 @@ async def test_cancel_all_drains_running_loop_tasks_quickly() -> None:
     elapsed = time.monotonic() - start
     assert elapsed < 0.1
     assert len(mgr) == 0
+
+
+async def test_cancel_all_drains_in_flight_tick() -> None:
+    """A cancellation while a tick is mid-flight must not leave a detached
+    coroutine running — `cancel_all` is awaited from REPL shutdown right
+    before the history store closes, and a stray tick would write to a
+    closed sqlite connection.
+    """
+    mgr = WatchManager()
+    started = asyncio.Event()
+    finished = False
+
+    async def slow_tick() -> None:
+        nonlocal finished
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        finally:
+            finished = True
+
+    spec = mgr.add("alice", 1, tick=slow_tick, start=False)
+    assert spec.user == "alice"
+    # Drive a tick directly so we control timing.
+    tick_task = asyncio.create_task(mgr.tick_once("alice"))
+    await started.wait()  # tick is now running inside _run_tick
+    await mgr.cancel_all()
+    # cancel_all must have cancelled the in-flight invoke task.
+    assert finished is True
+    # Drain the orphaned outer task.
+    with contextlib.suppress(BaseException):
+        await tick_task
 
 
 # ---------------------------------------------------------------------------

@@ -145,10 +145,13 @@ async def config_cmd(ctx: CommandContext) -> list[dict[str, Any]]:
 
 
 def _add_theme_args(parser: argparse.ArgumentParser) -> None:
+    from insto.ui.theme import list_themes
+
     parser.add_argument(
         "name",
         nargs="?",
         default=None,
+        choices=list_themes(),
         help="theme to switch to; omit to show the active theme + list",
     )
 

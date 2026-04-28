@@ -101,10 +101,15 @@ class _SlashCommandCompleter(Completer):
         self, document: Document, complete_event: CompleteEvent
     ) -> Iterable[Completion]:
         text = document.text_before_cursor
-        # Only complete while the user is typing the *first* token.
-        if " " in text.lstrip():
+        stripped = text.lstrip()
+
+        # ── Argument completion: cursor is past the first whitespace ─────────
+        if " " in stripped:
+            yield from self._argument_completions(text, stripped)
             return
-        prefix = text.lstrip()
+
+        # ── Command-name completion: still in the first token ────────────────
+        prefix = stripped
         if prefix.startswith("/"):
             user_typed = prefix[1:].lower()
             slash = "/"
@@ -120,6 +125,55 @@ class _SlashCommandCompleter(Completer):
                 display=signature,  # e.g. "/theme [name]" — args visible in popup
                 display_meta=help_text,
             )
+
+    def _argument_completions(self, text: str, stripped: str) -> Iterable[Completion]:
+        """Per-command positional-argument completion.
+
+        Reads `choices=` off the command's argparse parser. `/theme <Tab>`
+        offers `claude / instagram / aiograpi`; `/purge <Tab>` offers
+        `history / snapshots / cache`. Commands whose positionals have no
+        `choices` (free-form usernames, file paths, post codes) yield no
+        completions and the popup quietly stays empty.
+        """
+        from insto.commands._base import COMMANDS, build_parser_for
+
+        tokens = stripped.split()
+        cmd_name = tokens[0].lstrip("/").lower()
+        spec = COMMANDS.get(cmd_name)
+        if spec is None:
+            return
+
+        # If the cursor sits right after a space, the user is starting a
+        # fresh word; otherwise the last token is what's being typed.
+        if text.endswith(" "):
+            current_word = ""
+            consumed = len(tokens) - 1  # everything after the command
+        else:
+            current_word = tokens[-1]
+            consumed = len(tokens) - 2  # last token is the in-progress word
+
+        parser = build_parser_for(spec)
+        pos_index = 0
+        for action in parser._actions:
+            if action.option_strings or action.dest in ("help",):
+                continue
+            if pos_index == consumed:
+                choices = action.choices
+                if not choices:
+                    return
+                lower = current_word.lower()
+                for choice in choices:
+                    s = str(choice)
+                    if not s.lower().startswith(lower):
+                        continue
+                    yield Completion(
+                        text=s,
+                        start_position=-len(current_word),
+                        display=s,
+                        display_meta=str(action.help or ""),
+                    )
+                return
+            pos_index += 1
 
 
 def _completer() -> Completer:

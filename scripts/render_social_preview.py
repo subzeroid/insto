@@ -56,6 +56,7 @@ class HikerBackend(FakeBackend):
     fake. We never call the network from here; the parent's local-data
     behaviour is fine."""
 
+
 OUT_PNG = REPO / "docs" / "social-preview.png"
 WIDTH_COLS = 110  # Rich columns; controls aspect ratio of the SVG.
 THEME = "aiograpi"

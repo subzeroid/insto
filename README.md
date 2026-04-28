@@ -15,13 +15,28 @@ Two surfaces over the same command grammar:
 
 ## Install
 
-Requires Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+Requires Python ≥ 3.11. Pick the install path that matches how you keep
+other CLIs:
 
 ```sh
-uv tool install insto             # PyPI install (release)
-# or, from a checkout:
-uv sync && uv run insto --help
+uv tool install insto              # uv users — fastest, no venv to manage
+pipx install insto                 # pip users — same effect, classic tool
+brew install pipx && pipx install insto   # macOS, no Python yet
 ```
+
+Or from a checkout (development):
+
+```sh
+git clone git@github.com:subzeroid/insto.git
+cd insto
+uv sync && uv run insto --help     # editable inside .venv
+# or:  uv tool install --editable .   to put `insto` on $PATH
+```
+
+> ℹ️ **Bare `pip install insto` does not work on modern systems by default**
+> (PEP 668 — Homebrew Python, Debian 12+, Ubuntu 23.04+ all reject system-wide
+> pip writes). Use `pipx` or `uv tool install` — both create an isolated
+> venv per CLI, no manual sourcing.
 
 ## Setup
 

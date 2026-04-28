@@ -4,17 +4,30 @@
 
 ## From PyPI (recommended)
 
-```sh
-uv tool install insto
-```
-
-`uv` puts the `insto` script into a self-contained venv and exposes it on `$PATH`. Same effect with pip:
+Pick one — all three install `insto` into an isolated venv and put it on `$PATH`:
 
 ```sh
-pipx install insto
-# or
-python -m pip install --user insto
+uv tool install insto                       # if you have uv
+pipx install insto                          # if you have pipx
+brew install pipx && pipx install insto     # macOS, nothing yet
 ```
+
+### What about `pip install insto`?
+
+It does **not** work out of the box on modern systems and that is intentional, not an `insto` bug.
+
+Since pip 23.0, [PEP 668](https://peps.python.org/pep-0668/) instructs pip to refuse system-wide installs on Python distributions marked as "externally managed" — Homebrew Python on macOS, the system Python on Debian 12+, Ubuntu 23.04+, Fedora 38+, etc. You will see:
+
+```text
+error: externally-managed-environment
+× This environment is externally managed
+```
+
+Two ways forward:
+
+- **Recommended:** use `pipx` or `uv tool install`, see above. Each CLI lives in its own venv, so `insto`'s deps cannot break unrelated tools (or your OS Python).
+- **Inside a venv** (developer flow): `python -m venv .venv && source .venv/bin/activate && pip install insto`. The PEP 668 mark is per-Python, and venv Pythons are not marked.
+- **Override** (not recommended): `pip install --break-system-packages insto`. The flag does what it says.
 
 ## With shell completion
 

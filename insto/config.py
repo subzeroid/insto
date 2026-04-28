@@ -22,6 +22,7 @@ import tomli_w
 
 from insto._redact import _PROXY_USERINFO_RE, register_secret
 from insto.exceptions import BackendError
+from insto.ui.theme import DEFAULT_THEME_NAME
 
 CONFIG_HOME_ENV = "INSTO_HOME"
 DEFAULT_CONFIG_DIR_NAME = ".insto"
@@ -85,7 +86,7 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
-    theme: str = "aiograpi"
+    theme: str = DEFAULT_THEME_NAME
     sources: dict[str, Origin] = field(default_factory=dict)
 
 
@@ -153,7 +154,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         cli, "db_path", ENV_DB_PATH, toml_data.get("db_path"), str(db_path())
     )
     theme_value, sources["theme"] = _pick(
-        cli, "theme", ENV_THEME, toml_data.get("theme"), "aiograpi"
+        cli, "theme", ENV_THEME, toml_data.get("theme"), DEFAULT_THEME_NAME
     )
     sources["cli_history_path"] = "default"
 
@@ -173,7 +174,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         output_dir=Path(out_value),
         db_path=Path(db_value),
         cli_history_path=cli_history_path(),
-        theme=str(theme_value) if theme_value else "aiograpi",
+        theme=str(theme_value) if theme_value else DEFAULT_THEME_NAME,
         sources=sources,
     )
 

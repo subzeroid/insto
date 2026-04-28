@@ -376,12 +376,21 @@ class Repl:
                     await self.facade.record_command(head, self.session.target)
 
     async def run(self) -> None:
-        """Main loop: banner, prompt, dispatch, repeat. Returns on EOF / quit."""
+        """Main loop: banner, prompt, dispatch, repeat. Returns on EOF / quit.
+
+        Ctrl-C cancels the in-progress line and re-prompts (shell-style),
+        matching bash / zsh / Python REPL conventions. Ctrl-D on an empty
+        line exits, as does typing /exit, /quit, or just /q.
+        """
         self.redraw_banner()
         while True:
             try:
                 line = await self._read_line()
-            except (EOFError, KeyboardInterrupt):
+            except KeyboardInterrupt:
+                # Ctrl-C: drop the current input, stay in the REPL.
+                continue
+            except EOFError:
+                # Ctrl-D on an empty line: exit the REPL gracefully.
                 self.console.print("bye", style="muted")
                 return
             stripped = line.strip()

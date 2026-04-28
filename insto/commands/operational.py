@@ -140,6 +140,73 @@ async def config_cmd(ctx: CommandContext) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# /theme
+# ---------------------------------------------------------------------------
+
+
+def _add_theme_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="theme to switch to; omit to show the active theme + list",
+    )
+
+
+@command(
+    "theme",
+    "Show or switch the colour theme (persists in ~/.insto/config.toml)",
+    add_args=_add_theme_args,
+)
+async def theme_cmd(ctx: CommandContext) -> dict[str, Any]:
+    from insto.config import write_config
+    from insto.ui.theme import is_known, list_themes
+
+    requested = getattr(ctx.args, "name", None)
+    available = list_themes()
+    current = ctx.facade.config.theme
+
+    if requested is None:
+        # Read-only: print the active theme and the catalog.
+        ctx.print(f"active theme: {current}")
+        ctx.print("available: " + ", ".join(available))
+        return {"active": current, "available": available, "switched": False}
+
+    if not is_known(requested):
+        raise CommandUsageError(
+            f"unknown theme {requested!r}; available: " + ", ".join(available)
+        )
+
+    if requested == current:
+        ctx.print(f"theme already {current!r}")
+        return {"active": current, "available": available, "switched": False}
+
+    # Persist to ~/.insto/config.toml so the choice survives the next launch.
+    # Round-trip through a structured payload so we don't drop other keys.
+    cfg = ctx.facade.config
+    payload: dict[str, Any] = {"theme": requested}
+    if cfg.hiker_token or cfg.hiker_proxy:
+        hiker: dict[str, Any] = {}
+        if cfg.hiker_token:
+            hiker["token"] = cfg.hiker_token
+        if cfg.hiker_proxy:
+            hiker["proxy"] = cfg.hiker_proxy
+        payload["hiker"] = hiker
+    if cfg.sources.get("output_dir") != "default":
+        payload["output_dir"] = str(cfg.output_dir)
+    if cfg.sources.get("db_path") != "default":
+        payload["db_path"] = str(cfg.db_path)
+    write_config(payload)
+
+    cfg.theme = requested
+    ctx.print(
+        f"theme: {current} → {requested}. "
+        "Restart `insto` to apply across the welcome banner and prompt popup."
+    )
+    return {"active": requested, "previous": current, "available": available, "switched": True}
+
+
+# ---------------------------------------------------------------------------
 # /purge
 # ---------------------------------------------------------------------------
 
@@ -269,4 +336,5 @@ __all__ = [
     "help_cmd",
     "purge_cmd",
     "quota_cmd",
+    "theme_cmd",
 ]

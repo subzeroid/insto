@@ -30,6 +30,7 @@ ENV_TOKEN = "HIKERAPI_TOKEN"
 ENV_PROXY = "HIKERAPI_PROXY"
 ENV_OUTPUT_DIR = "INSTO_OUTPUT_DIR"
 ENV_DB_PATH = "INSTO_DB_PATH"
+ENV_THEME = "INSTO_THEME"
 
 Origin = Literal["flag", "env", "toml", "default"]
 
@@ -84,6 +85,7 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
+    theme: str = "claude"
     sources: dict[str, Origin] = field(default_factory=dict)
 
 
@@ -150,6 +152,9 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     db_value, sources["db_path"] = _pick(
         cli, "db_path", ENV_DB_PATH, toml_data.get("db_path"), str(db_path())
     )
+    theme_value, sources["theme"] = _pick(
+        cli, "theme", ENV_THEME, toml_data.get("theme"), "claude"
+    )
     sources["cli_history_path"] = "default"
 
     # Register the resolved token / proxy with the redaction set so any error
@@ -168,6 +173,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         output_dir=Path(out_value),
         db_path=Path(db_value),
         cli_history_path=cli_history_path(),
+        theme=str(theme_value) if theme_value else "claude",
         sources=sources,
     )
 
@@ -220,6 +226,7 @@ def effective_config_report(config: Config) -> list[dict[str, Any]]:
         "output_dir": str(config.output_dir),
         "db_path": str(config.db_path),
         "cli_history_path": str(config.cli_history_path),
+        "theme": config.theme,
     }
     rows: list[dict[str, Any]] = []
     for key, value in snapshot.items():

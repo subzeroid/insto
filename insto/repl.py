@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from prompt_toolkit import PromptSession
-from prompt_toolkit.completion import CompleteEvent, Completer, Completion
+from prompt_toolkit.completion import CompleteEvent, Completer, Completion, ThreadedCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
@@ -45,7 +45,7 @@ from insto.commands import COMMANDS, CommandUsageError, Session, dispatch
 from insto.config import Config, cli_history_path, load_config
 from insto.exceptions import BackendError
 from insto.ui.banner import render_welcome
-from insto.ui.theme import INSTO_THEME
+from insto.ui.theme import get_palette, get_theme
 
 if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
@@ -55,20 +55,22 @@ if TYPE_CHECKING:
 EXIT_COMMANDS = frozenset({"quit", "exit", "q"})
 
 
-# Claude-Code-style popup: subtle dark slate row, accented command name on
-# the left, dimmed description on the right. The selected row gets a brighter
-# accent so it pops against the dark column.
-_PROMPT_STYLE = Style.from_dict(
-    {
-        "completion-menu": "bg:#1f2228",
-        "completion-menu.completion": "bg:#1f2228 #d2cdb6",
-        "completion-menu.completion.current": "bg:#3a2a14 #ffd166 bold",
-        "completion-menu.meta.completion": "bg:#1f2228 #6f7280",
-        "completion-menu.meta.completion.current": "bg:#3a2a14 #d8c9a3",
-        "scrollbar.background": "bg:#1f2228",
-        "scrollbar.button": "bg:#3a2a14",
-    }
-)
+def _build_prompt_style(theme_name: str) -> Style:
+    """Per-theme popup style. Uses the active palette's `accent` for the
+    current selection so the slash-popup picks up theme switches."""
+    palette = get_palette(theme_name)
+    accent = palette.accent
+    return Style.from_dict(
+        {
+            "completion-menu": "bg:#1f2228",
+            "completion-menu.completion": "bg:#1f2228 #d2cdb6",
+            "completion-menu.completion.current": f"bg:#3a2a14 {accent} bold",
+            "completion-menu.meta.completion": "bg:#1f2228 #6f7280",
+            "completion-menu.meta.completion.current": "bg:#3a2a14 #d8c9a3",
+            "scrollbar.background": "bg:#1f2228",
+            "scrollbar.button": "bg:#3a2a14",
+        }
+    )
 
 
 class _SlashCommandCompleter(Completer):
@@ -189,7 +191,7 @@ class Repl:
     ) -> None:
         self.facade = facade
         self.config = config
-        self.console = console or Console(theme=INSTO_THEME)
+        self.console = console or Console(theme=get_theme(config.theme))
         self.session = Session()
         self.email = email
         self._log = logging.getLogger("insto.repl")
@@ -199,11 +201,11 @@ class Repl:
         self.key_bindings = self._build_key_bindings()
         self.prompt_session: PromptSession[str] = PromptSession(
             history=FileHistory(str(self._history_path)),
-            completer=_completer(),
+            completer=ThreadedCompleter(_completer()),
             complete_while_typing=True,
             complete_style=CompleteStyle.COLUMN,
             reserve_space_for_menu=10,
-            style=_PROMPT_STYLE,
+            style=_build_prompt_style(config.theme),
             enable_history_search=True,
             bottom_toolbar=self.bottom_toolbar,
             key_bindings=self.key_bindings,
@@ -245,15 +247,11 @@ class Repl:
         @kb.add("/")
         def _open_slash_menu(event: KeyPressEvent) -> None:
             """Open the command popup the moment '/' is typed at the start of
-            the line — same UX as Claude Code's slash menu. complete_while_typing
-            does fire eventually, but it waits for a typing-pause idle window;
-            this binding skips the wait and asks prompt_toolkit to render the
-            menu synchronously after the keystroke is inserted.
-            """
+            the line — Claude-Code-style. ThreadedCompleter (wired into
+            PromptSession) keeps the popup live as the user narrows the prefix
+            (`/`, `/i`, `/in`, `/info`)."""
             buf = event.current_buffer
             buf.insert_text("/")
-            # Only auto-open at the start of the input. Once the user is typing
-            # an argument (e.g. "/info /something"), let normal input flow.
             if buf.document.text_before_cursor.strip() == "/":
                 buf.start_completion(select_first=False)
 

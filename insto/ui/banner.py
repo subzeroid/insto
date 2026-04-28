@@ -58,16 +58,24 @@ _TIPS: tuple[tuple[str, str], ...] = (
 def _banner_text() -> RenderableType:
     """Render the INSTO logotype + anagram tagline.
 
-    Three stacked Text blocks: bold accent INSTO figlet on top, dimmed `i n s t o
-    ⇋ o s i n t` line in the middle, even-dimmer subtagline at the bottom. No
-    image deps, no terminal-bg coupling — works on light *and* dark schemes.
+    Five figlet rows are coloured per-row from the active theme's gradient
+    (`logo.0` … `logo.4`). On a flat-colour theme like `claude` every row
+    gets the same accent so visually nothing changes; on `instagram` /
+    `aiograpi` the rows step through the brand gradient so the logotype
+    reads like the source mark.
     """
-    return Group(
-        Text(LOGO_BANNER, style="accent", no_wrap=True),
-        Text(""),
-        Text(LOGO_TAGLINE, style="value"),
-        Text(LOGO_SUBTAGLINE, style="muted"),
-    )
+    rows = LOGO_BANNER.splitlines()
+    while len(rows) < 5:  # defensive: never short-row past the gradient
+        rows.append("")
+    parts: list[RenderableType] = []
+    for i, row in enumerate(rows[:5]):
+        parts.append(Text(row, style=f"bold logo.{i}", no_wrap=True))
+    for row in rows[5:]:
+        parts.append(Text(row, style="bold logo.4", no_wrap=True))
+    parts.append(Text(""))
+    parts.append(Text(LOGO_TAGLINE, style="value"))
+    parts.append(Text(LOGO_SUBTAGLINE, style="muted"))
+    return Group(*parts)
 
 
 def _tips_table() -> Table:

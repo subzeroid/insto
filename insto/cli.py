@@ -451,9 +451,9 @@ async def _run_oneshot(
     try:
         from rich.console import Console
 
-        from insto.ui.theme import INSTO_THEME
+        from insto.ui.theme import get_theme
 
-        console = Console(theme=INSTO_THEME)
+        console = Console(theme=get_theme(config.theme))
         await dispatch(line, facade=facade, session=session, console=console)
         dispatch_ok = True
         return 0

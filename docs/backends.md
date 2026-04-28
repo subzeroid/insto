@@ -67,7 +67,7 @@ What the backend handles:
 
 HikerAPI proxies Instagram's HTTP statuses verbatim — when a call returns 403, that's Instagram refusing the request, not HikerAPI billing or scope. You'll see this most often on:
 
-- `/similar` — Instagram retired the public suggested-users endpoint.
+- `/similar` — Instagram refuses the suggested-users / chaining call for many target user_ids (locked-down accounts, country gating, anti-abuse heuristics). It works for some targets, 403s for others — the endpoint isn't dead, it's just per-target flaky.
 - Anything against an account that requires a logged-in session to read.
 
 The fix is to switch to the aiograpi backend for that one command.
@@ -92,10 +92,14 @@ What works on aiograpi:
 
 What does NOT work on aiograpi 0.7:
 
-- `/similar` — Instagram retired the public suggested-users endpoint. No backend supports it.
-- `/tagged` — aiograpi 0.7 does not expose `user_tag_medias`. Use the hiker backend for this command.
+- `/similar` — aiograpi has no `chaining` / `fetch_suggestion_details` surface yet (instagrapi has both — upstream PR is in flight). Use the hiker backend for now. Raises a clear `BackendError("...needs hiker backend")` instead of returning silently empty.
 
-Both raise a clear `BackendError("...needs hiker backend")` instead of returning silently empty.
+### Backend support matrix
+
+| Command(s) | hiker | aiograpi |
+|---|---|---|
+| `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/dossier` | ✅ | ✅ |
+| `/similar` | ✅ (Instagram often returns 403 — expected, see "HikerAPI 403" above) | ❌ (upstream gap) |
 
 ### Account-ban risk
 

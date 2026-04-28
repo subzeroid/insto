@@ -19,14 +19,13 @@ them into the insto taxonomy in `insto/exceptions.py` so the command
 layer never sees a raw aiograpi exception. New aiograpi exception
 classes are caught by the `ClientError` fallback as `Transient`.
 
-Methods that aiograpi 0.7.2 does not implement raise the closest
-backend-typed error. The two known gaps:
+One method aiograpi 0.7 does not implement raises the closest
+backend-typed error:
 
-  * `get_suggested(pk)` — Instagram retired its public suggested-users
-    endpoint; mapping it to a logged-in v0.2 backend is a future work
-    item. Calls raise `BackendError` with a "not supported" message.
-  * `iter_user_tagged(pk)` — aiograpi 0.7 has no `user_tag_medias`
-    surface. Same handling.
+  * `get_suggested(pk)` — aiograpi has no `chaining` /
+    `fetch_suggestion_details` surface yet (instagrapi has both —
+    upstream PR pending). Calls raise `BackendError` with a clear
+    "needs hiker backend" message.
 """
 
 from __future__ import annotations
@@ -248,11 +247,17 @@ class AiograpiBackend(OSINTBackend):
                 raise
 
     async def iter_user_tagged(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
-        raise BackendError(
-            "aiograpi 0.7 does not expose a tagged-feed endpoint; this command "
-            "needs the hiker backend."
-        )
-        yield  # pragma: no cover — keep this an async generator for the ABC.
+        from insto.backends._aiograpi_map import map_post
+
+        amount = int(limit) if limit else 0
+        items = await self._call(lambda: self._client.usertag_medias_v1(int(pk), amount=amount))
+        for raw in items:
+            try:
+                yield map_post(raw)
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
 
     # ------------------------------------------------------------------ stories
 
@@ -317,8 +322,8 @@ class AiograpiBackend(OSINTBackend):
 
     async def get_suggested(self, pk: str) -> list[User]:
         raise BackendError(
-            "aiograpi 0.7 does not expose a suggested-users endpoint; "
-            "/similar will not work on this backend."
+            "aiograpi 0.7 does not expose chaining / suggested-users "
+            "endpoints; /similar needs the hiker backend."
         )
 
     # ------------------------------------------------------------------ comments + likers

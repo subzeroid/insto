@@ -242,6 +242,21 @@ class Repl:
             self.console.clear()
             self.redraw_banner()
 
+        @kb.add("/")
+        def _open_slash_menu(event: KeyPressEvent) -> None:
+            """Open the command popup the moment '/' is typed at the start of
+            the line — same UX as Claude Code's slash menu. complete_while_typing
+            does fire eventually, but it waits for a typing-pause idle window;
+            this binding skips the wait and asks prompt_toolkit to render the
+            menu synchronously after the keystroke is inserted.
+            """
+            buf = event.current_buffer
+            buf.insert_text("/")
+            # Only auto-open at the start of the input. Once the user is typing
+            # an argument (e.g. "/info /something"), let normal input flow.
+            if buf.document.text_before_cursor.strip() == "/":
+                buf.start_completion(select_first=False)
+
         return kb
 
     # ----------------------------------------------------------------- io

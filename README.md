@@ -36,6 +36,16 @@ pipx install 'insto[aiograpi]'
 the right credentials. See [`docs/backends.md`](docs/backends.md) for
 the trade-offs and the account-ban risk on aiograpi.
 
+> **Got `insto: command not found` after install?** Both `pipx` and
+> `uv tool` install into `~/.local/bin`, which is not on `$PATH` by
+> default on a fresh Linux box. Fix it once:
+>
+> ```sh
+> pipx ensurepath           # or: uv tool update-shell
+> exec "$SHELL"             # reload PATH in the current session
+> insto --version
+> ```
+
 Or from a checkout (development):
 
 ```sh

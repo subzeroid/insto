@@ -12,6 +12,25 @@ pipx install insto                          # if you have pipx
 brew install pipx && pipx install insto     # macOS, nothing yet
 ```
 
+### `insto: command not found` after install
+
+Both `pipx` and `uv tool` drop the launcher into `~/.local/bin`, and that directory is not on `$PATH` by default on a fresh Linux box (Ubuntu, Debian, Alpine, most cloud images). The installer prints a one-line warning when it happens — easy to miss in a long log. Fix it once:
+
+```sh
+pipx ensurepath                # or: uv tool update-shell
+exec "$SHELL"                  # reload PATH in the current shell
+insto --version
+```
+
+Or do it yourself:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc   # or ~/.zshrc
+source ~/.bashrc
+```
+
+macOS / Homebrew installs already prepend `~/.local/bin` for `pipx`, so this only bites Linux users — typically when running over SSH on a freshly-provisioned server.
+
 ### With the aiograpi backend
 
 `insto[aiograpi]` adds the optional [aiograpi](https://github.com/subzeroid/aiograpi) dependency so you can authenticate as a real Instagram user (private accounts you follow, login-walled endpoints) instead of paying per call against HikerAPI. Pick the same install path you would for the bare CLI, with the extras marker added:

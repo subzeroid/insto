@@ -12,6 +12,18 @@ pipx install insto                          # if you have pipx
 brew install pipx && pipx install insto     # macOS, nothing yet
 ```
 
+### With the aiograpi backend
+
+`insto[aiograpi]` adds the optional [aiograpi](https://github.com/subzeroid/aiograpi) dependency so you can authenticate as a real Instagram user (private accounts you follow, login-walled endpoints) instead of paying per call against HikerAPI. Pick the same install path you would for the bare CLI, with the extras marker added:
+
+```sh
+uv tool install 'insto[aiograpi]'
+pipx install 'insto[aiograpi]'
+pip install 'insto[aiograpi]'                # in a venv only — see PEP 668 below
+```
+
+After install, `insto setup` will offer `backend (hiker | aiograpi)` and prompt for the credentials of the chosen backend. See [Backends](backends.md) for the trade-offs and the account-ban risk.
+
 ### What about `pip install insto`?
 
 It does **not** work out of the box on modern systems and that is intentional, not an `insto` bug.

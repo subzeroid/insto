@@ -24,6 +24,18 @@ pipx install insto                 # pip users — same effect, classic tool
 brew install pipx && pipx install insto   # macOS, no Python yet
 ```
 
+For the optional logged-in `aiograpi` backend (private accounts, posts
+behind Instagram's login wall) install with the extra:
+
+```sh
+uv tool install 'insto[aiograpi]'
+pipx install 'insto[aiograpi]'
+```
+
+`insto setup` then offers a `hiker | aiograpi` choice and prompts for
+the right credentials. See [`docs/backends.md`](docs/backends.md) for
+the trade-offs and the account-ban risk on aiograpi.
+
 Or from a checkout (development):
 
 ```sh
@@ -169,6 +181,8 @@ Inside the REPL each command may be invoked with or without a leading `/`.
 - `~/.insto/config.toml` — settings (mode `0600`).
 - `~/.insto/store.db` — sqlite store: snapshots, watches, cli history.
 - `~/.insto/logs/insto.log` — rotating log file (mode `0600`, secrets redacted).
+- `~/.insto/aiograpi.session.json` — persisted Instagram session for the
+  aiograpi backend (mode `0600`; only created when you pick that backend).
 - `./output/<user>/<type>/…` — downloaded media. Override with
   `[output_dir]` in config or `--out` on commands that accept it.
 

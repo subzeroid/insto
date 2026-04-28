@@ -111,7 +111,7 @@ _PALETTES: dict[str, _Palette] = {
 
 THEMES: dict[str, Theme] = {name: _make_theme(p) for name, p in _PALETTES.items()}
 
-DEFAULT_THEME_NAME: str = "claude"
+DEFAULT_THEME_NAME: str = "aiograpi"
 INSTO_THEME: Theme = THEMES[DEFAULT_THEME_NAME]
 
 

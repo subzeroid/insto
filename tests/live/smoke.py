@@ -50,7 +50,7 @@ async def _run_required(backend: HikerBackend) -> list[tuple[str, BaseException]
         try:
             out = await coro_factory()
             print(f"REQ {name}: {out}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             failures.append((name, exc))
             print(f"REQ {name} FAIL: {type(exc).__name__}: {str(exc)[:140]}")
 
@@ -133,7 +133,7 @@ async def _run_optional(backend: HikerBackend) -> tuple[int, int]:
             out = await coro_factory()
             opt_pass += 1
             print(f"opt {name}: {out}")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"opt {name}: {type(exc).__name__}: {str(exc)[:140]}")
 
     async def similar() -> str:

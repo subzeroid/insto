@@ -30,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -47,6 +48,7 @@ from insto.exceptions import (
     Transient,
 )
 from insto.models import Comment, Highlight, HighlightItem, Post, Profile, Quota, Story, User
+from insto.service.metrics import Metrics, MetricsSnapshot
 
 log = logging.getLogger("insto.backends.aiograpi")
 
@@ -167,6 +169,7 @@ class AiograpiBackend(OSINTBackend):
         self._logged_in = False
         self._last_error: BaseException | None = None
         self._drift_count = 0
+        self._metrics = Metrics()
 
     # ------------------------------------------------------------------ auth
 
@@ -204,16 +207,28 @@ class AiograpiBackend(OSINTBackend):
     # ------------------------------------------------------------------ exec
 
     async def _call(self, factory: Any) -> Any:
-        """Single-shot wrapper: ensure login, run, translate any error."""
+        """Single-shot wrapper: ensure login, run, translate any error.
+
+        Records latency and error type into ``self._metrics`` so /health
+        can show backend health without a separate logging path. The
+        ``_ensure_logged_in`` step is *outside* the timer — login latency
+        is a one-time setup cost we don't want skewing the per-call p50.
+        """
         await self._ensure_logged_in()
+        start = time.monotonic()
         try:
-            return await factory()
+            result = await factory()
         except BackendError as exc:
+            self._metrics.record((time.monotonic() - start) * 1000.0, error=exc)
             self._last_error = exc
             raise
         except Exception as exc:
+            mapped = _translate(exc)
+            self._metrics.record((time.monotonic() - start) * 1000.0, error=mapped)
             self._last_error = exc
-            raise _translate(exc) from exc
+            raise mapped from exc
+        self._metrics.record((time.monotonic() - start) * 1000.0, error=None)
+        return result
 
     # ------------------------------------------------------------------ resolve
 
@@ -392,6 +407,9 @@ class AiograpiBackend(OSINTBackend):
 
     def get_schema_drift_count(self) -> int:
         return self._drift_count
+
+    def get_metrics(self) -> MetricsSnapshot:
+        return self._metrics.snapshot()
 
     async def aclose(self) -> None:
         """Close the underlying httpx client.

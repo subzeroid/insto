@@ -63,6 +63,7 @@ from insto.models import (
     Story,
     User,
 )
+from insto.service.metrics import Metrics, MetricsSnapshot
 
 T = TypeVar("T")
 
@@ -296,6 +297,7 @@ class HikerBackend(OSINTBackend):
         self._quota: Quota = Quota.unknown()
         self._last_error: BaseException | None = None
         self._drift_count: int = 0
+        self._metrics = Metrics()
 
     def _record_drift(self, exc: SchemaDrift) -> SchemaDrift:
         """Track a `SchemaDrift` for `/health`. Returns `exc` so callers can `raise`."""
@@ -333,19 +335,30 @@ class HikerBackend(OSINTBackend):
             except httpx.RequestError as exc:
                 raise Transient(f"HikerAPI network error: {exc}") from exc
 
+        # Wall-clock latency of the whole _call (including all retry
+        # waits). If the SDK retried 3x before succeeding, the latency
+        # reflects all of it — that's exactly what /health should show
+        # to flag a degraded backend.
+        start = time.monotonic()
         try:
             # `_apply_retry` is constructor-injected and erases its argument's
             # generic to `Any`; cast back to `T` since `attempt`'s body is
             # statically `Awaitable[T]`.
-            return cast(T, await attempt())
+            result = cast(T, await attempt())
         except _NotFoundError:
             # The internal sentinel — let the caller translate to a typed
             # ProfileNotFound / PostNotFound *with context* and record that
-            # final error rather than the internal placeholder.
+            # final error rather than the internal placeholder. NotFound is
+            # a normal answer ("user doesn't exist"), not a backend error,
+            # so we record it as a successful call for latency purposes.
+            self._metrics.record((time.monotonic() - start) * 1000.0, error=None)
             raise
         except BackendError as exc:
+            self._metrics.record((time.monotonic() - start) * 1000.0, error=exc)
             self._last_error = exc
             raise
+        self._metrics.record((time.monotonic() - start) * 1000.0, error=None)
+        return result
 
     def _raise_not_found(self, mapped: BackendError, original: BaseException) -> NoReturn:
         """Map an internal `_NotFoundError` to a public typed error and remember it."""
@@ -726,6 +739,9 @@ class HikerBackend(OSINTBackend):
 
     def get_schema_drift_count(self) -> int:
         return self._drift_count
+
+    def get_metrics(self) -> MetricsSnapshot:
+        return self._metrics.snapshot()
 
     async def aclose(self) -> None:
         """Close the underlying SDK client."""

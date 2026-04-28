@@ -30,6 +30,7 @@ from insto.models import (
     Story,
     User,
 )
+from insto.service.metrics import Metrics, MetricsSnapshot
 
 
 class OSINTBackend(ABC):
@@ -125,6 +126,16 @@ class OSINTBackend(ABC):
         so an operator can spot provider degradation.
         """
         return 0
+
+    def get_metrics(self) -> MetricsSnapshot:
+        """Return a snapshot of per-call latency / error metrics.
+
+        Default is an empty snapshot so backends that don't record (test
+        fakes) don't have to override. Real backends instrument their
+        `_call` boundary with `Metrics.record(...)` and return its
+        snapshot here — `/health` renders it.
+        """
+        return Metrics().snapshot()
 
     async def aclose(self) -> None:  # noqa: B027 — intentional empty default
         """Release backend-owned resources (HTTP clients, sockets, …).

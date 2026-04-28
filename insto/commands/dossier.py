@@ -142,8 +142,101 @@ def _user_rows(users: Sequence[User]) -> list[dict[str, Any]]:
     ]
 
 
+def _user_maltego_rows(users: Sequence[User]) -> list[dict[str, Any]]:
+    """Maltego entity-row shape: `value` is the username, extras flow into Properties."""
+    return [
+        {
+            "value": u.username,
+            "weight": 1,
+            "notes": u.full_name,
+            "rank": i,
+            "pk": u.pk,
+            "is_private": u.is_private,
+            "is_verified": u.is_verified,
+        }
+        for i, u in enumerate(users, 1)
+    ]
+
+
 def _toplist_rows(top: analytics.TopList) -> list[dict[str, Any]]:
     return [{"rank": i, "key": key, "count": count} for i, (key, count) in enumerate(top.items, 1)]
+
+
+def _toplist_maltego_rows(top: analytics.TopList) -> list[dict[str, Any]]:
+    return [
+        {"value": key, "weight": count, "rank": i} for i, (key, count) in enumerate(top.items, 1)
+    ]
+
+
+# Per-section entity types when `--maltego` is set. Same mapping the
+# standalone /hashtags / /mentions / ... commands use, so importing the
+# dossier into Maltego produces nodes of the same kind as importing
+# each section individually.
+_DOSSIER_MALTEGO_KIND: dict[str, str] = {
+    "followers": "user",
+    "followings": "user",
+    "mutuals": "user",
+    "hashtags": "hashtag",
+    "mentions": "mention",
+    "locations": "location",
+    "wcommented": "user",
+    "wtagged": "user",
+}
+
+
+def _write_user_section(
+    facade: OsintFacade,
+    *,
+    users: Sequence[User],
+    command: str,
+    target: str,
+    dossier_dir: Path,
+    filename_stem: str,
+    maltego: bool,
+) -> Path:
+    """Write a user-list section in either plain CSV or Maltego CSV.
+
+    Returns the path actually written. The two formats live side by
+    side in the dossier directory only if a future caller writes both
+    — today the dossier picks one based on `--maltego`.
+    """
+    if maltego:
+        path = dossier_dir / f"{filename_stem}.maltego.csv"
+        facade.export_maltego(
+            _user_maltego_rows(users),
+            command=command,
+            entity_type=_DOSSIER_MALTEGO_KIND[command],
+            target=target,
+            dest=path,
+        )
+        return path
+    path = dossier_dir / f"{filename_stem}.csv"
+    facade.export_csv(_user_rows(users), command=command, target=target, dest=path)
+    return path
+
+
+def _write_toplist_section(
+    facade: OsintFacade,
+    *,
+    top: analytics.TopList,
+    command: str,
+    target: str,
+    dossier_dir: Path,
+    maltego: bool,
+) -> Path:
+    if maltego:
+        path = dossier_dir / f"{command}.maltego.csv"
+        facade.export_maltego(
+            _toplist_maltego_rows(top),
+            command=command,
+            entity_type=_DOSSIER_MALTEGO_KIND[command],
+            target=target,
+            dest=path,
+        )
+        return path
+    path = dossier_dir / f"{command}.csv"
+    facade.export_csv(_toplist_rows(top), command=command, target=target, dest=path)
+    return path
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +280,7 @@ async def _do_posts(
 
 
 async def _do_network_bundle(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> tuple[SectionResult, SectionResult, SectionResult, BaseException | None]:
     """Fetch followers + following exactly once, derive mutuals locally.
 
@@ -218,9 +311,14 @@ async def _do_network_bundle(
             error=f"{type(followers_res).__name__}: {followers_res}",
         )
     else:
-        path = dossier_dir / "followers.csv"
-        facade.export_csv(
-            _user_rows(followers_res), command="followers", target=username, dest=path
+        path = _write_user_section(
+            facade,
+            users=followers_res,
+            command="followers",
+            target=username,
+            dossier_dir=dossier_dir,
+            filename_stem="followers",
+            maltego=maltego,
         )
         followers_section = SectionResult(
             name="followers",
@@ -235,9 +333,14 @@ async def _do_network_bundle(
             error=f"{type(followings_res).__name__}: {followings_res}",
         )
     else:
-        path = dossier_dir / "following.csv"
-        facade.export_csv(
-            _user_rows(followings_res), command="followings", target=username, dest=path
+        path = _write_user_section(
+            facade,
+            users=followings_res,
+            command="followings",
+            target=username,
+            dossier_dir=dossier_dir,
+            filename_stem="following",
+            maltego=maltego,
         )
         following_section = SectionResult(
             name="following",
@@ -268,8 +371,15 @@ async def _do_network_bundle(
             follower_limit=limit,
             following_limit=limit,
         )
-        path = dossier_dir / "mutuals.csv"
-        facade.export_csv(_user_rows(result.items), command="mutuals", target=username, dest=path)
+        path = _write_user_section(
+            facade,
+            users=result.items,
+            command="mutuals",
+            target=username,
+            dossier_dir=dossier_dir,
+            filename_stem="mutuals",
+            maltego=maltego,
+        )
         mutuals_section = SectionResult(name="mutuals", file=path, count=len(result.items))
 
     # Surface hard limits so the outer guard can flip the abort flag for
@@ -286,47 +396,77 @@ async def _do_network_bundle(
 
 
 async def _do_hashtags(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> SectionResult:
     top = await facade.hashtags(username, limit=limit)
-    path = dossier_dir / "hashtags.csv"
-    facade.export_csv(_toplist_rows(top), command="hashtags", target=username, dest=path)
+    path = _write_toplist_section(
+        facade,
+        top=top,
+        command="hashtags",
+        target=username,
+        dossier_dir=dossier_dir,
+        maltego=maltego,
+    )
     return SectionResult(name="hashtags", file=path, count=len(top.items))
 
 
 async def _do_mentions(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> SectionResult:
     top = await facade.mentions(username, limit=limit)
-    path = dossier_dir / "mentions.csv"
-    facade.export_csv(_toplist_rows(top), command="mentions", target=username, dest=path)
+    path = _write_toplist_section(
+        facade,
+        top=top,
+        command="mentions",
+        target=username,
+        dossier_dir=dossier_dir,
+        maltego=maltego,
+    )
     return SectionResult(name="mentions", file=path, count=len(top.items))
 
 
 async def _do_locations(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> SectionResult:
     top = await facade.locations(username, limit=limit)
-    path = dossier_dir / "locations.csv"
-    facade.export_csv(_toplist_rows(top), command="locations", target=username, dest=path)
+    path = _write_toplist_section(
+        facade,
+        top=top,
+        command="locations",
+        target=username,
+        dossier_dir=dossier_dir,
+        maltego=maltego,
+    )
     return SectionResult(name="locations", file=path, count=len(top.items))
 
 
 async def _do_wcommented(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> SectionResult:
     top = await facade.wcommented(username, limit=limit)
-    path = dossier_dir / "wcommented.csv"
-    facade.export_csv(_toplist_rows(top), command="wcommented", target=username, dest=path)
+    path = _write_toplist_section(
+        facade,
+        top=top,
+        command="wcommented",
+        target=username,
+        dossier_dir=dossier_dir,
+        maltego=maltego,
+    )
     return SectionResult(name="wcommented", file=path, count=len(top.items))
 
 
 async def _do_wtagged(
-    facade: OsintFacade, username: str, limit: int, dossier_dir: Path
+    facade: OsintFacade, username: str, limit: int, dossier_dir: Path, *, maltego: bool = False
 ) -> SectionResult:
     top = await facade.wtagged(username, limit=limit)
-    path = dossier_dir / "wtagged.csv"
-    facade.export_csv(_toplist_rows(top), command="wtagged", target=username, dest=path)
+    path = _write_toplist_section(
+        facade,
+        top=top,
+        command="wtagged",
+        target=username,
+        dossier_dir=dossier_dir,
+        maltego=maltego,
+    )
     return SectionResult(name="wtagged", file=path, count=len(top.items))
 
 
@@ -416,6 +556,11 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
     started = time.monotonic()
     no_download = ctx.no_download
     user_limit = ctx.limit
+    # `--maltego` swaps each maltego-eligible section's CSV writer
+    # for the entity-import shape (`Type, Value, Weight, Notes,
+    # Properties`). profile.json + posts.json keep their JSON shape —
+    # there's no canonical entity-per-row representation for those.
+    maltego = ctx.output_format() == "maltego"
 
     # 1. Pre-flight: profile must be public. NOTHING else fires on a
     #    non-public profile, and no directory is created.
@@ -473,7 +618,7 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
             return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
         try:
             followers_s, following_s, mutuals_s, abort_exc = await _do_network_bundle(
-                ctx.facade, username, network_n, dossier_dir
+                ctx.facade, username, network_n, dossier_dir, maltego=maltego
             )
         except (QuotaExhausted, AuthInvalid, Banned) as exc:
             abort.set()
@@ -486,11 +631,11 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
 
     coros = [
         _guarded(_do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)),
-        _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir)),
-        _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir)),
-        _guarded(_do_locations(ctx.facade, username, analytics_n, dossier_dir)),
-        _guarded(_do_wcommented(ctx.facade, username, analytics_n, dossier_dir)),
-        _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir)),
+        _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+        _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+        _guarded(_do_locations(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+        _guarded(_do_wcommented(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+        _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir, maltego=maltego)),
     ]
     network_task = asyncio.create_task(_network_guarded())
     other_results = await asyncio.gather(*coros, return_exceptions=True)

@@ -330,11 +330,14 @@ def validate_global_flags(name: str, args: argparse.Namespace) -> None:
             f"/{name} cannot be exported as CSV (output is not flat). "
             f"Use --json instead. Flat-row commands: {flat}"
         )
-    if fmt == "maltego" and name not in MALTEGO_COMMANDS:
+    # /dossier is a special case: it composes many maltego-eligible
+    # sub-sections and emits one .maltego.csv per section in addition
+    # to the JSON top-level outputs. Allow it through.
+    if fmt == "maltego" and name not in MALTEGO_COMMANDS and name != "dossier":
         eligible = ", ".join(sorted(MALTEGO_COMMANDS))
         raise CommandUsageError(
             f"/{name} cannot be exported as Maltego CSV (no canonical entity per row). "
-            f"Maltego-eligible commands: {eligible}"
+            f"Maltego-eligible commands: {eligible}, dossier"
         )
 
 

@@ -2,6 +2,18 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.2.2] - 2026-04-29
+
+### Added
+
+- **`tests/live/smoke.py`** — structured live smoke against the real HikerAPI, eight REQ checks + one OPT (`/similar`). Skips with exit 0 when `HIKERAPI_TOKEN_TEST` is unset, so it's safe in any release-prep gate. Costs ~10 calls, single-digit cents. See `CONTRIBUTING.md`.
+- **`/health` observability** — extends the existing quota / drift output with per-call latency p50/p95/max, cumulative call count, and a breakdown of `BackendError` subtypes seen this session. Instrumented at the `_call` boundary in both backends; latencies are kept in a 1000-slot ring (~8 KB).
+- **`/dossier --maltego`** — promised in the README since v0.1, finally implemented. Each maltego-eligible section (followers, following, mutuals, hashtags, mentions, locations, wcommented, wtagged) writes a `.maltego.csv` with the standard `Type, Value, Weight, Notes, Properties` shape; profile.json + posts.json keep their JSON form. Verified live on both hiker and aiograpi backends.
+
+### Fixed
+
+- `iter_hashtag_posts` was silently broken on the real HikerAPI: hashtag responses use `response.sections[*].layout_content.medias[*].media`, not the generic `users/items/comments` keys, and the cursor at the top level is `next_page_id` (a base64 envelope), not the inner `next_max_id` (a hex string the server rejects). The live smoke caught this — mocks always passed because the fakes mirrored the wrong shape.
+
 ## [0.2.1] - 2026-04-28
 
 ### Added

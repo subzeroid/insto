@@ -85,16 +85,37 @@ def _format_last_error(err: BaseException | None) -> str:
     return f"{type(err).__name__}: {err}"
 
 
-@command("health", "Ping the backend and report quota + last error + drift count")
+def _format_latency(value_ms: float | None) -> str:
+    if value_ms is None:
+        return "—"
+    if value_ms >= 1000:
+        return f"{value_ms / 1000:.2f}s"
+    return f"{value_ms:.0f}ms"
+
+
+def _format_errors(errors_by_type: dict[str, int]) -> str:
+    if not errors_by_type:
+        return "none"
+    # Show in descending count order so the noisiest class is first.
+    parts = sorted(errors_by_type.items(), key=lambda kv: (-kv[1], kv[0]))
+    return ", ".join(f"{name} x{count}" for name, count in parts)
+
+
+@command(
+    "health",
+    "Backend status: quota, last error, drift count, p50/p95 latency, error breakdown",
+)
 async def health_cmd(ctx: CommandContext) -> dict[str, Any]:
     quota = ctx.facade.quota()
     last_err = ctx.facade.last_error()
     schema_drifts = ctx.facade.backend.get_schema_drift_count()
+    metrics = ctx.facade.backend.get_metrics()
     payload: dict[str, Any] = {
         "backend": type(ctx.facade.backend).__name__,
         "quota": dataclasses.asdict(quota),
         "last_error": _format_last_error(last_err),
         "schema_drifts": schema_drifts,
+        "metrics": dataclasses.asdict(metrics),
     }
     fmt = ctx.output_format()
     if fmt == "json":
@@ -111,6 +132,13 @@ async def health_cmd(ctx: CommandContext) -> dict[str, Any]:
     ctx.print(f"quota remaining: {rem}")
     ctx.print(f"last error: {payload['last_error']}")
     ctx.print(f"schema drifts: {schema_drifts}")
+    ctx.print(f"calls (session): {metrics.calls}")
+    ctx.print(
+        f"latency: p50={_format_latency(metrics.latency_p50_ms)} "
+        f"p95={_format_latency(metrics.latency_p95_ms)} "
+        f"max={_format_latency(metrics.latency_max_ms)}"
+    )
+    ctx.print(f"errors: {_format_errors(metrics.errors_by_type)}")
     return payload
 
 

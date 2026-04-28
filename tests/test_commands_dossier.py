@@ -289,6 +289,66 @@ async def test_dossier_happy_path_no_download_creates_full_layout(
     assert len(mutuals_csv) == 3
 
 
+async def test_dossier_maltego_writes_entity_csvs(
+    backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """`--maltego` swaps every eligible section's CSV for a Maltego entity-import CSV.
+
+    profile.json + posts.json keep their JSON shape — they don't have a
+    canonical entity-per-row representation. The 8 maltego-eligible
+    sections (followers/following/mutuals/hashtags/mentions/locations/
+    wcommented/wtagged) each get a `.maltego.csv` with the standard
+    Maltego header.
+    """
+    facade = _make_facade(backend, history, config)
+    out = await dispatch("/dossier --maltego --no-download --yes", facade=facade, session=session)
+    assert isinstance(out, Path)
+    files = {p.name for p in out.iterdir() if p.is_file()}
+
+    # JSON sections unchanged.
+    assert "profile.json" in files
+    assert "posts.json" in files
+
+    # All maltego-eligible sections moved to .maltego.csv. None of the
+    # plain .csv variants should exist when --maltego is set.
+    expected_maltego = {
+        "followers.maltego.csv",
+        "following.maltego.csv",
+        "mutuals.maltego.csv",
+        "hashtags.maltego.csv",
+        "mentions.maltego.csv",
+        "locations.maltego.csv",
+        "wcommented.maltego.csv",
+        "wtagged.maltego.csv",
+    }
+    assert expected_maltego <= files
+    plain_csvs = {f for f in files if f.endswith(".csv") and not f.endswith(".maltego.csv")}
+    assert plain_csvs == set()
+
+    # Maltego CSVs use the canonical header.
+    header_expected = "Type,Value,Weight,Notes,Properties"
+    for fname in expected_maltego:
+        lines = (out / fname).read_text().splitlines()
+        assert lines and lines[0] == header_expected, fname
+
+    # User-shaped sections produce maltego.Person rows.
+    followers_lines = (out / "followers.maltego.csv").read_text().splitlines()
+    assert any(line.startswith("maltego.Person,") for line in followers_lines[1:])
+
+    # Hashtags use maltego.Phrase, locations use maltego.GPS.
+    hashtags_lines = (out / "hashtags.maltego.csv").read_text().splitlines()
+    if len(hashtags_lines) > 1:
+        assert hashtags_lines[1].startswith("maltego.Phrase,")
+
+    # MANIFEST references the maltego files (not the .csv ones).
+    manifest = (out / "MANIFEST.md").read_text()
+    assert "followers.maltego.csv" in manifest
+    assert "followers.csv" not in manifest.replace("followers.maltego.csv", "")
+
+
 async def test_dossier_directory_named_with_utc_timestamp(
     backend: FakeBackend,
     history: HistoryStore,

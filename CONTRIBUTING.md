@@ -20,7 +20,7 @@ uv run pytest -k hiker                           # subset
 uv run pytest --cov=insto --cov-report=term-missing
 ```
 
-The suite is fully offline — no real HikerAPI or Instagram calls. The single live smoke flow is documented in `CLAUDE.md` and is gated by an explicit `HIKERAPI_TOKEN` env var.
+The suite is fully offline — no real HikerAPI or Instagram calls. To exercise the live path manually, set `HIKERAPI_TOKEN` and run a few one-shots: `insto -c info instagram`, `insto -c quota`, `insto -c posts instagram --limit 3 --no-download`. Costs ~5 requests; never wired into CI.
 
 Coverage targets: keep pure-logic modules at 100% (`models`, `_redact`, `exceptions`, mappers). Everything else: 90%+ on touched code.
 

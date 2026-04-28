@@ -2,6 +2,8 @@
 
 Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend.
 
+![demo](docs/demo.gif)
+
 Two surfaces over the same command grammar:
 
 - **REPL** — `insto` drops you into a prompt-toolkit session with tab-completion,
@@ -52,28 +54,49 @@ REPL:
 
 ```text
 $ insto
-… wasp banner …
-Tips: /target @user · /info · /posts --limit 10 · /watch · /quit
-> /target @ferrari
+                                Tips for getting started
+  ___ _   _ ____ _____ ___      /target <user>  set OSINT target
+ |_ _| \ | / ___|_   _/ _ \     /info           full profile dump
+  | ||  \| \___ \ | || | | |    /help           list all commands
+  | || |\  |___) || || |_| |
+ |___|_| \_|____/ |_| \___/     Recent activity
+                                @nasa
+ i n s t o  ⇋  o s i n t        @instagram
+ instagram tool · open-source intel
+                                hiker · 14.7M requests left · $4,417 · 15 rps cap
+
+insto @→ /
+```
+
+Type `/` and the popup opens with every command (Slack / Claude Code style):
+
+```text
+insto @→ /info
+> /target ferrari
 > /info
-> /posts --limit 10 --download
-> /followers --limit 200 --json followers.json
+> /posts 10                   # last 10 feed posts, media saved under output/ferrari/posts/
+> /posts 10 --no-download     # URLs only, no CDN write
+> /followers 500 --csv followers.csv
 > /diff
-> /watch ferrari 600
+> /watch ferrari 600          # poll every 10 minutes (5 min floor)
+> /dossier                    # collect a full target package
 > /quit
 ```
 
-`/watch <user> [interval-seconds]` — interval defaults to the 5-minute
-floor; `/unwatch <user>` removes a watch and `/watching` lists active ones.
+`/info <user>` is also valid as inline form — runs the lookup without
+mutating the active session target. Same for every single-target
+command (`/posts nasa 5`, `/dossier nasa`, ...).
 
 One-shot:
 
 ```sh
 insto @ferrari -c info
-insto @ferrari -c posts --limit 10 --json -
-insto @ferrari -c followers --limit 500 --csv followers.csv
-insto -c batch targets.txt info --json - --yes
-insto @ferrari -c dossier
+insto -c info instagram                                    # inline target, no REPL state
+insto @ferrari -c posts 10 --json -                        # 10 posts, JSON to stdout
+insto @ferrari -c followers 500 --csv followers.csv
+insto @ferrari -c followers 200 --maltego                  # Maltego CSV under output/ferrari/
+cat targets.txt | insto -c batch - info --yes              # stdin pipe + non-interactive
+insto -c dossier instagram                                 # full target package
 ```
 
 `-c <cmd>` consumes the rest of `argv` as the slash-command's arguments,
@@ -134,14 +157,19 @@ Inside the REPL each command may be invoked with or without a leading `/`.
 - `./output/<user>/<type>/…` — downloaded media. Override with
   `[output_dir]` in config or `--out` on commands that accept it.
 
-## Design & spec
+## Documentation
 
-Architecture is documented in [`docs/superpowers/specs/2026-04-27-insto-design.md`](docs/superpowers/specs/2026-04-27-insto-design.md)
-(442 lines, source of truth). Implementation plan:
-[`docs/plans/2026-04-27-insto-v0.1-implementation.md`](docs/plans/2026-04-27-insto-v0.1-implementation.md).
+Full docs at <https://subzeroid.github.io/insto/>:
 
-Contributor docs: [`CLAUDE.md`](CLAUDE.md).
+- [Installation](https://subzeroid.github.io/insto/installation/)
+- [Basic usage](https://subzeroid.github.io/insto/basic-usage/)
+- [CLI reference](https://subzeroid.github.io/insto/cli-reference/)
+- [Backends](https://subzeroid.github.io/insto/backends/)
+- [Architecture](https://subzeroid.github.io/insto/architecture/)
+- [Troubleshooting](https://subzeroid.github.io/insto/troubleshooting/)
+
+Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md). Security policy: [SECURITY.md](SECURITY.md).
 
 ## License
 
-MIT.
+MIT — see [LICENSE](LICENSE).

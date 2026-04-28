@@ -160,7 +160,11 @@ def _format_error(exc: BaseException) -> str:
     elif isinstance(exc, Transient):
         msg = f"transient backend error: {exc.detail}"
     elif isinstance(exc, Banned):
-        msg = f"backend account is banned: {exc.detail}"
+        # The Banned class is reused for both "your aiograpi-logged-in
+        # account is suspended" and "HikerAPI 403 forbidden for this
+        # endpoint" — the message itself carries the diagnosis, no need
+        # to bolt on a misleading prefix.
+        msg = str(exc)
     elif isinstance(exc, BackendError):
         msg = f"backend error: {exc}"
     elif isinstance(exc, CommandUsageError):

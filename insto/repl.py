@@ -244,16 +244,41 @@ class Repl:
             self.console.clear()
             self.redraw_banner()
 
-        @kb.add("/")
-        def _open_slash_menu(event: KeyPressEvent) -> None:
-            """Open the command popup the moment '/' is typed at the start of
-            the line — Claude-Code-style. ThreadedCompleter (wired into
-            PromptSession) keeps the popup live as the user narrows the prefix
-            (`/`, `/i`, `/in`, `/info`)."""
-            buf = event.current_buffer
-            buf.insert_text("/")
-            if buf.document.text_before_cursor.strip() == "/":
+        # Slash-popup keystroke handling.
+        #
+        # `complete_while_typing=True` *is* enabled, but prompt_toolkit
+        # debounces it — the popup briefly collapses on each keystroke before
+        # re-opening, which reads as flicker / "popup disappeared" when the
+        # user types '/i'. Bind every character that can appear in a command
+        # name (the registered names are `[a-z0-9_-]+`) plus '/' so each
+        # keystroke synchronously inserts the char *and* re-opens the menu.
+        #
+        # Filter: only fires while the cursor is still inside the first
+        # token. Once the user types a space (entering arguments), regular
+        # input flow resumes — no completer fights with positional parsing.
+        from prompt_toolkit.application import get_app
+        from prompt_toolkit.filters import Condition
+
+        @Condition
+        def _in_first_token() -> bool:
+            text = get_app().current_buffer.document.text_before_cursor
+            return " " not in text
+
+        def _make_keep_popup(ch: str) -> Callable[[KeyPressEvent], None]:
+            def handler(event: KeyPressEvent) -> None:
+                buf = event.current_buffer
+                buf.insert_text(ch)
                 buf.start_completion(select_first=False)
+
+            return handler
+
+        command_name_chars = (
+            "abcdefghijklmnopqrstuvwxyz"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "0123456789_-/"
+        )
+        for ch in command_name_chars:
+            kb.add(ch, filter=_in_first_token)(_make_keep_popup(ch))
 
         return kb
 

@@ -98,9 +98,7 @@ def _translate(exc: BaseException) -> BackendError:
         return Banned(f"aiograpi: {type(exc).__name__} ({exc})")
     if isinstance(
         exc,
-        ae.RateLimitError
-        | ae.PleaseWaitFewMinutes
-        | ae.ClientThrottledError,
+        ae.RateLimitError | ae.PleaseWaitFewMinutes | ae.ClientThrottledError,
     ):
         # aiograpi's PleaseWaitFewMinutes wraps Instagram's "wait a few
         # minutes before you try again" — treat as 60s minimum retry.
@@ -236,9 +234,7 @@ class AiograpiBackend(OSINTBackend):
 
     # ------------------------------------------------------------------ posts
 
-    async def iter_user_posts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_posts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         from insto.backends._aiograpi_map import map_post
 
         amount = int(limit) if limit else 0  # 0 = "as many as the API will give"
@@ -251,9 +247,7 @@ class AiograpiBackend(OSINTBackend):
                 self._last_error = drift
                 raise
 
-    async def iter_user_tagged(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_tagged(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         raise BackendError(
             "aiograpi 0.7 does not expose a tagged-feed endpoint; this command "
             "needs the hiker backend."
@@ -262,9 +256,7 @@ class AiograpiBackend(OSINTBackend):
 
     # ------------------------------------------------------------------ stories
 
-    async def iter_user_stories(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Story]:
+    async def iter_user_stories(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Story]:
         from insto.backends._aiograpi_map import map_story
 
         items = await self._call(lambda: self._client.user_stories(str(pk)))
@@ -306,9 +298,7 @@ class AiograpiBackend(OSINTBackend):
         from insto.backends._aiograpi_map import map_user_short
 
         amount = int(limit) if limit else 0
-        users = await self._call(
-            lambda: self._client.user_followers(str(pk), amount=amount)
-        )
+        users = await self._call(lambda: self._client.user_followers(str(pk), amount=amount))
         # aiograpi returns a {pk → UserShort} dict for paginated endpoints.
         items = users.values() if isinstance(users, dict) else users
         for raw in items:
@@ -320,9 +310,7 @@ class AiograpiBackend(OSINTBackend):
         from insto.backends._aiograpi_map import map_user_short
 
         amount = int(limit) if limit else 0
-        users = await self._call(
-            lambda: self._client.user_following(str(pk), amount=amount)
-        )
+        users = await self._call(lambda: self._client.user_following(str(pk), amount=amount))
         items = users.values() if isinstance(users, dict) else users
         for raw in items:
             yield map_user_short(raw)
@@ -341,9 +329,7 @@ class AiograpiBackend(OSINTBackend):
         from insto.backends._aiograpi_map import map_comment
 
         amount = int(limit) if limit else 0
-        items = await self._call(
-            lambda: self._client.media_comments(str(media_pk), amount=amount)
-        )
+        items = await self._call(lambda: self._client.media_comments(str(media_pk), amount=amount))
         for raw in items:
             yield map_comment(raw, media_pk=str(media_pk))
 

@@ -320,9 +320,7 @@ def _run_setup(
     print("press Enter to keep the shown default; values are masked on display.", file=stream)
 
     backend_default = (existing.backend if existing else None) or "hiker"
-    backend_input = prompt(
-        f"backend (hiker | aiograpi) [{backend_default}]: "
-    ).strip().lower()
+    backend_input = prompt(f"backend (hiker | aiograpi) [{backend_default}]: ").strip().lower()
     backend = backend_input or backend_default
     if backend not in {"hiker", "aiograpi"}:
         print(f"unknown backend {backend!r}; falling back to hiker", file=stream)
@@ -345,15 +343,11 @@ def _run_setup(
     aio_pass = existing.aiograpi_password if existing else None
     aio_totp = existing.aiograpi_totp_seed if existing else None
     if backend == "aiograpi":
-        u_in = prompt(
-            f"aiograpi.username [{aio_user or '(none)'}]: "
-        ).strip()
+        u_in = prompt(f"aiograpi.username [{aio_user or '(none)'}]: ").strip()
         if u_in:
             aio_user = u_in
         p_default_disp = f"***{aio_pass[-2:]}" if aio_pass and len(aio_pass) >= 2 else "(none)"
-        p_in = secret_prompt(
-            f"aiograpi.password [{p_default_disp}] (input hidden): "
-        ).strip()
+        p_in = secret_prompt(f"aiograpi.password [{p_default_disp}] (input hidden): ").strip()
         if p_in:
             aio_pass = p_in
         t_default_disp = "***" if aio_totp else "(none)"
@@ -480,12 +474,9 @@ async def _run_oneshot(
     if config.backend == "hiker" and not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         return 1
-    if config.backend == "aiograpi" and not (
-        config.aiograpi_username and config.aiograpi_password
-    ):
+    if config.backend == "aiograpi" and not (config.aiograpi_username and config.aiograpi_password):
         print(
-            "no aiograpi credentials configured. Run `insto setup` and pick the "
-            "aiograpi backend.",
+            "no aiograpi credentials configured. Run `insto setup` and pick the aiograpi backend.",
             file=sys.stderr,
         )
         return 1

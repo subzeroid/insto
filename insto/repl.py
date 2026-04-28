@@ -93,8 +93,7 @@ class _SlashCommandCompleter(Completer):
         # Pre-compute (name, signature, help) so the menu shows positional
         # arguments next to the command name (`/theme <name>`, `/info [target]`).
         self._items: list[tuple[str, str, str]] = sorted(
-            (name, command_signature(spec), spec.help)
-            for name, spec in COMMANDS.items()
+            (name, command_signature(spec), spec.help) for name, spec in COMMANDS.items()
         )
 
     def get_completions(
@@ -331,11 +330,7 @@ class Repl:
 
             return handler
 
-        command_name_chars = (
-            "abcdefghijklmnopqrstuvwxyz"
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-            "0123456789_-/"
-        )
+        command_name_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/"
         for ch in command_name_chars:
             kb.add(ch, filter=_in_first_token)(_make_keep_popup(ch))
 

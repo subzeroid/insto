@@ -176,9 +176,7 @@ async def theme_cmd(ctx: CommandContext) -> dict[str, Any]:
         return {"active": current, "available": available, "switched": False}
 
     if not is_known(requested):
-        raise CommandUsageError(
-            f"unknown theme {requested!r}; available: " + ", ".join(available)
-        )
+        raise CommandUsageError(f"unknown theme {requested!r}; available: " + ", ".join(available))
 
     if requested == current:
         ctx.print(f"theme already {current!r}")

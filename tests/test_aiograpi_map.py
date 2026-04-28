@@ -176,8 +176,12 @@ def test_map_post_carousel_walks_resources() -> None:
     payload["media_type"] = 8
     payload["resources"] = [
         _bag(pk="r1", media_type=1, thumbnail_url="https://cdn.example/r1.jpg", video_url=None),
-        _bag(pk="r2", media_type=2, thumbnail_url="https://cdn.example/r2-thumb.jpg",
-             video_url="https://cdn.example/r2.mp4"),
+        _bag(
+            pk="r2",
+            media_type=2,
+            thumbnail_url="https://cdn.example/r2-thumb.jpg",
+            video_url="https://cdn.example/r2.mp4",
+        ),
     ]
     post = map_post(_bag(**payload))
     assert post.media_type == "carousel"

@@ -100,17 +100,18 @@ def _recent_block(recent: list[str]) -> RenderableType:
 
 
 def _quota_line(facade: OsintFacade) -> Text:
-    """One-line backend / quota status."""
+    """One-line backend / quota / theme status."""
     quota = facade.quota()
     if quota.remaining is None:
-        body = "hiker · balance: pending"
+        parts: list[str] = ["balance: pending"]
     else:
         parts = [_format_requests(quota.remaining) + " requests left"]
         if quota.amount is not None and quota.currency:
             parts.append(_format_money(quota.amount, quota.currency))
         if quota.rate is not None:
             parts.append(f"{quota.rate} rps cap")
-        body = "hiker · " + " · ".join(parts)
+    parts.append(f"theme: {facade.config.theme}")
+    body = "hiker · " + " · ".join(parts)
     return Text(body, style="muted")
 
 

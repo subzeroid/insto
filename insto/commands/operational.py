@@ -311,9 +311,16 @@ async def purge_cmd(ctx: CommandContext) -> dict[str, Any]:
 
 @command("help", "List every registered command with its one-line description")
 async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
-    from insto.commands._base import COMMANDS
+    from insto.commands._base import COMMANDS, command_signature
 
-    rows = [{"name": name, "help": spec.help} for name, spec in sorted(COMMANDS.items())]
+    rows = [
+        {
+            "name": name,
+            "signature": command_signature(spec),
+            "help": spec.help,
+        }
+        for name, spec in sorted(COMMANDS.items())
+    ]
     fmt = ctx.output_format()
     if fmt == "json":
         dest_arg = ctx.args.json if ctx.args.json is not None else ""
@@ -324,9 +331,9 @@ async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
             dest=resolve_export_dest(dest_arg),
         )
         return rows
-    width = max(len(r["name"]) for r in rows) if rows else 8
+    width = max(len(r["signature"]) for r in rows) if rows else 8
     for row in rows:
-        ctx.print(f"/{row['name']:<{width}}  — {row['help']}")
+        ctx.print(f"{row['signature']:<{width}}  — {row['help']}")
     return rows
 
 

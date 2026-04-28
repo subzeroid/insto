@@ -273,6 +273,34 @@ def build_parser_for(spec: CommandSpec) -> argparse.ArgumentParser:
     return parser
 
 
+def command_signature(spec: CommandSpec) -> str:
+    """Return `/cmd <pos1> [pos2]` for help text + completer display.
+
+    Reads positional arguments off the per-command parser. Required
+    positionals are wrapped in `<...>`, optional ones (`nargs='?'`) in
+    `[...]`, repeating ones (`nargs in {'*', '+'}`) get an ellipsis. Global
+    flags (`--json`, `--limit`, ...) are intentionally omitted — they apply
+    to every command and would just make every help row noisier.
+    """
+    parser = build_parser_for(spec)
+    parts: list[str] = [f"/{spec.name}"]
+    for action in parser._actions:
+        if action.option_strings:
+            continue  # skip flags like --json / --limit
+        if action.dest in ("help",):
+            continue
+        name = action.dest
+        if action.nargs == "?":
+            parts.append(f"[{name}]")
+        elif action.nargs == "*":
+            parts.append(f"[{name}...]")
+        elif action.nargs == "+":
+            parts.append(f"<{name}...>")
+        else:
+            parts.append(f"<{name}>")
+    return " ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Validation + parsing
 # ---------------------------------------------------------------------------
@@ -519,6 +547,7 @@ __all__ = [
     "Session",
     "add_target_arg",
     "build_parser_for",
+    "command_signature",
     "command",
     "compose_args",
     "dispatch",

@@ -88,8 +88,13 @@ class _SlashCommandCompleter(Completer):
     """
 
     def __init__(self) -> None:
-        self._items: list[tuple[str, str]] = sorted(
-            (name, spec.help) for name, spec in COMMANDS.items()
+        from insto.commands._base import command_signature
+
+        # Pre-compute (name, signature, help) so the menu shows positional
+        # arguments next to the command name (`/theme <name>`, `/info [target]`).
+        self._items: list[tuple[str, str, str]] = sorted(
+            (name, command_signature(spec), spec.help)
+            for name, spec in COMMANDS.items()
         )
 
     def get_completions(
@@ -106,13 +111,13 @@ class _SlashCommandCompleter(Completer):
         else:
             user_typed = prefix.lower()
             slash = ""
-        for name, help_text in self._items:
+        for name, signature, help_text in self._items:
             if not name.lower().startswith(user_typed):
                 continue
             yield Completion(
                 text=f"{slash}{name}",
                 start_position=-len(prefix),
-                display=f"/{name}",
+                display=signature,  # e.g. "/theme [name]" — args visible in popup
                 display_meta=help_text,
             )
 

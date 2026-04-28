@@ -40,6 +40,7 @@ Changelog = "https://github.com/subzeroid/insto/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 completion = ["shtab>=1.7"]
+aiograpi = ["aiograpi>=0.7.2"]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

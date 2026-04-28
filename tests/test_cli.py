@@ -230,6 +230,7 @@ def test_setup_writes_0600_with_token_and_proxy(capsys: pytest.CaptureFixture[st
     rc = _run_setup(
         prompt=_scripted_prompt(
             [
+                "",  # backend (Enter = default 'hiker')
                 "tok-1234567890",  # token
                 "./out-x",  # output_dir
                 "/tmp/insto-store.db",  # db_path
@@ -256,7 +257,8 @@ def test_setup_writes_0600_with_token_and_proxy(capsys: pytest.CaptureFixture[st
 
 def test_setup_keeps_existing_token_when_blank(monkeypatch: pytest.MonkeyPatch) -> None:
     cfgmod.write_config({"hiker": {"token": "existing-token-9999"}})
-    rc = _run_setup(prompt=_scripted_prompt(["", "", "", ""]))
+    # Five Enters: backend / token / output_dir / db_path / proxy — all default.
+    rc = _run_setup(prompt=_scripted_prompt(["", "", "", "", ""]))
     assert rc == 0
     cfg = load_config()
     assert cfg.hiker_token == "existing-token-9999"
@@ -266,14 +268,14 @@ def test_setup_clear_proxy_with_dash() -> None:
     cfgmod.write_config(
         {"hiker": {"token": "tok-abcd1234", "proxy": "http://prev:1"}, "output_dir": "./o"}
     )
-    rc = _run_setup(prompt=_scripted_prompt(["", "", "", "-"]))
+    rc = _run_setup(prompt=_scripted_prompt(["", "", "", "", "-"]))
     assert rc == 0
     cfg = load_config()
     assert cfg.hiker_proxy is None
 
 
 def test_setup_without_token_emits_hint(capsys: pytest.CaptureFixture[str]) -> None:
-    rc = _run_setup(prompt=_scripted_prompt(["", "", "", ""]))
+    rc = _run_setup(prompt=_scripted_prompt(["", "", "", "", ""]))
     assert rc == 0
     out = capsys.readouterr().out
     assert SETUP_HINT in out

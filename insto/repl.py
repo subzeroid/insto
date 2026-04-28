@@ -438,8 +438,8 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     # backend API client — see cli._run_oneshot for the rationale.
     import httpx as _httpx
 
-    from insto.backends import make_backend
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
+    from insto.cli import _build_backend
     from insto.service.facade import OsintFacade
     from insto.service.history import HistoryStore
 
@@ -449,7 +449,7 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     # a `HistoryStore(...)` failure does not leak network sockets.
     history = HistoryStore(cfg.db_path)
     try:
-        backend = make_backend("hiker", token=cfg.hiker_token, proxy=cfg.hiker_proxy)
+        backend = _build_backend(cfg)
         cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
         if cfg.hiker_proxy:
             cdn_kwargs["proxy"] = cfg.hiker_proxy

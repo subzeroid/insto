@@ -32,6 +32,9 @@ ENV_PROXY = "HIKERAPI_PROXY"
 ENV_OUTPUT_DIR = "INSTO_OUTPUT_DIR"
 ENV_DB_PATH = "INSTO_DB_PATH"
 ENV_THEME = "INSTO_THEME"
+ENV_AIOGRAPI_USERNAME = "AIOGRAPI_USERNAME"
+ENV_AIOGRAPI_PASSWORD = "AIOGRAPI_PASSWORD"
+ENV_AIOGRAPI_TOTP = "AIOGRAPI_TOTP_SEED"
 
 Origin = Literal["flag", "env", "toml", "default"]
 
@@ -87,6 +90,13 @@ class Config:
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
     theme: str = DEFAULT_THEME_NAME
+    backend: str = "hiker"
+    aiograpi_username: str | None = None
+    aiograpi_password: str | None = None
+    aiograpi_totp_seed: str | None = None
+    aiograpi_session_path: Path = field(
+        default_factory=lambda: config_dir() / "aiograpi.session.json"
+    )
     sources: dict[str, Origin] = field(default_factory=dict)
 
 
@@ -138,6 +148,8 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     toml_data = _read_toml(config_file_path())
     raw_hiker = toml_data.get("hiker")
     hiker_toml: dict[str, Any] = raw_hiker if isinstance(raw_hiker, dict) else {}
+    raw_aio = toml_data.get("aiograpi")
+    aio_toml: dict[str, Any] = raw_aio if isinstance(raw_aio, dict) else {}
 
     sources: dict[str, Origin] = {}
 
@@ -156,6 +168,25 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     theme_value, sources["theme"] = _pick(
         cli, "theme", ENV_THEME, toml_data.get("theme"), DEFAULT_THEME_NAME
     )
+    backend_value, sources["backend"] = _pick(
+        cli, "backend", "INSTO_BACKEND", toml_data.get("backend"), "hiker"
+    )
+    aio_user, sources["aiograpi.username"] = _pick(
+        cli, "aiograpi_username", ENV_AIOGRAPI_USERNAME, aio_toml.get("username"), None
+    )
+    aio_pass, sources["aiograpi.password"] = _pick(
+        cli, "aiograpi_password", ENV_AIOGRAPI_PASSWORD, aio_toml.get("password"), None
+    )
+    aio_totp, sources["aiograpi.totp_seed"] = _pick(
+        cli, "aiograpi_totp_seed", ENV_AIOGRAPI_TOTP, aio_toml.get("totp_seed"), None
+    )
+    aio_session_raw = aio_toml.get("session_path")
+    aio_session = (
+        Path(str(aio_session_raw)).expanduser().resolve()
+        if aio_session_raw
+        else config_dir() / "aiograpi.session.json"
+    )
+    sources["aiograpi.session_path"] = "toml" if aio_session_raw else "default"
     sources["cli_history_path"] = "default"
 
     # Register the resolved token / proxy with the redaction set so any error
@@ -167,6 +198,10 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         register_secret(token)
     if isinstance(proxy, str):
         register_secret(proxy)
+    if isinstance(aio_pass, str):
+        register_secret(aio_pass)
+    if isinstance(aio_totp, str):
+        register_secret(aio_totp)
 
     return Config(
         hiker_token=token,
@@ -175,6 +210,11 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         db_path=Path(db_value),
         cli_history_path=cli_history_path(),
         theme=str(theme_value) if theme_value else DEFAULT_THEME_NAME,
+        backend=str(backend_value) if backend_value else "hiker",
+        aiograpi_username=aio_user,
+        aiograpi_password=aio_pass,
+        aiograpi_totp_seed=aio_totp,
+        aiograpi_session_path=aio_session,
         sources=sources,
     )
 
@@ -220,7 +260,7 @@ def _redact(value: str) -> str:
 
 def effective_config_report(config: Config) -> list[dict[str, Any]]:
     """Return rows of `{key, value, origin}` for the `/config` command."""
-    redacted_keys = {"hiker.token"}
+    redacted_keys = {"hiker.token", "aiograpi.password", "aiograpi.totp_seed"}
     snapshot: dict[str, Any] = {
         "hiker.token": config.hiker_token,
         "hiker.proxy": config.hiker_proxy,
@@ -228,6 +268,11 @@ def effective_config_report(config: Config) -> list[dict[str, Any]]:
         "db_path": str(config.db_path),
         "cli_history_path": str(config.cli_history_path),
         "theme": config.theme,
+        "backend": config.backend,
+        "aiograpi.username": config.aiograpi_username,
+        "aiograpi.password": config.aiograpi_password,
+        "aiograpi.totp_seed": config.aiograpi_totp_seed,
+        "aiograpi.session_path": str(config.aiograpi_session_path),
     }
     rows: list[dict[str, Any]] = []
     for key, value in snapshot.items():

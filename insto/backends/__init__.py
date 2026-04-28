@@ -45,6 +45,20 @@ def make_backend(name: str, **opts: Any) -> OSINTBackend:
         from insto.backends.hiker import HikerBackend
 
         return HikerBackend(**opts)
+    if name == "aiograpi":
+        # aiograpi is an optional dependency: gate the import so the
+        # default install (hiker-only) does not have to ship it. If the
+        # user did not install `insto[aiograpi]`, give them the exact
+        # command to run.
+        try:
+            from insto.backends.aiograpi import AiograpiBackend
+        except ModuleNotFoundError as exc:  # pragma: no cover — environment dependent
+            raise RuntimeError(
+                "aiograpi backend requested but the `aiograpi` package is not "
+                "installed. Run: `pip install 'insto[aiograpi]'` "
+                "(or `uv tool install 'insto[aiograpi]'` / `pipx install 'insto[aiograpi]'`)."
+            ) from exc
+        return AiograpiBackend(**opts)
     if name == "fake":
         from insto.backends._fake import FakeBackendProd
 

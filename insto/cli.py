@@ -248,6 +248,32 @@ def build_parser() -> argparse.ArgumentParser:
 # ---------------------------------------------------------------------------
 
 
+def _build_backend(config: Config) -> Any:
+    """Construct the backend the active config selects.
+
+    Centralised so both the one-shot CLI and the REPL get the same
+    selection logic (hiker / aiograpi). aiograpi import-failures bubble
+    up as `RuntimeError` from `make_backend`; the caller's existing
+    `_format_error` handles them.
+    """
+    from insto.backends import make_backend
+
+    if config.backend == "aiograpi":
+        return make_backend(
+            "aiograpi",
+            username=config.aiograpi_username,
+            password=config.aiograpi_password,
+            totp_seed=config.aiograpi_totp_seed,
+            session_path=config.aiograpi_session_path,
+            proxy=config.hiker_proxy,
+        )
+    return make_backend(
+        "hiker",
+        token=config.hiker_token,
+        proxy=config.hiker_proxy,
+    )
+
+
 def _safe_load_config(hiker_token: str | None = None, proxy: str | None = None) -> Config | None:
     """Load config; surface security-relevant failures to stderr.
 
@@ -293,13 +319,51 @@ def _run_setup(
     print("insto setup — writes ~/.insto/config.toml (mode 0600)", file=stream)
     print("press Enter to keep the shown default; values are masked on display.", file=stream)
 
+    backend_default = (existing.backend if existing else None) or "hiker"
+    backend_input = prompt(
+        f"backend (hiker | aiograpi) [{backend_default}]: "
+    ).strip().lower()
+    backend = backend_input or backend_default
+    if backend not in {"hiker", "aiograpi"}:
+        print(f"unknown backend {backend!r}; falling back to hiker", file=stream)
+        backend = "hiker"
+
     token_default = existing.hiker_token if existing else None
-    if token_default:
-        token_disp = f"***{token_default[-4:]}" if len(token_default) >= 4 else "***"
-        token_input = secret_prompt(f"hiker.token [{token_disp}] (input hidden): ").strip()
+    if backend == "hiker":
+        if token_default:
+            token_disp = f"***{token_default[-4:]}" if len(token_default) >= 4 else "***"
+            token_input = secret_prompt(f"hiker.token [{token_disp}] (input hidden): ").strip()
+        else:
+            token_input = secret_prompt("hiker.token (input hidden): ").strip()
+        token = token_input or token_default
     else:
-        token_input = secret_prompt("hiker.token (input hidden): ").strip()
-    token = token_input or token_default
+        # Keep an existing hiker.token alive even when switching to aiograpi —
+        # an operator may want to flip back without re-entering the secret.
+        token = token_default
+
+    aio_user = existing.aiograpi_username if existing else None
+    aio_pass = existing.aiograpi_password if existing else None
+    aio_totp = existing.aiograpi_totp_seed if existing else None
+    if backend == "aiograpi":
+        u_in = prompt(
+            f"aiograpi.username [{aio_user or '(none)'}]: "
+        ).strip()
+        if u_in:
+            aio_user = u_in
+        p_default_disp = f"***{aio_pass[-2:]}" if aio_pass and len(aio_pass) >= 2 else "(none)"
+        p_in = secret_prompt(
+            f"aiograpi.password [{p_default_disp}] (input hidden): "
+        ).strip()
+        if p_in:
+            aio_pass = p_in
+        t_default_disp = "***" if aio_totp else "(none)"
+        t_in = secret_prompt(
+            f"aiograpi.totp_seed [{t_default_disp}] (optional, input hidden): "
+        ).strip()
+        if t_in:
+            aio_totp = t_in
+        if t_in == "-":
+            aio_totp = None
 
     out_default = str(
         existing.output_dir.expanduser().resolve()
@@ -337,13 +401,29 @@ def _run_setup(
         hiker["proxy"] = proxy
     if hiker:
         payload["hiker"] = hiker
+    aio_section: dict[str, Any] = {}
+    if aio_user:
+        aio_section["username"] = aio_user
+    if aio_pass:
+        aio_section["password"] = aio_pass
+    if aio_totp:
+        aio_section["totp_seed"] = aio_totp
+    if aio_section:
+        payload["aiograpi"] = aio_section
+    payload["backend"] = backend
     payload["output_dir"] = output_path
     payload["db_path"] = db
 
     path = write_config(payload)
     print(f"wrote {path}", file=stream)
-    if not token:
+    if backend == "hiker" and not token:
         print(SETUP_HINT, file=stream)
+    if backend == "aiograpi" and not (aio_user and aio_pass):
+        print(
+            "aiograpi backend selected but credentials are incomplete; "
+            "re-run `insto setup` to add username/password.",
+            file=stream,
+        )
     return 0
 
 
@@ -397,8 +477,17 @@ async def _run_oneshot(
         # instead of letting a raw traceback escape from `asyncio.run`.
         print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
         return 1
-    if not config.hiker_token:
+    if config.backend == "hiker" and not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
+        return 1
+    if config.backend == "aiograpi" and not (
+        config.aiograpi_username and config.aiograpi_password
+    ):
+        print(
+            "no aiograpi credentials configured. Run `insto setup` and pick the "
+            "aiograpi backend.",
+            file=sys.stderr,
+        )
         return 1
 
     # Reuse a single httpx client for every CDN download in the run so we do
@@ -409,7 +498,6 @@ async def _run_oneshot(
     # to be proxied just like the API surface.
     import httpx as _httpx
 
-    from insto.backends import make_backend
     from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
     from insto.service.facade import OsintFacade
     from insto.service.history import HistoryStore
@@ -428,7 +516,7 @@ async def _run_oneshot(
     cdn_client: Any = None
     try:
         history = HistoryStore(config.db_path)
-        backend = make_backend("hiker", token=config.hiker_token, proxy=config.hiker_proxy)
+        backend = _build_backend(config)
         cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
         if config.hiker_proxy:
             cdn_kwargs["proxy"] = config.hiker_proxy

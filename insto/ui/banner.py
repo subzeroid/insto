@@ -108,17 +108,27 @@ def _recent_block(recent: list[str]) -> RenderableType:
 
 def _quota_line(facade: OsintFacade) -> Text:
     """One-line backend / quota status. Theme name lives in the left
-    column under the logotype, see `_banner_text`."""
+    column under the logotype, see `_banner_text`.
+
+    Backend label is read from the live class name so /quota / banner
+    always reflect the actual backend, not a hard-coded 'hiker' literal.
+    """
+    backend_name = type(facade.backend).__name__.lower()
+    for suffix in ("backend", "prod"):
+        if backend_name.endswith(suffix):
+            backend_name = backend_name[: -len(suffix)]
+    backend_name = backend_name or "backend"
+
     quota = facade.quota()
     if quota.remaining is None:
-        body = "hiker · balance: pending"
+        body = f"{backend_name} · balance: pending"
     else:
         parts = [_format_requests(quota.remaining) + " requests left"]
         if quota.amount is not None and quota.currency:
             parts.append(_format_money(quota.amount, quota.currency))
         if quota.rate is not None:
             parts.append(f"{quota.rate} rps cap")
-        body = "hiker · " + " · ".join(parts)
+        body = f"{backend_name} · " + " · ".join(parts)
     return Text(body, style="muted")
 
 

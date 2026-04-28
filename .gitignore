@@ -2,7 +2,7 @@ docs/superpowers/
 docs/plans/
 docs/internal/
 .context/
-.claude/settings.local.json
+.claude/
 CLAUDE.md
 
 # Python

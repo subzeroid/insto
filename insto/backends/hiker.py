@@ -629,18 +629,59 @@ class HikerBackend(OSINTBackend):
     async def iter_hashtag_posts(
         self, tag: str, *, limit: int | None = None
     ) -> AsyncIterator[Post]:
-        async def fetch(cursor: str | None) -> Any:
-            return await self._client.hashtag_medias_recent_v2(name=tag, page_id=cursor)
+        # Hashtag responses don't fit the generic chunk shape `_extract_chunk`
+        # was written for. The payload looks like:
+        #   {"response": {"sections": [{"layout_content":
+        #       {"medias": [{"media": {...}}, ...]}}, ...],
+        #    "next_max_id": "...", "more_available": true},
+        #    "next_page_id": "WyJi..."}
+        # The real items are nested two levels deep, and the cursor that the
+        # endpoint accepts back is the *outer* `next_page_id` (a base64
+        # envelope), not the inner `next_max_id` (a hex string the server
+        # rejects with 400 if echoed back).
+        if limit is not None and limit <= 0:
+            limit = None
+        cursor: str | None = None
+        pages = 0
+        yielded = 0
+        endpoint = "hashtag_medias_recent_v2"
+        while True:
+            if pages >= self._max_pages:
+                raise BackendError(
+                    f"{endpoint}: cursor did not terminate after {self._max_pages} pages"
+                )
 
-        try:
-            async for post in self._iter_chunks(
-                fetch, endpoint="hashtag_medias_recent_v2", limit=limit, mapper=map_post
-            ):
-                yield post
-        except _NotFoundError as exc:
-            mapped = BackendError(f"hashtag not found: #{tag}")
-            self._last_error = mapped
-            raise mapped from exc
+            async def fetch(c: str | None = cursor) -> Any:
+                return await self._client.hashtag_medias_recent_v2(name=tag, page_id=c)
+
+            try:
+                payload = await self._call(fetch)
+            except _NotFoundError as exc:
+                mapped = BackendError(f"hashtag not found: #{tag}")
+                self._last_error = mapped
+                raise mapped from exc
+            pages += 1
+            response = payload.get("response", {}) if isinstance(payload, dict) else {}
+            sections = response.get("sections", []) if isinstance(response, dict) else []
+            for section in sections:
+                medias = (section.get("layout_content") or {}).get("medias") or []
+                for entry in medias:
+                    raw = entry.get("media") if isinstance(entry, dict) else None
+                    if not isinstance(raw, dict):
+                        raise self._record_drift(SchemaDrift(endpoint, "media"))
+                    try:
+                        yield map_post(raw)
+                    except SchemaDrift as exc:
+                        raise self._record_drift(exc) from None
+                    except (ValueError, TypeError) as exc:
+                        raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+                    yielded += 1
+                    if limit is not None and yielded >= limit:
+                        return
+            next_cursor = _normalise_cursor(payload.get("next_page_id"))
+            if not next_cursor:
+                return
+            cursor = next_cursor
 
     # -------------------------------------------------------------- bookkeeping
 

@@ -20,7 +20,13 @@ uv run pytest -k hiker                           # subset
 uv run pytest --cov=insto --cov-report=term-missing
 ```
 
-The suite is fully offline — no real HikerAPI or Instagram calls. To exercise the live path manually, set `HIKERAPI_TOKEN` and run a few one-shots: `insto -c info instagram`, `insto -c quota`, `insto -c posts instagram --limit 3 --no-download`. Costs ~5 requests; never wired into CI.
+The suite is fully offline — no real HikerAPI or Instagram calls. There's also a structured live smoke against the real HikerAPI:
+
+```bash
+HIKERAPI_TOKEN_TEST=<token> uv run python tests/live/smoke.py
+```
+
+Eight REQ checks (resolve / profile / posts / followers / tagged / hashtag / quota / 404) plus one OPT check (`/similar`, per-target flaky). Skips with exit 0 if `HIKERAPI_TOKEN_TEST` is unset, so it's safe to wire into release-prep gates. Costs ~10 requests, single-digit cents. **Run before each release tag** — caught a real `iter_hashtag_posts` bug that mocks couldn't.
 
 Coverage targets: keep pure-logic modules at 100% (`models`, `_redact`, `exceptions`, mappers). Everything else: 90%+ on touched code.
 

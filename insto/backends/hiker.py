@@ -144,19 +144,20 @@ def _translate_http_status(exc: httpx.HTTPStatusError) -> BackendError:
     if status == 402:
         return QuotaExhausted("HikerAPI quota exhausted")
     if status == 403:
-        # 403 from HikerAPI is "forbidden", *not* "your account is banned".
-        # Three things flag like this:
-        #   1. the endpoint isn't included in your current plan (most common
-        #      for `/v1/user/suggested_profiles_v2` — paid tier only),
-        #   2. HikerAPI deprecated the endpoint server-side,
-        #   3. the target itself blocks third-party introspection (rare,
-        #      typically for verified or business accounts).
-        # /info / /quota will keep working — only the specific call is blocked.
+        # HikerAPI proxies Instagram's HTTP status codes — 403 is what
+        # Instagram itself returns, not HikerAPI's plan / scope error.
+        # Typical causes:
+        #   1. The endpoint is login-walled (Instagram demands a session
+        #      cookie). v0.1 hiker has no cookie; v0.2 aiograpi will.
+        #   2. The target's profile is region-restricted, age-gated, or
+        #      throttling third-party introspection.
+        # 401 stays the only "your HikerAPI access is wrong" signal.
+        # /info / /quota for other targets will keep working.
         return Banned(
-            "HikerAPI returned 403 (forbidden) for this endpoint. "
-            "Usually means it's not on your plan or HikerAPI removed it. "
-            "Other commands (/info, /posts, /quota) should still work. "
-            "Check https://hikerapi.com/p for plan details."
+            "Instagram returned 403 for this lookup (login-walled or "
+            "target-restricted). v0.1 hiker can't log in; this endpoint "
+            "will likely need the v0.2 aiograpi backend. Other commands "
+            "and other targets should still work."
         )
     if status == 404:
         return _NotFoundError()

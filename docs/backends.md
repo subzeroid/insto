@@ -84,22 +84,13 @@ pip install 'insto[aiograpi]'           # in a venv only — see installation.md
 
 Then run `insto setup`, pick `aiograpi`, paste your Instagram username + password, and (optionally) the TOTP seed for 2FA.
 
-What works on aiograpi:
+What works on aiograpi (≥ 0.8.0):
 
-- `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/dossier`.
+- Every command — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/dossier`.
 - Reads private profiles you follow.
 - Login is **lazy** — the constructor stores credentials, the actual `client.login()` fires on the first network call. The session is then dumped to `~/.insto/aiograpi.session.json` (mode `0600`); subsequent runs reuse it without re-authenticating.
 
-What does NOT work on aiograpi 0.7:
-
-- `/similar` — aiograpi has no `chaining` / `fetch_suggestion_details` surface yet (instagrapi has both — upstream PR is in flight). Use the hiker backend for now. Raises a clear `BackendError("...needs hiker backend")` instead of returning silently empty.
-
-### Backend support matrix
-
-| Command(s) | hiker | aiograpi |
-|---|---|---|
-| `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/dossier` | ✅ | ✅ |
-| `/similar` | ✅ (Instagram often returns 403 — expected, see "HikerAPI 403" above) | ❌ (upstream gap) |
+aiograpi 0.7 was missing `chaining` / `fetch_suggestion_details` (used by `/similar`); insto's `[aiograpi]` extra now requires aiograpi ≥ 0.8.0 so this is settled at install time.
 
 ### Account-ban risk
 

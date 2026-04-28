@@ -19,13 +19,10 @@ them into the insto taxonomy in `insto/exceptions.py` so the command
 layer never sees a raw aiograpi exception. New aiograpi exception
 classes are caught by the `ClientError` fallback as `Transient`.
 
-One method aiograpi 0.7 does not implement raises the closest
-backend-typed error:
-
-  * `get_suggested(pk)` — aiograpi has no `chaining` /
-    `fetch_suggestion_details` surface yet (instagrapi has both —
-    upstream PR pending). Calls raise `BackendError` with a clear
-    "needs hiker backend" message.
+All `OSINTBackend` methods are implemented. `get_suggested(pk)` and
+`iter_user_tagged(pk)` need aiograpi ≥ 0.8.0 (the release that added
+`chaining` / `fetch_suggestion_details` and exposed `usertag_medias_v1`).
+The `[aiograpi]` extra in `pyproject.toml` enforces this minimum.
 """
 
 from __future__ import annotations
@@ -81,6 +78,13 @@ def _translate(exc: BaseException) -> BackendError:
     if isinstance(exc, ae.PrivateAccount):
         username = getattr(exc, "username", None) or str(exc)
         return ProfilePrivate(str(username))
+    if isinstance(exc, ae.InvalidTargetUser):
+        # Raised by `chaining()` when Instagram says "Not eligible for
+        # chaining." — a per-target permanent answer, not a transient.
+        # We expose it as a plain BackendError so the command layer
+        # surfaces a clear "no suggestions available" instead of
+        # treating it as a generic schema/transient failure.
+        return BackendError(f"target not eligible: {exc}")
     if isinstance(exc, ae.BadPassword | ae.BadCredentials):
         return AuthInvalid("aiograpi rejected the credentials")
     if isinstance(
@@ -321,10 +325,26 @@ class AiograpiBackend(OSINTBackend):
             yield map_user_short(raw)
 
     async def get_suggested(self, pk: str) -> list[User]:
-        raise BackendError(
-            "aiograpi 0.7 does not expose chaining / suggested-users "
-            "endpoints; /similar needs the hiker backend."
-        )
+        from insto.backends._aiograpi_map import map_user_short
+
+        payload = await self._call(lambda: self._client.chaining(str(pk)))
+        # chaining() returns {"users": [{pk, username, ...}, ...], "status": "ok"}.
+        # Defensive about shape — Instagram occasionally returns an empty body
+        # for ineligible targets even without raising InvalidTargetUser.
+        if not payload:
+            return []
+        users = payload.get("users") if isinstance(payload, dict) else None
+        if not users:
+            return []
+        out: list[User] = []
+        for raw in users:
+            try:
+                out.append(map_user_short(raw))
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
+        return out
 
     # ------------------------------------------------------------------ comments + likers
 

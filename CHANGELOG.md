@@ -2,6 +2,21 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.2.1] - 2026-04-28
+
+### Added
+
+- `/tagged` and `/similar` now work on the aiograpi backend. The first via `usertag_medias_v1` (already in aiograpi 0.7 — the previous "not exposed" stub was wrong), the second via the freshly-landed `chaining` + `fetch_suggestion_details` in [aiograpi 0.8.0](https://github.com/subzeroid/aiograpi/releases/tag/0.8.0). All 14 `OSINTBackend` methods now land on both backends.
+
+### Changed
+
+- `[aiograpi]` extra now requires `aiograpi >= 0.8.0` (was `>= 0.7.2`) — the upstream release that adds the chaining endpoints.
+- `aiograpi.exceptions.InvalidTargetUser` ("Not eligible for chaining.") is mapped to a clear `BackendError("target not eligible: ...")` instead of falling through to a generic transient.
+
+### Documentation
+
+- `docs/backends.md` matrix simplified — no per-backend gaps remain. The "HikerAPI 403" note now correctly describes `/similar` as per-target flaky (Instagram refuses chaining for some user_ids), not "endpoint retired".
+
 ## [0.2.0] - 2026-04-28
 
 ### Added

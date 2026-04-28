@@ -96,12 +96,14 @@ _PALETTES: dict[str, _Palette] = {
     ),
     "aiograpi": _Palette(
         # Same palette as the instagrapi / aiograpi project banner: purple-
-        # magenta → blue diagonal with a single-pop yellow accent. The accent
-        # uses the brand yellow so it stays readable over both purple and blue.
-        accent="#FFC72A",
+        # magenta → blue diagonal. Accent kept inside the same colour family
+        # (saturated violet) so panel borders / section headers / tip.cmd
+        # all read as part of the gradient instead of clashing with a
+        # contrasting yellow.
+        accent="#A45EE5",
         gradient=("#7A2A8C", "#5E2C8E", "#3F4090", "#3D5DC4", "#3D72E0"),
         muted="grey54",
-        field="bold #FFC72A",
+        field="bold #A45EE5",
         value="white",
     ),
 }

@@ -64,12 +64,15 @@ def _make_theme(p: _Palette) -> Theme:
             "section": f"bold {p.accent}",
             # Per-row gradient classes. The banner addresses these by name
             # (`logo.0` … `logo.4`) so non-instagram themes can collapse them
-            # to a single accent without the banner code knowing.
-            "logo.0": p.gradient[0],
-            "logo.1": p.gradient[1],
-            "logo.2": p.gradient[2],
-            "logo.3": p.gradient[3],
-            "logo.4": p.gradient[4],
+            # to a single accent without the banner code knowing. `bold` is
+            # baked into the registered style here because Rich does not
+            # parse compound style strings that mix a literal modifier with
+            # a dotted theme key (`"bold logo.0"` raises MissingStyle).
+            "logo.0": f"bold {p.gradient[0]}",
+            "logo.1": f"bold {p.gradient[1]}",
+            "logo.2": f"bold {p.gradient[2]}",
+            "logo.3": f"bold {p.gradient[3]}",
+            "logo.4": f"bold {p.gradient[4]}",
         }
     )
 

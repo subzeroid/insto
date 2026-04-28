@@ -75,7 +75,7 @@ def _banner_text(theme_name: str | None = None) -> RenderableType:
     for i, row in enumerate(rows[:5]):
         parts.append(Text(row, style=f"bold logo.{i}", no_wrap=True))
     for row in rows[5:]:
-        parts.append(Text(row, style="bold logo.4", no_wrap=True))
+        parts.append(Text(row, style="logo.4", no_wrap=True))
     parts.append(Text(""))
     parts.append(Text(LOGO_TAGLINE, style="value"))
     parts.append(Text(LOGO_SUBTAGLINE, style="muted"))

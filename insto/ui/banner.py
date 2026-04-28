@@ -55,14 +55,18 @@ _TIPS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _banner_text() -> RenderableType:
-    """Render the INSTO logotype + anagram tagline.
+def _banner_text(theme_name: str | None = None) -> RenderableType:
+    """Render the INSTO logotype + anagram tagline + active-theme footer.
 
     Five figlet rows are coloured per-row from the active theme's gradient
     (`logo.0` … `logo.4`). On a flat-colour theme like `claude` every row
     gets the same accent so visually nothing changes; on `instagram` /
     `aiograpi` the rows step through the brand gradient so the logotype
     reads like the source mark.
+
+    If `theme_name` is provided, a `theme · <name>` footer is appended in
+    muted colour so the active palette is discoverable from the welcome
+    banner without running `/theme`.
     """
     rows = LOGO_BANNER.splitlines()
     while len(rows) < 5:  # defensive: never short-row past the gradient
@@ -75,6 +79,9 @@ def _banner_text() -> RenderableType:
     parts.append(Text(""))
     parts.append(Text(LOGO_TAGLINE, style="value"))
     parts.append(Text(LOGO_SUBTAGLINE, style="muted"))
+    if theme_name:
+        parts.append(Text(""))
+        parts.append(Text(f"theme · {theme_name}", style="muted"))
     return Group(*parts)
 
 
@@ -100,18 +107,18 @@ def _recent_block(recent: list[str]) -> RenderableType:
 
 
 def _quota_line(facade: OsintFacade) -> Text:
-    """One-line backend / quota / theme status."""
+    """One-line backend / quota status. Theme name lives in the left
+    column under the logotype, see `_banner_text`."""
     quota = facade.quota()
     if quota.remaining is None:
-        parts: list[str] = ["balance: pending"]
+        body = "hiker · balance: pending"
     else:
         parts = [_format_requests(quota.remaining) + " requests left"]
         if quota.amount is not None and quota.currency:
             parts.append(_format_money(quota.amount, quota.currency))
         if quota.rate is not None:
             parts.append(f"{quota.rate} rps cap")
-    parts.append(f"theme: {facade.config.theme}")
-    body = "hiker · " + " · ".join(parts)
+        body = "hiker · " + " · ".join(parts)
     return Text(body, style="muted")
 
 
@@ -150,14 +157,14 @@ def _two_column(facade: OsintFacade, email: str | None) -> RenderableType:
     grid = Table.grid(padding=(0, 4), expand=True)
     grid.add_column(no_wrap=True)
     grid.add_column(ratio=1)
-    grid.add_row(_banner_text(), _right_column(facade, email))
+    grid.add_row(_banner_text(facade.config.theme), _right_column(facade, email))
     return grid
 
 
 def _narrow_panel_body(facade: OsintFacade, email: str | None) -> RenderableType:
     """Banner-only body for medium terminals."""
     blocks: list[RenderableType] = [
-        Align.center(_banner_text()),
+        Align.center(_banner_text(facade.config.theme)),
         Text(""),
         _quota_line(facade),
     ]

@@ -379,9 +379,16 @@ class AiograpiBackend(OSINTBackend):
         # `chaining()` returns raw IG dicts; aiograpi's `extract_user_short`
         # reconciles the `id` / `pk_id` / `pk` aliases. `user_related_profiles_gql`
         # already returns proper `UserShort` models so it skips that wrap.
-        from aiograpi.extractors import extract_user_short
+        # The `Any` cast keeps mypy quiet on both CI (where aiograpi is not
+        # installed and the import returns `Any`) and locally (where the
+        # extractor is real but untyped, triggering `no-untyped-call`).
+        from typing import Any as _Any
+
+        from aiograpi.extractors import extract_user_short as _extract_user_short
 
         from insto.backends._aiograpi_map import map_user_short
+
+        extract_user_short: _Any = _extract_user_short
 
         # --- private chaining (preferred) ---
         try:
@@ -400,11 +407,7 @@ class AiograpiBackend(OSINTBackend):
                 out: list[User] = []
                 for raw in users:
                     try:
-                        out.append(
-                            map_user_short(
-                                extract_user_short(raw)  # type: ignore[no-untyped-call]
-                            )
-                        )
+                        out.append(map_user_short(extract_user_short(raw)))
                     except SchemaDrift as drift:
                         self._drift_count += 1
                         self._last_error = drift
@@ -488,9 +491,14 @@ class AiograpiBackend(OSINTBackend):
         # response uses, then yields a `UserShort` Pydantic model that
         # `map_user_short` can read via attribute access. Skipping this
         # wrapping makes `map_user_short` raise SchemaDrift on `pk`.
-        from aiograpi.extractors import extract_user_short
+        # `Any` cast: see `get_suggested` for the rationale.
+        from typing import Any as _Any
+
+        from aiograpi.extractors import extract_user_short as _extract_user_short
 
         from insto.backends._aiograpi_map import map_user_short
+
+        extract_user_short: _Any = _extract_user_short
 
         if limit is not None and limit <= 0:
             limit = None
@@ -506,7 +514,7 @@ class AiograpiBackend(OSINTBackend):
                 return
             users = payload.get("users") or []
             for raw in users:
-                yield map_user_short(extract_user_short(raw))  # type: ignore[no-untyped-call]
+                yield map_user_short(extract_user_short(raw))
                 yielded += 1
                 if limit is not None and yielded >= limit:
                     return

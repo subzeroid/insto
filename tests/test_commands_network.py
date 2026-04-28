@@ -622,5 +622,69 @@ async def test_followers_explicit_target_overrides_session(
     assert [u.pk for u in out] == ["u1", "u2"]
 
 
+# ---------------------------------------------------------------------------
+# /search
+# ---------------------------------------------------------------------------
+
+
+async def test_search_returns_users_for_query(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    network_backend.search_users["ferrari"] = [
+        _user("100", "ferrari", verified=True),
+        _user("101", "scuderiaferrari", verified=True),
+        _user("102", "ferrari_fanclub"),
+    ]
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    out = await dispatch("/search ferrari", facade=facade, session=session)
+    assert [u.username for u in out] == ["ferrari", "scuderiaferrari", "ferrari_fanclub"]
+
+
+async def test_search_count_caps_results(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    network_backend.search_users["ferrari"] = [_user(str(i), f"ferrari{i}") for i in range(5)]
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    out = await dispatch("/search ferrari 2", facade=facade, session=session)
+    assert len(out) == 2
+
+
+async def test_search_empty_query_rejected(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    with pytest.raises(CommandUsageError, match="non-empty query"):
+        await dispatch('/search ""', facade=facade, session=session)
+
+
+async def test_search_maltego_export(
+    network_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    network_backend.search_users["ferrari"] = [
+        _user("100", "ferrari", verified=True),
+        _user("101", "scuderiaferrari", verified=True),
+    ]
+    facade = OsintFacade(backend=network_backend, history=history, config=config)
+    await dispatch("/search ferrari --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "ferrari" / "search.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert len(rows) == 2
+    assert rows[0]["Type"] == "maltego.Person"
+    assert rows[0]["Value"] == "ferrari"
+
+
 # Suppress unused-import warnings for io — kept for potential future stream tests.
 _ = io

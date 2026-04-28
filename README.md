@@ -175,7 +175,7 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 
 Profile: `info`, `propic`, `email`, `phone`, `export`.
 Media: `posts`, `reels`, `stories`, `highlights`, `tagged`.
-Network: `followers`, `followings`, `mutuals`, `similar`.
+Network: `followers`, `followings`, `mutuals`, `similar`, `search`.
 Content: `hashtags`, `mentions`, `locations`, `captions`, `likes`.
 Interactions: `comments`, `wcommented`, `wtagged`.
 Watch / diff: `watch`, `unwatch`, `watching`, `diff`, `history`.

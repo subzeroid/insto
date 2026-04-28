@@ -2,6 +2,19 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.3.0] - 2026-04-29
+
+### Added
+
+- **`/search <query>`** — find Instagram accounts by free-text query (username, brand, location, etc). New top-level command with `--limit`, `--csv`, `--json`, and `--maltego` exports. Works on both backends via `fbsearch_accounts_v2` (HikerAPI 0.1.0+ / aiograpi 0.8.1+). Big OSINT win: insto could already drill into a *known* target, but couldn't *discover* unknown handles by name. `/search` closes that gap.
+- **`/similar` fallback chain on aiograpi** — when the primary `chaining()` private endpoint refuses a target ("Not eligible for chaining" / 403), insto now falls through to `user_related_profiles_gql` (public-graphql `edge_chaining`). Live test: `@ferrari` returns 80 suggestions on aiograpi, where the equivalent hiker call 403s. Needs aiograpi ≥ 0.8.5.
+- **`resolve_target` fallback on aiograpi** — when the public `user_id_from_username` path JSON-decode-fails (HTML challenge, intermittent gating), insto retries through `user_web_profile_info_v1` (private-host route, carries the logged-in session). Same target, more reliable plumbing.
+
+### Changed
+
+- `[aiograpi]` extra now requires `aiograpi >= 0.8.5` (was `>= 0.8.0`) — the release that landed `fbsearch_accounts_v2`, `user_related_profiles_gql`, and `user_web_profile_info_v1`. Settled at install time.
+- aiograpi-side `chaining` and `fbsearch_accounts_v2` responses are now run through `aiograpi.extractors.extract_user_short` before the insto mapper. The SERP / chaining endpoints return raw IG dicts (`pk_id` / `id` instead of `pk`); the upstream extractor reconciles them. Without this wrap, every `/similar` and `/search` row crashed with `SchemaDrift: missing field 'pk'`.
+
 ## [0.2.2] - 2026-04-29
 
 ### Added

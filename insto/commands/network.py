@@ -31,6 +31,7 @@ from typing import IO, Any
 from insto.commands._base import (
     ArgsBuilder,
     CommandContext,
+    CommandUsageError,
     add_target_arg,
     command,
     resolve_export_dest,
@@ -189,6 +190,48 @@ async def followings_cmd(ctx: CommandContext, username: str) -> list[User]:
         ctx.print(f"@{username} follows nobody")
         return users
     ctx.print(render_user_table(users, title=f"@{username} follows ({len(users)})"))
+    return users
+
+
+# ---------------------------------------------------------------------------
+# /similar
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# /search
+# ---------------------------------------------------------------------------
+
+
+def _add_search_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("query", help="free-text search (username, brand, location, etc.)")
+    parser.add_argument(
+        "count",
+        nargs="?",
+        type=int,
+        default=20,
+        help="number of accounts to fetch (default 20, page size on IG)",
+    )
+
+
+@command(
+    "search",
+    "Find accounts matching a free-text query (username, brand, etc.)",
+    csv=True,
+    add_args=_add_search_args,
+)
+async def search_cmd(ctx: CommandContext) -> list[User]:
+    query = (getattr(ctx.args, "query", "") or "").strip()
+    if not query:
+        raise CommandUsageError("/search needs a non-empty query")
+    n = int(ctx.limit) if ctx.limit is not None else int(getattr(ctx.args, "count", 20))
+    users = await ctx.facade.search_users(query, limit=n)
+    if _export_users(ctx, users=users, command_name="search", target=query):
+        return users
+    if not users:
+        ctx.print(f"no accounts matched {query!r}")
+        return users
+    ctx.print(render_user_table(users, title=f"search '{query}' ({len(users)})"))
     return users
 
 

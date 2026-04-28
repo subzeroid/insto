@@ -1,6 +1,6 @@
 [project]
 name = "insto"
-version = "0.2.2"
+version = "0.3.0"
 description = "Interactive Instagram OSINT CLI on the HikerAPI backend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,7 +40,7 @@ Changelog = "https://github.com/subzeroid/insto/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 completion = ["shtab>=1.7"]
-aiograpi = ["aiograpi>=0.8.0"]
+aiograpi = ["aiograpi>=0.8.5"]
 docs = [
     "mkdocs>=1.6",
     "mkdocs-material>=9.5",

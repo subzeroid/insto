@@ -110,6 +110,17 @@ class OSINTBackend(ABC):
     def iter_hashtag_posts(self, tag: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate top / recent posts under a hashtag."""
 
+    def iter_search_users(self, query: str, *, limit: int | None = None) -> AsyncIterator[User]:
+        """Iterate accounts matching a free-text search query.
+
+        Backends that don't expose a search surface raise
+        ``BackendError`` from the iterator. Default is a `NotImplementedError`-
+        style stub — concrete backends override.
+        """
+        raise NotImplementedError(
+            "this backend does not implement search; override iter_search_users"
+        )
+
     @abstractmethod
     def get_quota(self) -> Quota:
         """Return the last-known quota state for the backend."""

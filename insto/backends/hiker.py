@@ -696,6 +696,52 @@ class HikerBackend(OSINTBackend):
                 return
             cursor = next_cursor
 
+    async def iter_search_users(
+        self, query: str, *, limit: int | None = None
+    ) -> AsyncIterator[User]:
+        # `fbsearch_accounts_v2` returns the IG raw payload at the top level
+        # (no `response` envelope): `{users, has_more, page_token, ...}`.
+        # The cursor is named `page_token` (not `next_page_token`); that's
+        # the key both HikerAPI and aiograpi accept back as the kwarg name.
+        if limit is not None and limit <= 0:
+            limit = None
+        cursor: str | None = None
+        pages = 0
+        yielded = 0
+        endpoint = "fbsearch_accounts_v2"
+        while True:
+            if pages >= self._max_pages:
+                raise BackendError(
+                    f"{endpoint}: cursor did not terminate after {self._max_pages} pages"
+                )
+
+            async def fetch(c: str | None = cursor) -> Any:
+                return await self._client.fbsearch_accounts_v2(query=query, page_token=c)
+
+            payload = await self._call(fetch)
+            pages += 1
+            users = payload.get("users") if isinstance(payload, dict) else None
+            if not isinstance(users, list):
+                raise self._record_drift(SchemaDrift(endpoint, "users"))
+            for raw in users:
+                if not isinstance(raw, dict):
+                    raise self._record_drift(SchemaDrift(endpoint, "user"))
+                try:
+                    yield map_user(raw)
+                except SchemaDrift as exc:
+                    raise self._record_drift(exc) from None
+                except (ValueError, TypeError) as exc:
+                    raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            if not payload.get("has_more"):
+                return
+            next_cursor = _normalise_cursor(payload.get("page_token"))
+            if not next_cursor:
+                return
+            cursor = next_cursor
+
     # -------------------------------------------------------------- bookkeeping
 
     def get_quota(self) -> Quota:

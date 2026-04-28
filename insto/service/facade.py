@@ -172,6 +172,10 @@ class OsintFacade:
         pk = await self.resolve_pk(username)
         return await self.backend.get_suggested(pk)
 
+    async def search_users(self, query: str, *, limit: int = 50) -> list[User]:
+        """Free-text user search. Empty query is rejected upstream."""
+        return [u async for u in self.backend.iter_search_users(query, limit=limit)]
+
     async def mutuals(
         self, username: str, *, follower_limit: int = 1000, following_limit: int = 1000
     ) -> analytics.MutualsResult:

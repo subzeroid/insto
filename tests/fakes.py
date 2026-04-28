@@ -67,6 +67,7 @@ class FakeErrors:
     iter_user_stories: BackendError | None = None
     get_suggested: BackendError | None = None
     iter_hashtag_posts: BackendError | None = None
+    iter_search_users: BackendError | None = None
 
 
 @dataclass
@@ -88,6 +89,7 @@ class FakeBackend(OSINTBackend):
     stories: dict[str, list[Story]] = field(default_factory=dict)
     suggested: dict[str, list[User]] = field(default_factory=dict)
     hashtag_posts: dict[str, list[Post]] = field(default_factory=dict)
+    search_users: dict[str, list[User]] = field(default_factory=dict)
 
     quota: Quota = field(default_factory=Quota.unknown)
     errors: FakeErrors = field(default_factory=FakeErrors)
@@ -244,6 +246,14 @@ class FakeBackend(OSINTBackend):
         self.request_log.append(("iter_hashtag_posts", (tag, limit)))
         self._consume_error("iter_hashtag_posts")
         async for item in self._paged("iter_hashtag_posts", self.hashtag_posts.get(tag, []), limit):
+            yield item
+
+    async def iter_search_users(
+        self, query: str, *, limit: int | None = None
+    ) -> AsyncIterator[User]:
+        self.request_log.append(("iter_search_users", (query, limit)))
+        self._consume_error("iter_search_users")
+        async for item in self._paged("iter_search_users", self.search_users.get(query, []), limit):
             yield item
 
     def get_quota(self) -> Quota:

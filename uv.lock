@@ -8,7 +8,7 @@ resolution-markers = [
 
 [[package]]
 name = "aiograpi"
-version = "0.8.0"
+version = "0.8.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -19,9 +19,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/14/5431aa856449ccc8255e52f275d3f7ae3e7f71a01f2cd14a86066cb4a507/aiograpi-0.8.0.tar.gz", hash = "sha256:dd99002747e58b18973ebf262781206053cbcd2ec08d152fcefb1b63db60ef06", size = 144276, upload-time = "2026-04-28T20:47:10.264Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/94/f6b81cc3ad4c587cf884b4b596ca4a95114458f2665b77d37de2625c58fb/aiograpi-0.8.6.tar.gz", hash = "sha256:e6e5029d7df695e8773eb26e8f20057deaa8f4d765248b2f31a5c4383f26be00", size = 148352, upload-time = "2026-04-28T23:02:03.843Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/b5/18c61a1bdb3f5454f6e99fe0ba9b20f0f808f57c56bb80bc9a14045585a8/aiograpi-0.8.0-py3-none-any.whl", hash = "sha256:05525687a2afe2efa0af3eff0c044a05468ffcbc5ec4375eff8ced3b06f76135", size = 157682, upload-time = "2026-04-28T20:47:08.592Z" },
+    { url = "https://files.pythonhosted.org/packages/72/45/fa366b33ab29572c711ee13dae98233f66bf4fb5a128af7b1b30121fb4bd/aiograpi-0.8.6-py3-none-any.whl", hash = "sha256:d02fe7f1602a01684940518395179e5d928d43081e428e89f0558dc12f2f8d67", size = 161939, upload-time = "2026-04-28T23:02:01.928Z" },
 ]
 
 [[package]]
@@ -443,7 +443,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiograpi", marker = "extra == 'aiograpi'", specifier = ">=0.8.0" },
+    { name = "aiograpi", marker = "extra == 'aiograpi'", specifier = ">=0.8.5" },
     { name = "hikerapi", specifier = ">=0.1.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.6" },

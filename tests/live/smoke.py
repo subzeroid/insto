@@ -92,6 +92,19 @@ async def _run_required(backend: HikerBackend) -> list[tuple[str, BaseException]
         assert len(items) >= 1, f"expected ≥ 1 hashtag media, got {len(items)}"
         return f"got {len(items)} #{HASHTAG} medias"
 
+    async def search() -> str:
+        users = []
+        async for u in backend.iter_search_users("ferrari", limit=3):
+            users.append(u)
+        assert len(users) == 3, f"expected 3 search hits, got {len(users)}"
+        # The canonical @ferrari should always show up in the top-3 for
+        # the literal query 'ferrari'. If it doesn't, the SDK shape changed
+        # or the ranking signal moved.
+        assert any(u.username == "ferrari" for u in users), (
+            f"@ferrari not in top-3 for 'ferrari' query: {[u.username for u in users]}"
+        )
+        return f"got {len(users)} users (top: @{users[0].username})"
+
     async def quota() -> str:
         # HikerAPI doesn't send x-quota-* headers on every endpoint, so
         # the response-hook path can leave _quota empty. The /sys/balance
@@ -114,6 +127,7 @@ async def _run_required(backend: HikerBackend) -> list[tuple[str, BaseException]
     await check("followers", followers)
     await check("tagged", tagged)
     await check("hashtag", hashtag)
+    await check("search", search)
     await check("quota", quota)
     await check("not_found", not_found)
     return failures

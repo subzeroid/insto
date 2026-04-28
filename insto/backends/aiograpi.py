@@ -233,8 +233,27 @@ class AiograpiBackend(OSINTBackend):
     # ------------------------------------------------------------------ resolve
 
     async def resolve_target(self, username: str) -> str:
-        pk = await self._call(lambda: self._client.user_id_from_username(username))
-        return str(pk)
+        """Resolve `@username` to its stable pk.
+
+        Two-stage chain: aiograpi's stock `user_id_from_username` first
+        (public-host, sometimes returns HTML when IG decides to challenge
+        the unauthenticated request), then `user_web_profile_info_v1` —
+        a private-host route that carries the logged-in session and
+        is meaningfully more reliable when the public path JSON-decode
+        fails. Both surfaces return the same canonical pk.
+        """
+        try:
+            pk = await self._call(lambda: self._client.user_id_from_username(username))
+            return str(pk)
+        except ProfileNotFound:
+            raise
+        except BackendError:
+            data = await self._call(lambda: self._client.user_web_profile_info_v1(username))
+            user = data.get("user") if isinstance(data, dict) else None
+            pk = (user or {}).get("id") or (user or {}).get("pk")
+            if not pk:
+                raise
+            return str(pk)
 
     # ------------------------------------------------------------------ profile
 
@@ -340,19 +359,81 @@ class AiograpiBackend(OSINTBackend):
             yield map_user_short(raw)
 
     async def get_suggested(self, pk: str) -> list[User]:
+        """Two-stage chaining: private `chaining()` first, then public-graphql
+        `user_related_profiles_gql` as a fallback.
+
+        Why both: Instagram refuses the private `chaining` endpoint
+        (``InvalidTargetUser`` "Not eligible for chaining.") for many
+        high-profile / locked-down targets — that's the path the IG
+        app uses, and IG actively limits third-party scraping of it.
+        The public graphql ``edge_chaining`` field still works for many
+        of those same targets, just at a less reliable rate-limited
+        surface. Trying both gives us a meaningfully higher hit rate
+        for `/similar` than either alone.
+
+        Order matters: private first because it's the canonical
+        surface and returns richer rows (more fields the user table
+        knows how to render). Public-graphql second because it's
+        less reliable.
+        """
+        # `chaining()` returns raw IG dicts; aiograpi's `extract_user_short`
+        # reconciles the `id` / `pk_id` / `pk` aliases. `user_related_profiles_gql`
+        # already returns proper `UserShort` models so it skips that wrap.
+        from aiograpi.extractors import extract_user_short
+
         from insto.backends._aiograpi_map import map_user_short
 
-        payload = await self._call(lambda: self._client.chaining(str(pk)))
-        # chaining() returns {"users": [{pk, username, ...}, ...], "status": "ok"}.
-        # Defensive about shape — Instagram occasionally returns an empty body
-        # for ineligible targets even without raising InvalidTargetUser.
-        if not payload:
-            return []
-        users = payload.get("users") if isinstance(payload, dict) else None
-        if not users:
-            return []
+        # --- private chaining (preferred) ---
+        try:
+            payload = await self._call(lambda: self._client.chaining(str(pk)))
+        except BackendError as primary:
+            # InvalidTargetUser is the typed signal for "Not eligible
+            # for chaining" — try the public graphql path instead.
+            # Banned (403) is also a per-target IG refusal, same fallback.
+            if not isinstance(primary, (Banned,)) and "not eligible" not in str(primary).lower():
+                raise
+            return await self._suggested_via_graphql(pk, primary)
+
+        if isinstance(payload, dict):
+            users = payload.get("users") or []
+            if users:
+                out: list[User] = []
+                for raw in users:
+                    try:
+                        out.append(
+                            map_user_short(
+                                extract_user_short(raw)  # type: ignore[no-untyped-call]
+                            )
+                        )
+                    except SchemaDrift as drift:
+                        self._drift_count += 1
+                        self._last_error = drift
+                        raise
+                return out
+
+        # Empty private result — fall through to graphql before giving up.
+        return await self._suggested_via_graphql(pk, None)
+
+    async def _suggested_via_graphql(self, pk: str, primary: BackendError | None) -> list[User]:
+        """Public-graphql `edge_chaining` fallback for `/similar`.
+
+        `user_related_profiles_gql` returns `List[UserShort]` (already
+        Pydantic), so no `extract_user_short` wrap is needed here.
+        Returns whatever the graphql edge gives us; on its own failure
+        we propagate `primary` (the original chaining error) if any,
+        so the caller gets the *first* rejection signal — that's the
+        more actionable error 90% of the time.
+        """
+        from insto.backends._aiograpi_map import map_user_short
+
+        try:
+            shorts = await self._call(lambda: self._client.user_related_profiles_gql(str(pk)))
+        except BackendError as fallback_exc:
+            if primary is not None:
+                raise primary from fallback_exc
+            raise
         out: list[User] = []
-        for raw in users:
+        for raw in shorts or []:
             try:
                 out.append(map_user_short(raw))
             except SchemaDrift as drift:
@@ -395,6 +476,46 @@ class AiograpiBackend(OSINTBackend):
         items = await self._call(lambda: self._client.hashtag_medias_recent(tag, amount=amount))
         for raw in items:
             yield map_post(raw)
+
+    # ------------------------------------------------------------------ search
+
+    async def iter_search_users(
+        self, query: str, *, limit: int | None = None
+    ) -> AsyncIterator[User]:
+        # `fbsearch_accounts_v2` returns raw IG dicts (not Pydantic models),
+        # so route them through aiograpi's own `extract_user_short` first —
+        # it handles the `id` / `pk_id` → `pk` reconciliation that the SERP
+        # response uses, then yields a `UserShort` Pydantic model that
+        # `map_user_short` can read via attribute access. Skipping this
+        # wrapping makes `map_user_short` raise SchemaDrift on `pk`.
+        from aiograpi.extractors import extract_user_short
+
+        from insto.backends._aiograpi_map import map_user_short
+
+        if limit is not None and limit <= 0:
+            limit = None
+        cursor: str | None = None
+        yielded = 0
+        while True:
+
+            async def fetch(c: str | None = cursor) -> Any:
+                return await self._client.fbsearch_accounts_v2(query=query, page_token=c)
+
+            payload = await self._call(fetch)
+            if not isinstance(payload, dict):
+                return
+            users = payload.get("users") or []
+            for raw in users:
+                yield map_user_short(extract_user_short(raw))  # type: ignore[no-untyped-call]
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            if not payload.get("has_more"):
+                return
+            next_cursor = payload.get("page_token") or payload.get("next_page_token")
+            if not next_cursor:
+                return
+            cursor = str(next_cursor)
 
     # ------------------------------------------------------------------ bookkeeping
 

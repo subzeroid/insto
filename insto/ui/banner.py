@@ -41,7 +41,7 @@ LOGO_BANNER: str = r"""
 |___|_| \_|____/ |_| \___/
 """.strip("\n")
 
-LOGO_TAGLINE: str = "i n s t o   ⇋   o s i n t"
+LOGO_TAGLINE: str = "i n s t o   ↔   o s i n t"
 LOGO_SUBTAGLINE: str = "instagram tool · open-source intel"
 
 # Backwards-compat alias for code/tests that still import the old name.
@@ -200,6 +200,7 @@ def render_welcome(
     width: int,
     email: str | None = None,
     target: str | None = None,
+    show_version: bool = True,
 ) -> RenderableType:
     """Render the welcome screen sized to `width`.
 
@@ -207,8 +208,12 @@ def render_welcome(
       - `width < 60`: a single status line (no panel).
       - `60 ≤ width < 100`: banner-only `Panel`.
       - `width ≥ 100`: two-column `Panel` (banner + tips/recent/status).
+
+    `show_version=False` drops the `insto vX.Y.Z` panel title — useful
+    for social-preview screenshots that should not date themselves to
+    a specific release.
     """
-    title = f"insto v{__version__}"
+    title = f"insto v{__version__}" if show_version else None
     if width < 60:
         return _tiny_line(facade, target)
     body = _narrow_panel_body(facade, email) if width < 100 else _two_column(facade, email)

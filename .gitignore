@@ -22,3 +22,4 @@ htmlcov/
 # insto runtime artifacts
 output/
 .insto-test-home/
+.DS_Store

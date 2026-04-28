@@ -94,6 +94,14 @@ disallow_incomplete_defs = true
 module = ["hikerapi", "hikerapi.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# aiograpi is an optional dependency (insto[aiograpi]). The default
+# CI install path runs `uv sync` without that extra, so the import in
+# insto/backends/aiograpi.py needs to fall through gracefully when the
+# package is missing on the type-checker's machine.
+module = ["aiograpi", "aiograpi.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

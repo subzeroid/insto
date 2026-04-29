@@ -1,6 +1,6 @@
 [project]
 name = "insto"
-version = "0.7.2"
+version = "0.7.3"
 description = "Interactive Instagram OSINT CLI on the HikerAPI backend"
 readme = "README.md"
 requires-python = ">=3.11"

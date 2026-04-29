@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.3](https://github.com/subzeroid/insto/compare/v0.7.2...v0.7.3) (2026-04-29)
+
+
+### Documentation
+
+* HikerAPI free-trial promo link (100 requests, no card) ([a1bbaed](https://github.com/subzeroid/insto/commit/a1bbaedd71f10c2b39bc05c68a31662f07d67c64))
+
 ## [0.7.2](https://github.com/subzeroid/insto/compare/v0.7.1...v0.7.2) (2026-04-29)
 
 

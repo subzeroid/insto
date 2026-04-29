@@ -4,6 +4,14 @@ Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend.
 
 ![demo](docs/demo.gif)
 
+## Design choices
+
+- **HikerAPI is the default backend, not a side mode.** Quota balance is read on REPL startup and surfaced in the bottom toolbar; `with_retry` honours `RateLimited.retry_after`; every mapper raises typed `SchemaDrift(endpoint, missing_field)` when HikerAPI's documented fields move. Logged-in `aiograpi` is one extra (`pipx install 'insto[aiograpi]'`) when you actually need data behind the login wall — but kept off the default path so your account isn't in scope.
+- **Async, typed, tested.** Python ≥ 3.11, strict mypy, ~93% coverage, ruff-clean. Backends, facade, commands all `async def`.
+- **Two surfaces, one grammar.** A prompt-toolkit REPL with slash-popup completion and live `/watch` notifications, *and* a Unix-friendly one-shot mode (`insto @user -c info`). `--json -` and `--csv -` write to stdout; `/batch -` reads targets from stdin.
+- **Snapshot / watch / diff.** Persisted in `~/.insto/store.db`. Poll a target on an interval; diff against the last snapshot.
+- **Maltego CSV export** out of the box (`--maltego` on any flat-row command, plus full `/dossier`).
+
 Two surfaces over the same command grammar:
 
 - **REPL** — `insto` drops you into a prompt-toolkit session with tab-completion,
@@ -83,7 +91,7 @@ supported.
 | `HIKERAPI_TOKEN`  | API token (overrides `[hiker].token` in config.toml)                |
 | `HIKERAPI_PROXY`  | Proxy URL (overrides `[hiker].proxy`)                               |
 | `INSTO_HOME`      | Override the default `~/.insto/` config root                        |
-| `INSTO_BACKEND`   | Set to `fake` for the network-free backend used by the e2e suite    |
+| `INSTO_BACKEND`   | `hiker` (default) / `aiograpi` / `fake` (e2e suite). Same as `--backend` and `[backend]` in `config.toml` |
 
 ## Examples
 
@@ -132,8 +140,11 @@ insto -c info instagram                                    # inline target, no R
 insto @ferrari -c posts 10 --json -                        # 10 posts, JSON to stdout
 insto @ferrari -c followers 500 --csv followers.csv
 insto @ferrari -c followers 200 --maltego                  # Maltego CSV under output/ferrari/
+insto -c search ferrari 20 --maltego                       # full SERP, no active target needed
+insto @nasa -c fans --limit 10                             # top fans = ❤️ + 3*💬 across 10 posts
+insto @ferrari -c recommended --maltego                    # IG's "same category" recommendations
 cat targets.txt | insto -c batch - info --yes              # stdin pipe + non-interactive
-insto -c dossier instagram                                 # full target package
+insto -c dossier instagram --maltego                       # full target package, Maltego CSVs per section
 ```
 
 `-c <cmd>` consumes the rest of `argv` as the slash-command's arguments,
@@ -153,6 +164,8 @@ when the target list exceeds the confirmation threshold.
 | `--maltego [PATH or -]`         | Maltego entity-import CSV (alias for `--output-format maltego`) |
 | `--output-format {json,csv,maltego}` | Explicit format selector                            |
 | `--limit N` / `--no-download`   | Per-command paging cap and media opt-out                 |
+| `--backend {hiker,aiograpi}`    | Backend selector for this invocation (overrides `$INSTO_BACKEND` and `config.toml`) |
+| `--no-progress`                 | Suppress tqdm bars + spinner on long commands (`/fans`, `/wliked`, `/wcommented`, `/dossier`) |
 | `--yes / -y`                    | Skip confirmation prompts (required for `/batch -`)      |
 | `--verbose` / `--debug`         | Logging level for `~/.insto/logs/insto.log`              |
 | `--version`                     | Print the version and exit                               |
@@ -173,19 +186,22 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 
 ## Command surface
 
-Profile: `info`, `propic`, `email`, `phone`, `export`.
-Media: `posts`, `reels`, `stories`, `highlights`, `tagged`, `audio`.
-Network: `followers`, `followings`, `mutuals`, `similar`, `search`, `recommended`.
-Content: `hashtags`, `mentions`, `locations`, `captions`, `likes`.
-Interactions: `comments`, `wcommented`, `wliked`, `wtagged`, `fans`.
-Discovery: `resolve`.
-Watch / diff: `watch`, `unwatch`, `watching`, `diff`, `history`.
-Operational: `quota`, `health`, `config`, `purge`.
-Session: `target`, `current`, `clear`.
-Batch / dossier: `batch`, `dossier` (full target package: profile + media +
-network + analytics, with `--maltego` CSV export).
+| Group | Commands | What it does |
+|---|---|---|
+| **Profile** | `info` `propic` `email` `phone` `export` | full profile dump, avatar download, contact extraction, JSON export |
+| **Media** | `posts` `reels` `stories` `highlights` `tagged` `audio` | feed media + active stories + highlight reels + posts the target is tagged in + clips using a given audio asset |
+| **Network** | `followers` `followings` `mutuals` `similar` `search` `recommended` | follower / following lists, intersection, IG's "suggested similar" carousel, free-text search, category recommendations |
+| **Content** | `hashtags` `mentions` `locations` `captions` `likes` | top-N hashtags / @mentions / geotags across recent posts, raw captions, like-count stats |
+| **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` | per-post or aggregated comments, top commenters / likers / taggers, weighted "superfan" ranking |
+| **Discovery** | `resolve` | expand `instagram.com/share/...` short-links to canonical URLs (aiograpi only) |
+| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; history of cli invocations |
+| **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite / cache cleanup |
+| **Session** | `target` `current` `clear` | active-target plumbing for the REPL |
+| **Batch / dossier** | `batch` `dossier` | run one command across a target list; full target package (profile + media + network + analytics) with `--maltego` CSV export per section |
 
 Inside the REPL each command may be invoked with or without a leading `/`.
+
+Pretty much every command takes `--limit N` (paging cap) and supports `--json` / `--csv` / `--maltego` export to file or `-` for stdout. Long-running aggregations (`/fans`, `/wliked`, `/wcommented`, `/dossier`) show a tqdm progress bar; everything else gets a `⢿ <cmd>...` spinner during the silent setup wait.
 
 ## Where things go
 

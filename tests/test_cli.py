@@ -7,6 +7,7 @@ import stat
 import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -431,16 +432,31 @@ def test_main_no_args_no_token_prints_hint_and_exits(
 
 
 def test_main_setup_invokes_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
-    called: dict[str, bool] = {}
+    called: dict[str, Any] = {}
 
-    def fake_run_setup() -> int:
+    def fake_run_setup(*, non_interactive: bool = False) -> int:
         called["yes"] = True
+        called["non_interactive"] = non_interactive
         return 0
 
     monkeypatch.setattr(cli_mod, "_run_setup", fake_run_setup)
     rc = cli_mod.main(["setup"])
     assert rc == 0
     assert called.get("yes") is True
+    assert called.get("non_interactive") is False
+
+
+def test_main_setup_non_interactive_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_run_setup(*, non_interactive: bool = False) -> int:
+        captured["non_interactive"] = non_interactive
+        return 0
+
+    monkeypatch.setattr(cli_mod, "_run_setup", fake_run_setup)
+    rc = cli_mod.main(["--non-interactive", "setup"])
+    assert rc == 0
+    assert captured["non_interactive"] is True
 
 
 def test_main_print_completion_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:

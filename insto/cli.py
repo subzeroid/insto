@@ -239,6 +239,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="force the interactive REPL (default when no command is given)",
     )
     parser.add_argument(
+        "--non-interactive",
+        dest="non_interactive",
+        action="store_true",
+        help="`insto setup` non-interactively: take values from "
+        "$HIKERAPI_TOKEN / $INSTO_BACKEND / $HIKERAPI_PROXY / "
+        "$AIOGRAPI_USERNAME / $AIOGRAPI_PASSWORD / $AIOGRAPI_TOTP_SEED "
+        "(plus any existing config.toml as the fallback). For CI / "
+        "automation — skips every prompt, errors instead of waiting.",
+    )
+    parser.add_argument(
         "target",
         nargs="?",
         default=None,
@@ -316,11 +326,95 @@ def _safe_load_config(
         return None
 
 
+def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
+    """Setup driven entirely by env-vars + existing config — no prompts.
+
+    Resolution order per field: env-var → existing config.toml → built-in
+    default. Errors on missing required fields (hiker.token when
+    backend=hiker, aiograpi credentials when backend=aiograpi) so a CI
+    run fails loudly instead of writing a half-broken config.
+    """
+    stream = out if out is not None else sys.stdout
+    existing = _safe_load_config()
+
+    backend = (
+        os.environ.get("INSTO_BACKEND")
+        or (existing.backend if existing else None)
+        or "hiker"
+    )
+    if backend not in {"hiker", "aiograpi"}:
+        print(f"--non-interactive: unknown backend {backend!r}", file=sys.stderr)
+        return 2
+
+    token = os.environ.get("HIKERAPI_TOKEN") or (existing.hiker_token if existing else None)
+    proxy = os.environ.get("HIKERAPI_PROXY") or (existing.hiker_proxy if existing else None)
+
+    aio_user = os.environ.get("AIOGRAPI_USERNAME") or (
+        existing.aiograpi_username if existing else None
+    )
+    aio_pass = os.environ.get("AIOGRAPI_PASSWORD") or (
+        existing.aiograpi_password if existing else None
+    )
+    aio_totp = os.environ.get("AIOGRAPI_TOTP_SEED") or (
+        existing.aiograpi_totp_seed if existing else None
+    )
+
+    output_path = os.environ.get("INSTO_OUTPUT_DIR") or (
+        str(existing.output_dir.expanduser().resolve())
+        if existing
+        else str((Path.cwd() / "output").resolve())
+    )
+    db = os.environ.get("INSTO_DB_PATH") or (
+        str(existing.db_path.expanduser().resolve())
+        if existing
+        else str((config_dir() / "store.db").expanduser().resolve())
+    )
+
+    # Required-field guard: fail loudly so CI catches missing secrets.
+    if backend == "hiker" and not token:
+        print(
+            "--non-interactive: backend=hiker but HIKERAPI_TOKEN is unset and "
+            "config.toml has no [hiker].token. Set the env var or run interactive setup.",
+            file=sys.stderr,
+        )
+        return 2
+    if backend == "aiograpi" and not (aio_user and aio_pass):
+        print(
+            "--non-interactive: backend=aiograpi but AIOGRAPI_USERNAME / "
+            "AIOGRAPI_PASSWORD are missing. Set both env vars or run interactive setup.",
+            file=sys.stderr,
+        )
+        return 2
+
+    payload: dict[str, Any] = {"backend": backend, "output_dir": output_path, "db_path": db}
+    hiker: dict[str, Any] = {}
+    if token:
+        hiker["token"] = token
+    if proxy:
+        hiker["proxy"] = proxy
+    if hiker:
+        payload["hiker"] = hiker
+    aio_section: dict[str, Any] = {}
+    if aio_user:
+        aio_section["username"] = aio_user
+    if aio_pass:
+        aio_section["password"] = aio_pass
+    if aio_totp:
+        aio_section["totp_seed"] = aio_totp
+    if aio_section:
+        payload["aiograpi"] = aio_section
+
+    path = write_config(payload)
+    print(f"wrote {path} (backend={backend}, non-interactive)", file=stream)
+    return 0
+
+
 def _run_setup(
     *,
     prompt: Callable[[str], str] = input,
     secret_prompt: Callable[[str], str] | None = None,
     out: IO[str] | None = None,
+    non_interactive: bool = False,
 ) -> int:
     """Interactive wizard. Writes `~/.insto/config.toml` (mode 0600).
 
@@ -329,7 +423,16 @@ def _run_setup(
     scripted callable instead. If only `prompt` is overridden, the same
     callable handles the token line so existing scripted tests keep
     working.
+
+    With ``non_interactive=True`` (CLI: ``--non-interactive``), the
+    wizard takes every value from environment variables + the existing
+    config.toml without prompting — for CI / automation. Errors out
+    when the chosen backend's required fields are missing instead of
+    waiting on stdin.
     """
+    if non_interactive:
+        return _run_setup_non_interactive(out=out)
+
     stream = out if out is not None else sys.stdout
     existing = _safe_load_config()
 
@@ -608,7 +711,7 @@ def main(argv: list[str] | None = None) -> int:
         return _print_completion(parser, args.print_completion)
 
     if args.target == "setup":
-        return _run_setup()
+        return _run_setup(non_interactive=args.non_interactive)
 
     if args.cmd_argv:
         return asyncio.run(

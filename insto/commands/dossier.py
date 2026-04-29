@@ -596,50 +596,76 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
     # limit. We still write a partial MANIFEST so progress is preserved.
     abort = asyncio.Event()
 
-    async def _guarded(
-        coro: Coroutine[Any, Any, SectionResult],
-    ) -> SectionResult | BaseException:
-        if abort.is_set():
-            coro.close()
-            return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
-        try:
-            return await coro
-        except (QuotaExhausted, AuthInvalid, Banned) as exc:
-            abort.set()
-            return exc
+    # 9 sections total: profile (already written above), posts, hashtags,
+    # mentions, locations, wcommented, wtagged, plus the 3-section network
+    # bundle (followers/following/mutuals). Bar starts at 1/9 because
+    # profile already finished by the time we get here.
+    from insto.ui.progress import manual_bar
 
-    # `_do_network_bundle` fetches followers + following once and derives
-    # mutuals locally — runs as a single guarded coroutine that returns 3
-    # SectionResults.
-    async def _network_guarded() -> (
-        tuple[SectionResult, SectionResult, SectionResult] | BaseException
-    ):
-        if abort.is_set():
-            return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
-        try:
-            followers_s, following_s, mutuals_s, abort_exc = await _do_network_bundle(
-                ctx.facade, username, network_n, dossier_dir, maltego=maltego
-            )
-        except (QuotaExhausted, AuthInvalid, Banned) as exc:
-            abort.set()
-            return exc
-        if abort_exc is not None:
-            # Hard-limit hit mid-bundle: keep partial sections (followers.csv
-            # may already exist on disk), but signal sibling-abort to outer.
-            abort.set()
-        return followers_s, following_s, mutuals_s
+    with manual_bar(total=9, desc=f"dossier @{username}") as bar:
+        bar.update(1)  # profile already done above
 
-    coros = [
-        _guarded(_do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)),
-        _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
-        _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
-        _guarded(_do_locations(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
-        _guarded(_do_wcommented(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
-        _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir, maltego=maltego)),
-    ]
-    network_task = asyncio.create_task(_network_guarded())
-    other_results = await asyncio.gather(*coros, return_exceptions=True)
-    network_result = await network_task
+        async def _guarded(
+            coro: Coroutine[Any, Any, SectionResult],
+        ) -> SectionResult | BaseException:
+            if abort.is_set():
+                coro.close()
+                bar.update(1)
+                return CommandUsageError(
+                    "aborted: quota / auth limit hit on a sibling section"
+                )
+            try:
+                return await coro
+            except (QuotaExhausted, AuthInvalid, Banned) as exc:
+                abort.set()
+                return exc
+            finally:
+                bar.update(1)
+
+        # `_do_network_bundle` fetches followers + following once and derives
+        # mutuals locally — runs as a single guarded coroutine that returns
+        # 3 SectionResults, so the bar advances by 3 on its completion.
+        async def _network_guarded() -> (
+            tuple[SectionResult, SectionResult, SectionResult] | BaseException
+        ):
+            if abort.is_set():
+                bar.update(3)
+                return CommandUsageError(
+                    "aborted: quota / auth limit hit on a sibling section"
+                )
+            try:
+                followers_s, following_s, mutuals_s, abort_exc = await _do_network_bundle(
+                    ctx.facade, username, network_n, dossier_dir, maltego=maltego
+                )
+            except (QuotaExhausted, AuthInvalid, Banned) as exc:
+                abort.set()
+                bar.update(3)
+                return exc
+            if abort_exc is not None:
+                # Hard-limit hit mid-bundle: keep partial sections
+                # (followers.csv may already exist on disk), but signal
+                # sibling-abort to outer.
+                abort.set()
+            bar.update(3)
+            return followers_s, following_s, mutuals_s
+
+        coros = [
+            _guarded(
+                _do_posts(ctx.facade, username, posts_n, dossier_dir, no_download=no_download)
+            ),
+            _guarded(_do_hashtags(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+            _guarded(_do_mentions(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)),
+            _guarded(
+                _do_locations(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)
+            ),
+            _guarded(
+                _do_wcommented(ctx.facade, username, analytics_n, dossier_dir, maltego=maltego)
+            ),
+            _guarded(_do_wtagged(ctx.facade, username, tagged_n, dossier_dir, maltego=maltego)),
+        ]
+        network_task = asyncio.create_task(_network_guarded())
+        other_results = await asyncio.gather(*coros, return_exceptions=True)
+        network_result = await network_task
 
     # Reassemble in SECTION_NAMES order.
     posts_r, hashtags_r, mentions_r, locations_r, wcommented_r, wtagged_r = other_results

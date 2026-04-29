@@ -130,3 +130,25 @@ def track(
         disable=_DISABLED,
         leave=False,
     )
+
+
+@contextlib.contextmanager
+def manual_bar(*, total: int, desc: str):  # type: ignore[no-untyped-def]
+    """Manual-tick tqdm bar for tasks that aren't iterable-driven.
+
+    Use when the work is a fan-out of N async coroutines and the bar
+    needs to advance on each completion (``/dossier`` runs 9 sections
+    via ``asyncio.gather`` — the bar ticks one per section as they
+    return). Stops the active spinner first; honours ``--no-progress``.
+
+    Yields the bar instance so callers can ``bar.update(1)`` (or by N)
+    on completion. Closing the with-block leaves stderr clean.
+    """
+    _stop_spinner()
+    from tqdm import tqdm
+
+    bar = tqdm(total=total, desc=desc, disable=_DISABLED, leave=False)
+    try:
+        yield bar
+    finally:
+        bar.close()

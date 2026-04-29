@@ -26,6 +26,7 @@ import asyncio
 import contextlib
 import re
 import sqlite3
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import IO, Any
 
@@ -223,34 +224,66 @@ class OsintFacade:
         posts = await self.user_posts(username, limit=limit)
         return analytics.aggregate_likes(posts, target=username, limit=limit)
 
+    # --------------------------------------------- per-post fan-out helpers
+
+    # Bounded concurrency for the per-post fan-out used by /wliked /wcommented
+    # /fans. HikerAPI's per-account rate cap is typically 7-15 rps; aiograpi
+    # rate-limits per session at a similar level. 5 concurrent calls keeps
+    # us comfortably under either ceiling while delivering ~5x wall-clock
+    # speedup over sequential.
+    _FANOUT_CONCURRENCY: int = 5
+
+    async def _gather_per_post(
+        self,
+        posts: list[Post],
+        fetch: Callable[[str], Awaitable[list[Any]]],
+        *,
+        desc: str,
+    ) -> list[Any]:
+        """Fan out ``fetch(post.pk)`` across all posts with bounded
+        concurrency, ticking a tqdm bar as each call completes.
+
+        Order of the returned items is non-deterministic — callers that
+        feed it into a ``Counter``-style aggregator (every current caller
+        does) don't care.
+        """
+        from insto.ui.progress import track
+
+        sem = asyncio.Semaphore(self._FANOUT_CONCURRENCY)
+
+        async def _bounded(pk: str) -> list[Any]:
+            async with sem:
+                return await fetch(pk)
+
+        tasks = [asyncio.create_task(_bounded(p.pk)) for p in posts]
+        merged: list[Any] = []
+        for fut in track(asyncio.as_completed(tasks), desc=desc, total=len(tasks)):
+            merged.extend(await fut)
+        return merged
+
     async def wcommented(self, username: str, *, limit: int = 50) -> analytics.TopList:
         # `limit` is the *post* window only. Per-post comments are bounded by
         # the facade default (50/post) — the same cap `/comments` aggregate
         # mode uses — so the spec §9 bounded-window guarantee holds without
         # `--limit` doubling as a per-post comment cap.
-        from insto.ui.progress import track
-
         posts = await self.user_posts(username, limit=limit)
-        merged: list[Comment] = []
-        for post in track(posts, desc="fetching comments", total=len(posts)):
-            merged.extend(await self.post_comments(post.pk))
+        merged: list[Comment] = await self._gather_per_post(
+            posts, self.post_comments, desc="fetching comments"
+        )
         return analytics.count_wcommented(merged, target=username, limit=limit)
 
     async def wliked(self, username: str, *, limit: int = 50) -> analytics.TopList:
         """Top likers across the target's last `limit` posts.
 
         Cost: 1 ``user_posts`` page + N likers calls (one per post).
-        Each likers call is bounded by `post_likers`'s default cap, so
-        a target with 50 posts x 50 likers = 2500 user yields per
-        invocation. /watch-style background callers should pass a
-        smaller `limit`.
+        Concurrency is bounded by ``_FANOUT_CONCURRENCY`` (default 5)
+        so a 50-post window completes in roughly the time of 10 serial
+        calls instead of 50.
         """
-        from insto.ui.progress import track
-
         posts = await self.user_posts(username, limit=limit)
-        merged: list[User] = []
-        for post in track(posts, desc="fetching likers", total=len(posts)):
-            merged.extend(await self.post_likers(post.pk))
+        merged: list[User] = await self._gather_per_post(
+            posts, self.post_likers, desc="fetching likers"
+        )
         return analytics.count_wliked(merged, target=username, limit=limit)
 
     async def fans(
@@ -263,20 +296,41 @@ class OsintFacade:
     ) -> analytics.FansResult:
         """Top fans of @username across the last `limit` posts.
 
-        Combines likers + commenters into one weighted ranking.
-        Single pass over posts emitting both calls per item — keeps
-        the progress bar one-dimensional ("posts processed") instead
-        of two stacked bars, and matches the order the cost is
-        actually incurred.
+        Combines likers + commenters into one weighted ranking. Both
+        fetches run concurrently across all posts (bounded by
+        ``_FANOUT_CONCURRENCY``) — the bar shows the *combined* call
+        count, ticking once per likers-or-comments completion.
         """
         from insto.ui.progress import track
 
         posts = await self.user_posts(username, limit=limit)
+        sem = asyncio.Semaphore(self._FANOUT_CONCURRENCY)
+
+        # Tag the result so a single `as_completed` loop can fan back
+        # into the right destination list. ``tuple[str, list[Any]]`` is
+        # a small evil that keeps mypy happy across the union of likers
+        # and comments without two parallel as_completed loops.
+        async def _likers(pk: str) -> tuple[str, list[Any]]:
+            async with sem:
+                return "likers", list(await self.post_likers(pk))
+
+        async def _comments(pk: str) -> tuple[str, list[Any]]:
+            async with sem:
+                return "comments", list(await self.post_comments(pk))
+
+        tasks: list[asyncio.Task[tuple[str, list[Any]]]] = [
+            asyncio.create_task(_likers(p.pk)) for p in posts
+        ]
+        tasks += [asyncio.create_task(_comments(p.pk)) for p in posts]
+
         likers: list[User] = []
         comments: list[Comment] = []
-        for post in track(posts, desc="fetching engagement", total=len(posts)):
-            likers.extend(await self.post_likers(post.pk))
-            comments.extend(await self.post_comments(post.pk))
+        for fut in track(asyncio.as_completed(tasks), desc="fetching engagement", total=len(tasks)):
+            kind, items = await fut
+            if kind == "likers":
+                likers.extend(items)
+            else:
+                comments.extend(items)
         return analytics.count_fans(
             likers,
             comments,

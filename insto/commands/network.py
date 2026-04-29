@@ -38,7 +38,7 @@ from insto.commands._base import (
     with_target,
 )
 from insto.models import User
-from insto.service.analytics import MutualsResult
+from insto.service.analytics import IntersectionResult, MutualsResult
 from insto.ui.render import render_user_table
 
 # Defensive symmetric cap on /mutuals when no --limit is given.
@@ -350,11 +350,90 @@ async def mutuals_cmd(ctx: CommandContext, username: str) -> MutualsResult:
     return result
 
 
+# ---------------------------------------------------------------------------
+# /intersect — followers(@a) ∩ followers(@b)
+# ---------------------------------------------------------------------------
+
+
+def _add_intersect_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("user_a", help="first target (e.g. ferrari)")
+    parser.add_argument("user_b", help="second target (e.g. mclaren)")
+
+
+@command(
+    "intersect",
+    "Followers(@a) ∩ followers(@b) — accounts that follow both targets",
+    csv=True,
+    add_args=_add_intersect_args,
+)
+async def intersect_cmd(ctx: CommandContext) -> IntersectionResult:
+    user_a = (getattr(ctx.args, "user_a", "") or "").lstrip("@").strip()
+    user_b = (getattr(ctx.args, "user_b", "") or "").lstrip("@").strip()
+    if not user_a or not user_b:
+        raise CommandUsageError("/intersect needs two usernames")
+    if user_a == user_b:
+        raise CommandUsageError("/intersect needs two *different* usernames")
+
+    window = _resolve_mutuals_limit(ctx)
+    result = await ctx.facade.intersect(user_a, user_b, window=window)
+
+    # Synthetic target name for the export filename. `intersect.<a>_<b>.csv`
+    # under output_dir keeps the file colocated with other artifacts.
+    synth_target = f"{user_a}_{user_b}"
+
+    fmt = ctx.output_format()
+    if fmt == "json":
+        ctx.facade.export_json(
+            dataclasses.asdict(result),
+            command="intersect",
+            target=synth_target,
+            dest=_resolve_dest(ctx, fmt="json"),
+        )
+        return result
+    if fmt == "csv":
+        ctx.facade.export_csv(
+            _user_rows(result.items),
+            command="intersect",
+            target=synth_target,
+            dest=_resolve_dest(ctx, fmt="csv"),
+        )
+        return result
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _user_maltego_rows(result.items),
+            command="intersect",
+            entity_type="user",
+            target=synth_target,
+        )
+        return result
+
+    if result.empty:
+        ctx.print(f"could not analyze @{user_a} ∩ @{user_b} (one side returned no followers)")
+        return result
+    if not result.items:
+        ctx.print(
+            f"no overlap between @{user_a} ({result.a_analyzed} followers) and "
+            f"@{user_b} ({result.b_analyzed} followers) in the analysed window"
+        )
+        return result
+    ctx.print(
+        render_user_table(
+            result.items,
+            title=(
+                f"@{user_a} ∩ @{user_b}: {len(result.items)} shared followers "
+                f"(out of {result.a_analyzed} / {result.b_analyzed} analysed)"
+            ),
+        )
+    )
+    return result
+
+
 __all__ = [
     "MUTUALS_DEFAULT_LIMIT",
     "MUTUALS_UNBOUNDED_LIMIT",
     "followers_cmd",
     "followings_cmd",
+    "intersect_cmd",
     "mutuals_cmd",
     "similar_cmd",
 ]

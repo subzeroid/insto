@@ -344,6 +344,98 @@ async def likes_cmd(ctx: CommandContext, username: str) -> LikesStats:
     return stats
 
 
+# ---------------------------------------------------------------------------
+# /timeline — posting cadence histogram
+# ---------------------------------------------------------------------------
+
+
+# Unicode block ladder, eight steps from "almost empty" to "full".
+_BAR_LADDER: str = " ▁▂▃▄▅▆▇█"
+_DAY_LABELS: tuple[str, ...] = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _spark(values: list[int]) -> str:
+    """Map a list of counts to a string of block characters of equal length.
+
+    Highest bucket gets `█`, empty buckets get a space. Linear scaling
+    against the max so the visual emphasises *relative* posting
+    intensity, not absolute counts (a 5-post target and a 500-post
+    target should both produce a meaningful shape)."""
+    if not values:
+        return ""
+    peak = max(values)
+    if peak == 0:
+        return " " * len(values)
+    out: list[str] = []
+    for v in values:
+        if v == 0:
+            out.append(" ")
+            continue
+        idx = max(1, min(len(_BAR_LADDER) - 1, round(v / peak * (len(_BAR_LADDER) - 1))))
+        out.append(_BAR_LADDER[idx])
+    return "".join(out)
+
+
+@command(
+    "timeline",
+    "Posting cadence histogram (hour-of-day + day-of-week) over recent posts",
+    csv=False,
+    add_args=add_target_arg,
+)
+@with_target
+async def timeline_cmd(ctx: CommandContext, username: str):  # type: ignore[no-untyped-def]
+    from datetime import UTC, datetime
+
+    window = _resolve_window(ctx)
+    result = await ctx.facade.timeline(username, limit=window)
+
+    fmt = ctx.output_format()
+    if fmt == "json":
+        ctx.facade.export_json(
+            {
+                "target": result.target,
+                "window": result.window,
+                "analyzed": result.analyzed,
+                "hour_of_day": result.hour_of_day,
+                "day_of_week": result.day_of_week,
+                "first_post_ts": result.first_post_ts,
+                "last_post_ts": result.last_post_ts,
+                "empty": result.empty,
+            },
+            command="timeline",
+            target=username,
+            dest=_resolve_dest(ctx, fmt="json"),
+        )
+        return result
+
+    if result.empty:
+        ctx.print(f"no timestamped posts to analyze for @{username}")
+        return result
+
+    span = ""
+    if result.first_post_ts and result.last_post_ts:
+        first = datetime.fromtimestamp(result.first_post_ts, tz=UTC).strftime("%Y-%m-%d")
+        last = datetime.fromtimestamp(result.last_post_ts, tz=UTC).strftime("%Y-%m-%d")
+        span = f" ({first} → {last})"
+    ctx.print(f"@{username} posting cadence — {result.analyzed} posts{span}")
+    ctx.print("")
+    # Hour-of-day: 24-char sparkline (one block per UTC hour). Range is
+    # implicit in the label; trying to print individual hour ticks under
+    # 24 single-width columns produces an unreadable slop.
+    spark = _spark(result.hour_of_day)
+    peak_hour = result.hour_of_day.index(max(result.hour_of_day)) if any(result.hour_of_day) else 0
+    ctx.print(f"  hour 00 → 23 (UTC, peak {peak_hour:02d}h): {spark}")
+    ctx.print("")
+    # Day-of-week: 7-row "Mon  N  █████" listing — easier to read than a
+    # 7-character sparkline.
+    peak = max(result.day_of_week) or 1
+    bar_width = 30
+    for label, count in zip(_DAY_LABELS, result.day_of_week, strict=True):
+        bar = "█" * round(count / peak * bar_width) if count else ""
+        ctx.print(f"  {label} {count:>3}  {bar}")
+    return result
+
+
 __all__ = [
     "CONTENT_DEFAULT_WINDOW",
     "captions_cmd",
@@ -351,4 +443,5 @@ __all__ = [
     "likes_cmd",
     "locations_cmd",
     "mentions_cmd",
+    "timeline_cmd",
 ]

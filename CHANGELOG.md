@@ -2,6 +2,25 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.6.0] - 2026-04-29
+
+### Added
+
+- **`/intersect <a> <b>`** — followers(@a) ∩ followers(@b). New OSINT primitive: shared audience between two targets reveals communities, staff, family, PR networks. Both follower fetches run concurrently (different pks so the backend serves in parallel). Default window 1000 per side; `--limit N` to widen, `--limit 0` for unbounded. Maltego export uses `{a}_{b}` as a synthetic target dir so the file colocates with other artifacts.
+- **`/timeline <user>`** — posting cadence histogram. 24-bucket hour-of-day sparkline + 7-bucket day-of-week bar chart over the last N posts. Reveals timezone (sleeping hours), human vs scheduler-driven posting, weekday vs weekend rhythm. UTC-bucketed; JSON export carries the raw bucket arrays for further analysis.
+- **/dossier section progress bar** — 9-step tqdm bar that ticks once per section completes. Pairs with the v0.5.5 spinner: spinner runs during pre-flight, hands off to the bar once sections start.
+- **`insto setup --non-interactive`** — config wizard driven entirely by env vars + existing config without prompts. Errors loudly when a required field is missing. Pattern for CI / automation: `INSTO_BACKEND=hiker HIKERAPI_TOKEN=$T insto setup --non-interactive`.
+
+### Performance
+
+- **`/fans`, `/wliked`, `/wcommented` are ~5× faster.** Per-post fan-out now uses `asyncio.Semaphore(5)` + `asyncio.as_completed` instead of a serial loop. `/fans @nasa --limit 5` drops from ~17 s to 8.5 s on the same backend response time. Concurrency cap is conservative re: HikerAPI's 7-15 rps per-account limit and aiograpi's per-session throttle. Order-independent (Counter aggregation) so `as_completed` is safe.
+
+### Documentation
+
+- Command surface now renders as a 10-row table (group / commands / one-line description) instead of a paragraph list. Easier to skim when you want to know what's in `/fans` vs `/recommended` vs `/intersect`.
+- One-shot examples in the README cover the new commands (`/search`, `/fans`, `/recommended`, `/intersect`, `/timeline`).
+- `INSTO_BACKEND` env-var description backfilled (the prior text said "set to `fake` for the e2e suite" — it's been accepting `hiker` / `aiograpi` for a year).
+
 ## [0.5.5] - 2026-04-29
 
 ### Added

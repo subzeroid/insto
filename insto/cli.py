@@ -337,11 +337,7 @@ def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
     stream = out if out is not None else sys.stdout
     existing = _safe_load_config()
 
-    backend = (
-        os.environ.get("INSTO_BACKEND")
-        or (existing.backend if existing else None)
-        or "hiker"
-    )
+    backend = os.environ.get("INSTO_BACKEND") or (existing.backend if existing else None) or "hiker"
     if backend not in {"hiker", "aiograpi"}:
         print(f"--non-interactive: unknown backend {backend!r}", file=sys.stderr)
         return 2

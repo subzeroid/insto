@@ -173,6 +173,42 @@ class OsintFacade:
         pk = await self.resolve_pk(username)
         return await self.backend.get_suggested(pk)
 
+    async def timeline(self, username: str, *, limit: int = 50) -> analytics.TimelineResult:
+        """Posting cadence (hour-of-day + day-of-week) over the last N posts."""
+        posts = await self.user_posts(username, limit=limit)
+        return analytics.compute_timeline(posts, target=username, limit=limit)
+
+    async def intersect(
+        self,
+        username_a: str,
+        username_b: str,
+        *,
+        window: int = 1000,
+    ) -> analytics.IntersectionResult:
+        """Followers(@a) ∩ followers(@b), capped at ``window`` per side.
+
+        Both follower fetches run concurrently — they hit different
+        pks so the backend can serve them in parallel. Output is the
+        list of users who follow *both* targets, useful OSINT signal
+        for "shared community" investigations.
+        """
+        pk_a, pk_b = await asyncio.gather(
+            self.resolve_pk(username_a),
+            self.resolve_pk(username_b),
+        )
+
+        async def _collect(pk: str) -> list[User]:
+            return [u async for u in self.backend.iter_user_followers(pk, limit=window)]
+
+        followers_a, followers_b = await asyncio.gather(_collect(pk_a), _collect(pk_b))
+        return analytics.compute_intersection(
+            followers_a,
+            followers_b,
+            target_a=username_a,
+            target_b=username_b,
+            window=window,
+        )
+
     async def search_users(self, query: str, *, limit: int = 50) -> list[User]:
         """Free-text user search. Empty query is rejected upstream."""
         return [u async for u in self.backend.iter_search_users(query, limit=limit)]

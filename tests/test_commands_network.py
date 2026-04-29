@@ -686,5 +686,70 @@ async def test_search_maltego_export(
     assert rows[0]["Value"] == "ferrari"
 
 
+# ---------------------------------------------------------------------------
+# /intersect
+# ---------------------------------------------------------------------------
+
+
+async def test_intersect_returns_shared_followers(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """followers(@a) ∩ followers(@b) — bob and carol follow both."""
+    profile_a = Profile(pk="100", username="ferrari", access="public", full_name="Ferrari")
+    profile_b = Profile(pk="200", username="mclaren", access="public", full_name="McLaren")
+    backend = FakeBackend(
+        profiles={"100": profile_a, "200": profile_b},
+        followers={
+            "100": [_user("u1", "alice"), _user("u2", "bob"), _user("u3", "carol")],
+            "200": [_user("u2", "bob"), _user("u3", "carol"), _user("u4", "dave")],
+        },
+        page_size=5,
+    )
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    out = await dispatch("/intersect ferrari mclaren", facade=facade, session=session)
+    assert [u.username for u in out.items] == ["bob", "carol"]
+    assert out.target_a == "ferrari"
+    assert out.target_b == "mclaren"
+
+
+async def test_intersect_rejects_same_target(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    backend = FakeBackend()
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    with pytest.raises(CommandUsageError, match=r"two \*different\* usernames"):
+        await dispatch("/intersect ferrari ferrari", facade=facade, session=session)
+
+
+async def test_intersect_maltego_export_with_synthetic_target(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """Output filename uses {a}_{b} as the synthetic target."""
+    profile_a = Profile(pk="100", username="ferrari", access="public", full_name="F")
+    profile_b = Profile(pk="200", username="mclaren", access="public", full_name="M")
+    backend = FakeBackend(
+        profiles={"100": profile_a, "200": profile_b},
+        followers={
+            "100": [_user("u1", "alice"), _user("u2", "bob")],
+            "200": [_user("u2", "bob"), _user("u3", "carol")],
+        },
+        page_size=5,
+    )
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    await dispatch("/intersect ferrari mclaren --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "ferrari_mclaren" / "intersect.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    assert len(rows) == 1
+    assert rows[0]["Value"] == "bob"
+    assert rows[0]["Type"] == "maltego.Person"
+
+
 # Suppress unused-import warnings for io — kept for potential future stream tests.
 _ = io

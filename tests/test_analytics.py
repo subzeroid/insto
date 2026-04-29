@@ -38,11 +38,12 @@ def _post(
     location_name: str | None = None,
     like_count: int = 0,
     owner_username: str | None = None,
+    taken_at: int = 1700000000,
 ) -> Post:
     return Post(
         pk=pk,
         code=code or f"C{pk}",
-        taken_at=1700000000,
+        taken_at=taken_at,
         media_type="image",
         like_count=like_count,
         hashtags=list(hashtags or []),
@@ -211,6 +212,97 @@ def test_count_wcommented_aggregates_repeats() -> None:
     res = count_wcommented(comments, target="alice", limit=50)
     assert dict(res.items) == {"bob": 3, "carol": 1, "dave": 1}
     assert res.items[0] == ("bob", 3)
+
+
+def test_compute_timeline_buckets_by_hour_and_weekday() -> None:
+    """Bucket counts come out as expected for known UTC timestamps."""
+    from insto.service.analytics import compute_timeline
+
+    # 2025-01-13 (Monday) 14:00 UTC, 15:00 UTC, 16:00 UTC
+    # 2025-01-15 (Wednesday) 14:00 UTC
+    posts = [
+        _post("a", taken_at=1736776800),  # Mon 14:00 UTC
+        _post("b", taken_at=1736780400),  # Mon 15:00 UTC
+        _post("c", taken_at=1736784000),  # Mon 16:00 UTC
+        _post("d", taken_at=1736949600),  # Wed 14:00 UTC
+    ]
+    res = compute_timeline(posts, target="x", limit=50)
+    assert res.analyzed == 4
+    assert res.hour_of_day[14] == 2
+    assert res.hour_of_day[15] == 1
+    assert res.hour_of_day[16] == 1
+    # Mon=0, Wed=2
+    assert res.day_of_week[0] == 3
+    assert res.day_of_week[2] == 1
+    assert res.empty is False
+    assert res.first_post_ts == 1736776800
+    assert res.last_post_ts == 1736949600
+
+
+def test_compute_timeline_skips_zero_or_negative_timestamps() -> None:
+    """Defensive: posts with `taken_at = 0` (legacy fixture data) are dropped
+    instead of contributing to the unix-epoch bucket."""
+    from insto.service.analytics import compute_timeline
+
+    posts = [_post("a", taken_at=0), _post("b", taken_at=-1), _post("c", taken_at=1736776800)]
+    res = compute_timeline(posts, target="x", limit=50)
+    assert res.analyzed == 3  # window respects all three (analyzed = inspected)
+    assert sum(res.hour_of_day) == 1  # but only the valid one bucketed
+    assert sum(res.day_of_week) == 1
+
+
+def test_compute_timeline_empty() -> None:
+    from insto.service.analytics import compute_timeline
+
+    res = compute_timeline([], target="x", limit=50)
+    assert res.empty is True
+    assert sum(res.hour_of_day) == 0
+    assert res.first_post_ts is None
+
+
+def test_compute_intersection_returns_users_in_both_lists() -> None:
+    """Cross-target overlap: users appearing in both follower windows."""
+    from insto.service.analytics import compute_intersection
+
+    a = [_user("alice"), _user("bob"), _user("carol")]
+    b = [_user("bob"), _user("carol"), _user("dave")]
+    res = compute_intersection(a, b, target_a="ferrari", target_b="mclaren")
+    names = [u.username for u in res.items]
+    assert names == ["bob", "carol"]
+    assert res.target_a == "ferrari"
+    assert res.target_b == "mclaren"
+    assert res.empty is False
+
+
+def test_compute_intersection_dedup_by_pk() -> None:
+    """Same pk in side_a twice (or via duplicate source) is collapsed."""
+    from insto.service.analytics import compute_intersection
+
+    bob = _user("bob")
+    a = [bob, bob, _user("carol")]
+    b = [bob]
+    res = compute_intersection(a, b, target_a="x", target_b="y")
+    assert len(res.items) == 1
+    assert res.items[0].username == "bob"
+
+
+def test_compute_intersection_empty_when_either_side_blank() -> None:
+    from insto.service.analytics import compute_intersection
+
+    res = compute_intersection([], [_user("bob")], target_a="x", target_b="y")
+    assert res.empty is True
+    assert res.items == []
+
+
+def test_compute_intersection_window_caps_each_side() -> None:
+    from insto.service.analytics import compute_intersection
+
+    big = [_user(f"u{i}", pk=f"p{i}") for i in range(2000)]
+    res = compute_intersection(big, big, target_a="x", target_b="y", window=50)
+    assert res.a_analyzed == 50
+    assert res.b_analyzed == 50
+    # Both windows are the first 50 users — full overlap.
+    assert len(res.items) == 50
 
 
 def test_count_wliked_aggregates_repeats() -> None:

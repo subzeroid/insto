@@ -611,9 +611,7 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
             if abort.is_set():
                 coro.close()
                 bar.update(1)
-                return CommandUsageError(
-                    "aborted: quota / auth limit hit on a sibling section"
-                )
+                return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
             try:
                 return await coro
             except (QuotaExhausted, AuthInvalid, Banned) as exc:
@@ -630,9 +628,7 @@ async def dossier_cmd(ctx: CommandContext, username: str) -> Path:
         ):
             if abort.is_set():
                 bar.update(3)
-                return CommandUsageError(
-                    "aborted: quota / auth limit hit on a sibling section"
-                )
+                return CommandUsageError("aborted: quota / auth limit hit on a sibling section")
             try:
                 followers_s, following_s, mutuals_s, abort_exc = await _do_network_bundle(
                     ctx.facade, username, network_n, dossier_dir, maltego=maltego

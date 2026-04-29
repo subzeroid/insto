@@ -83,6 +83,54 @@ class MutualsResult:
 
 
 @dataclass(slots=True)
+class TimelineResult:
+    """Posting cadence histogram across a bounded post window.
+
+    Two complementary histograms over the same posts:
+
+    - ``hour_of_day``: 24-bucket UTC histogram. The shape often
+      reveals the target's timezone (sleeping hours = empty buckets)
+      and whether posting is human-paced or scheduler-driven.
+    - ``day_of_week``: 7-bucket histogram (Monday=0, Sunday=6). Shape
+      reveals weekday vs weekend rhythm.
+
+    ``first_post_ts`` / ``last_post_ts`` are unix seconds — the
+    renderer prints them as ISO so the operator sees the actual span
+    the histogram is summarising.
+    """
+
+    target: str
+    window: int
+    analyzed: int
+    hour_of_day: list[int] = field(default_factory=lambda: [0] * 24)
+    day_of_week: list[int] = field(default_factory=lambda: [0] * 7)
+    first_post_ts: int | None = None
+    last_post_ts: int | None = None
+    empty: bool = False
+
+
+@dataclass(slots=True)
+class IntersectionResult:
+    """Cross-target intersection — users that follow *both* @a and @b.
+
+    Different from :class:`MutualsResult`: mutuals is one target's
+    followers ∩ following (an internal property). Intersection is two
+    different targets' follower lists. The OSINT signal is "shared
+    audience" — overlap reveals shared communities, staff, family,
+    PR networks. Both follower windows are capped at fetch time;
+    ``empty`` is True when either side analyzed zero followers.
+    """
+
+    target_a: str
+    target_b: str
+    window: int
+    a_analyzed: int
+    b_analyzed: int
+    items: list[User] = field(default_factory=list)
+    empty: bool = False
+
+
+@dataclass(slots=True)
 class LikesStats:
     """Aggregate `like_count` stats over a bounded window of posts.
 
@@ -271,6 +319,97 @@ def count_wcommented(
         analyzed=len(materialised),
         items=_top_from_counter(counter, top),
         empty=len(materialised) == 0,
+    )
+
+
+def compute_timeline(
+    posts: Iterable[Post],
+    *,
+    target: str,
+    limit: int = 50,
+) -> TimelineResult:
+    """Bucket post timestamps into hour-of-day + day-of-week histograms.
+
+    Uses UTC. Posts with non-positive ``taken_at`` are skipped silently
+    (defensive: some legacy fixture posts have 0 / negative timestamps
+    that would fall back to the unix epoch and skew the histogram).
+    """
+    from datetime import UTC, datetime
+
+    _check_limit(limit)
+    window = _take(posts, limit)
+    hours = [0] * 24
+    weekdays = [0] * 7
+    timestamps: list[int] = []
+    for post in window:
+        ts = post.taken_at
+        if ts is None or ts <= 0:
+            continue
+        dt = datetime.fromtimestamp(ts, tz=UTC)
+        hours[dt.hour] += 1
+        weekdays[dt.weekday()] += 1
+        timestamps.append(ts)
+    return TimelineResult(
+        target=target,
+        window=limit,
+        analyzed=len(window),
+        hour_of_day=hours,
+        day_of_week=weekdays,
+        first_post_ts=min(timestamps) if timestamps else None,
+        last_post_ts=max(timestamps) if timestamps else None,
+        empty=not timestamps,
+    )
+
+
+def compute_intersection(
+    side_a: Iterable[User],
+    side_b: Iterable[User],
+    *,
+    target_a: str,
+    target_b: str,
+    window: int = 1000,
+) -> IntersectionResult:
+    """Return users who appear in *both* bounded follower windows.
+
+    ``window`` caps each side identically (defaults to the same 1000
+    that :func:`compute_mutuals` uses). Output is dedup'd by ``pk`` and
+    sorted by ``username`` asc for stable rendering. Empty when either
+    side analyzed zero followers.
+    """
+    if window <= 0:
+        raise ValueError(f"window must be positive, got {window}")
+
+    a_window: list[User] = []
+    for i, user in enumerate(side_a):
+        if i >= window:
+            break
+        a_window.append(user)
+
+    by_pk_b: dict[str, User] = {}
+    for i, user in enumerate(side_b):
+        if i >= window:
+            break
+        by_pk_b[user.pk] = user
+    b_analyzed = len(by_pk_b)
+
+    seen: set[str] = set()
+    intersection: list[User] = []
+    for user in a_window:
+        if user.pk in by_pk_b and user.pk not in seen:
+            seen.add(user.pk)
+            # Prefer the b-side record (richer fields when sources disagree).
+            intersection.append(by_pk_b[user.pk])
+
+    intersection.sort(key=lambda u: (u.username.lower(), u.pk))
+    empty = len(a_window) == 0 or b_analyzed == 0
+    return IntersectionResult(
+        target_a=target_a,
+        target_b=target_b,
+        window=window,
+        a_analyzed=len(a_window),
+        b_analyzed=b_analyzed,
+        items=intersection,
+        empty=empty,
     )
 
 

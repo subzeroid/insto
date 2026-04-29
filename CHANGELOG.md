@@ -2,6 +2,14 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.2](https://github.com/subzeroid/insto/compare/v0.7.1...v0.7.2) (2026-04-29)
+
+
+### Documentation
+
+* OSINT recipes page — 7 multi-step investigative scenarios ([e776d4c](https://github.com/subzeroid/insto/commit/e776d4c2c754dc29f13d2105610812f48766216d))
+* refresh demo.gif (/info + /where + /fans) + Killer features page ([df556b0](https://github.com/subzeroid/insto/commit/df556b04f193754a8e99f8e013917224a568cb9d))
+
 ## [0.7.1] - 2026-04-29
 
 ### Added

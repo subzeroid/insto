@@ -100,6 +100,33 @@ supported.
 | `INSTO_HOME`      | Override the default `~/.insto/` config root                        |
 | `INSTO_BACKEND`   | `hiker` (default) / `aiograpi` / `fake` (e2e suite). Same as `--backend` and `[backend]` in `config.toml` |
 
+## How insto compares to other Instagram OSINT tools
+
+| | insto | [Osintgram](https://github.com/Datalux/Osintgram) | [Toutatis](https://github.com/megadose/toutatis) | [Sherlock](https://github.com/sherlock-project/sherlock) |
+|---|---|---|---|---|
+| Backend | [HikerAPI](https://hikerapi.com) cloud (default), aiograpi optional | Logged-in Instagram session | Logged-in Instagram session | HTTP probes — multi-site |
+| Account ban risk | **None** with HikerAPI backend | High | High | N/A — username probing |
+| Scope | Instagram deep dive | Instagram only | Instagram (email/phone focus) | 400+ sites, username search |
+| Geo OSINT (`/where`, `/place`, `/placeposts`) | ✅ unique | ❌ | ❌ | ❌ |
+| Network ops (`/intersect`, `/mutuals`) | ✅ unique | ❌ | ❌ | ❌ |
+| Posting cadence (`/timeline`) | ✅ unique | ❌ | ❌ | ❌ |
+| Superfan ranking (`/fans`) | ✅ unique | ❌ partial | ❌ | ❌ |
+| Snapshot / watch / diff | ✅ sqlite-backed | ❌ | ❌ | ❌ |
+| Maltego CSV export | ✅ | ❌ | ❌ | ❌ |
+| Interactive REPL | ✅ prompt-toolkit, slash-popup | ✅ basic shell | ❌ one-shot | ❌ one-shot |
+| One-shot / scriptable | ✅ stdin/stdout pipes | ⚠️ shell only | ✅ | ✅ |
+| Type-safe / strict mypy | ✅ ~93% coverage | ❌ | ❌ | ❌ |
+
+**When to pick insto** — Instagram-specific OSINT where you need account safety, deep network/geo analytics, snapshots over time, and Maltego-ready export. The HikerAPI default backend means no Instagram session is ever in scope, so no challenge-required, login-required, or account-ban surface.
+
+**When to pick Osintgram** — historic OSS standard, large existing community, you have a throwaway Instagram account you don't mind burning. The HikerAPI integration in upstream Osintgram (PR [#2586](https://github.com/Datalux/Osintgram/pull/2586) merged Aug 2025) means you can also run it through HikerAPI, but the command surface stays Osintgram's.
+
+**When to pick Toutatis** — narrow goal: extract email + phone hints from a target's `user_info`. It's smaller and single-purpose. insto's `/email` and `/phone` cover the same data through HikerAPI without an Instagram login.
+
+**When to pick Sherlock / Maigret** — you're doing username reconnaissance across many platforms (forums, image hosts, code hosts). Different tool category — pair with insto for Instagram depth after Sherlock points you at an account.
+
+Related projects: [aiograpi](https://github.com/subzeroid/aiograpi) (the async Instagram private API library that powers insto's optional `[aiograpi]` backend), [Social-Media-OSINT-Tools-Collection](https://github.com/subzeroid/Social-Media-OSINT-Tools-Collection) (curated tools list), [awesome-osint](https://github.com/subzeroid/awesome-osint).
+
 ## Examples
 
 REPL:

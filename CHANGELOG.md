@@ -2,6 +2,12 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.3] - 2026-04-29
+
+### Fixed
+
+- Slash popup now yields argument choices for the typed-exactly command without requiring a trailing space. Before: typing `/theme` and pressing Tab only re-inserted `/theme` itself; you had to type a space to get `claude` / `instagram` / `aiograpi`. After: `/theme<Tab>` shows the themes inline. Same for `/purge` (history / snapshots / cache).
+
 ## [0.5.2] - 2026-04-29
 
 ### Added

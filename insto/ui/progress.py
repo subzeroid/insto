@@ -2,7 +2,7 @@
 
 `/fans`, `/wliked`, `/wcommented`, and `/dossier` all loop over posts
 issuing one (or two) backend calls per iteration. With a 50-post
-window that's 50–100 silent seconds of HTTP — long enough that
+window that's 50-100 silent seconds of HTTP — long enough that
 operators reach for Ctrl-C wondering if it hung. A tqdm bar makes the
 progress visible and the ETA actionable.
 

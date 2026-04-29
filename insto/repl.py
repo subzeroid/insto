@@ -125,6 +125,21 @@ class _SlashCommandCompleter(Completer):
                 display_meta=help_text,
             )
 
+        # ── Bonus: if the typed token is *exactly* a command name with
+        #    positional choices (`/theme`, `/purge`), also yield those
+        #    choices in the same popup. Without this, the user has to type
+        #    a trailing space before Tab does anything useful — confusing
+        #    on first use because the popup shows `/theme [name]` but
+        #    pressing Tab just re-inserts `/theme` and stops.
+        from insto.commands._base import COMMANDS
+
+        spec = COMMANDS.get(user_typed)
+        if spec is not None:
+            yield from self._argument_completions(
+                text=f"{text} ",
+                stripped=f"{stripped} ",
+            )
+
     def _argument_completions(self, text: str, stripped: str) -> Iterable[Completion]:
         """Per-command positional-argument completion.
 

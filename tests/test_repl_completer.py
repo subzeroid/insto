@@ -105,6 +105,21 @@ def test_completer_works_without_leading_slash() -> None:
     assert "posts" not in matches
 
 
+def test_completer_yields_argument_choices_when_command_typed_exactly() -> None:
+    """Typing `/theme` (no trailing space) and Tab should already show
+    `claude` / `instagram` / `aiograpi` — without forcing the user to
+    type a space first. Same for `/purge`, etc.
+    """
+    completer = _completer()
+    matches = _completions(completer, "/theme")
+    # Command itself is still in the popup (so Tab can finish-and-submit).
+    assert "/theme" in matches
+    # And the theme choices appear inline.
+    assert "claude" in matches
+    assert "instagram" in matches
+    assert "aiograpi" in matches
+
+
 def test_completer_meta_uses_command_help() -> None:
     completer = _completer()
     spec = next(iter(COMMANDS.values()))

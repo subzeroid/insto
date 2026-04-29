@@ -2,6 +2,16 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.1] - 2026-04-29
+
+### Added
+
+- **`--backend {hiker,aiograpi}`** global flag — per-invocation backend override. Same `flag > env > toml > default` precedence the rest of the config uses, so `INSTO_BACKEND=…` and `[backend]` in `config.toml` keep working.
+
+### Changed
+
+- `/fans` output now uses ❤️ / 💬 emoji for the per-channel breakdown instead of the cryptic `2L+0C` shorthand. Both the table column (`(❤️3 💬0)`) and the Maltego Notes field (`❤️2 💬3`). Easier to read at a glance and survives copy-paste into chat / docs.
+
 ## [0.5.0] - 2026-04-29
 
 ### Added

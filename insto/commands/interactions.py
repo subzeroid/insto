@@ -396,13 +396,13 @@ def _fans_csv_rows(result: FansResult) -> list[dict[str, Any]]:
 
 def _fans_maltego_rows(result: FansResult) -> list[dict[str, Any]]:
     """Maltego rows for /fans. Notes carries the human-readable
-    breakdown (`12L+3C`) so the Maltego node label is informative
+    breakdown (`❤️12 💬3`) so the Maltego node label is informative
     without requiring the Properties JSON."""
     return [
         {
             "value": row.username,
             "weight": row.score,
-            "notes": f"{row.likes}L+{row.comments}C",
+            "notes": f"❤️{row.likes} \U0001f4ac{row.comments}",
             "rank": i,
             "likes": row.likes,
             "comments": row.comments,
@@ -456,7 +456,7 @@ async def fans_cmd(ctx: CommandContext, username: str) -> FansResult:
     ctx.print(
         f"Top fans of @{username} "
         f"(last {result.analyzed_posts} of {window} posts, "
-        f"score = likes + {result.comment_weight}*comments):"
+        f"score = ❤️ + {result.comment_weight}*\U0001f4ac):"
     )
     if result.empty:
         ctx.print(f"no posts to analyze for @{username}")
@@ -464,7 +464,13 @@ async def fans_cmd(ctx: CommandContext, username: str) -> FansResult:
     if not result.items:
         ctx.print("no engagement found in the analysed window")
         return result
-    rows = [(f"@{r.username}", f"{r.score:>4}  ({r.likes}L + {r.comments}C)") for r in result.items]
+    rows = [
+        (
+            f"@{r.username}",
+            f"{r.score:>4}  (❤️{r.likes} \U0001f4ac{r.comments})",
+        )
+        for r in result.items
+    ]
     ctx.print(render_kv(rows, key_label="user", value_label="score"))
     return result
 

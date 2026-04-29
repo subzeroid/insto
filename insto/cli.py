@@ -211,6 +211,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="HikerAPI token (overrides $HIKERAPI_TOKEN and config.toml)",
     )
     parser.add_argument(
+        "--backend",
+        choices=("hiker", "aiograpi"),
+        default=None,
+        help="backend selector for this invocation (overrides $INSTO_BACKEND and config.toml)",
+    )
+    parser.add_argument(
         "--print-completion",
         dest="print_completion",
         choices=("bash", "zsh"),
@@ -274,7 +280,11 @@ def _build_backend(config: Config) -> Any:
     )
 
 
-def _safe_load_config(hiker_token: str | None = None, proxy: str | None = None) -> Config | None:
+def _safe_load_config(
+    hiker_token: str | None = None,
+    proxy: str | None = None,
+    backend: str | None = None,
+) -> Config | None:
     """Load config; surface security-relevant failures to stderr.
 
     A `BackendError` from `load_config()` typically means the config file
@@ -289,6 +299,8 @@ def _safe_load_config(hiker_token: str | None = None, proxy: str | None = None) 
         overrides["hiker_token"] = hiker_token
     if proxy is not None:
         overrides["hiker_proxy"] = proxy
+    if backend is not None:
+        overrides["backend"] = backend
     try:
         return load_config(overrides or None)
     except BackendError as exc:
@@ -590,7 +602,7 @@ def main(argv: list[str] | None = None) -> int:
             _run_oneshot(args.cmd_argv, args.target, args.proxy, args.hiker_token, log)
         )
 
-    config = _safe_load_config(args.hiker_token, args.proxy)
+    config = _safe_load_config(args.hiker_token, args.proxy, args.backend)
     if config is None or not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         if not args.interactive:

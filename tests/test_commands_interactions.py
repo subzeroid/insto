@@ -611,11 +611,11 @@ async def test_fans_maltego_export_with_score_weight(
     out_path = config.output_dir / "alice" / "fans.maltego.csv"
     assert out_path.exists()
     rows = list(csv.DictReader(out_path.read_text().splitlines()))
-    # bob is top fan with score 11 (2L+3C)
+    # bob is top fan with score 11 (2 likes + 3 comments)
     bob_row = next(r for r in rows if r["Value"] == "bob")
     assert bob_row["Type"] == "maltego.Person"
     assert bob_row["Weight"] == "11"
-    assert bob_row["Notes"] == "2L+3C"
+    assert bob_row["Notes"] == "❤️2 \U0001f4ac3"
 
 
 async def test_fans_empty_target_renders_message(

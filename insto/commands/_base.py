@@ -403,7 +403,15 @@ async def dispatch(
     if reset_budget:
         facade.reset_command_budget()
     ctx = CommandContext(facade=facade, args=args, session=session, console=console)
-    return await spec.fn(ctx)
+    # Show a Braille spinner on stderr while the command runs. Auto-stops
+    # the moment a tqdm bar takes over (track() in `insto.ui.progress`),
+    # auto-suppresses on non-TTY / --no-progress. Gives the operator
+    # immediate feedback during the silent setup wait of /info, /resolve,
+    # and the resolve+user_posts ramp-up of /fans, before tqdm appears.
+    from insto.ui.progress import spinner
+
+    async with spinner(spec.name):
+        return await spec.fn(ctx)
 
 
 # ---------------------------------------------------------------------------

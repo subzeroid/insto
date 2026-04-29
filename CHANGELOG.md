@@ -2,6 +2,16 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.5] - 2026-04-29
+
+### Added
+
+- **Spinner on stderr** during command execution — pipx-style Braille wheel that paints `⢿ fans...` while the backend call sequence runs, before the per-post tqdm bar (or instead of it, for commands like `/info` / `/resolve` / `/recommended` that don't have a per-iteration loop). Auto-stops when `track()` starts a tqdm bar (tqdm reuses the same line). Honours `--no-progress` and auto-suppresses on non-TTY. Closes the silent-pause-then-output gap that made commands feel hung even on fast networks.
+
+### Fixed
+
+- `/theme<Tab>` selecting a choice now actually inserts `/theme instagram` instead of `/themeinstagram`. v0.5.4's leading-space approach turned out to drop the space on some prompt-toolkit code paths; v0.5.5 yields the choices as full-token replacements (`text="/theme instagram"`, `start_position=-len("/theme")`) so prompt-toolkit's apply step deletes the typed `/theme` and inserts the complete `/theme instagram`. Bulletproof regardless of which apply path the menu uses.
+
 ## [0.5.4] - 2026-04-29
 
 ### Fixed

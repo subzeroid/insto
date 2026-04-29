@@ -154,18 +154,21 @@ class _SlashCommandCompleter(Completer):
         #    on first use because the popup shows `/theme [name]` but
         #    pressing Tab just re-inserts `/theme` and stops.
         #
-        #    The cursor is at end-of-`/theme` (no trailing space yet), so
-        #    completion text *must* include the separator — otherwise
-        #    accepting `instagram` produces `/themeinstagram` instead of
-        #    `/theme instagram`.
+        #    To make the inserted result `/theme instagram` (not
+        #    `/themeinstagram`), the completion *replaces the whole
+        #    typed prefix* instead of inserting at cursor — the
+        #    leading-space-only approach turned out to drop the space
+        #    on some prompt-toolkit code paths. Replacing the whole
+        #    `/theme` token is bulletproof: prompt-toolkit can't shorten
+        #    or normalise it.
         from insto.commands._base import COMMANDS
 
         spec = COMMANDS.get(user_typed)
         if spec is not None:
             for choice in _first_positional_choices(spec):
                 yield Completion(
-                    text=f" {choice}",
-                    start_position=0,  # insert at cursor, replace nothing
+                    text=f"{prefix} {choice}",
+                    start_position=-len(prefix),
                     display=choice,
                     display_meta="",
                 )

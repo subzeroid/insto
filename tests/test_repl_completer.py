@@ -110,24 +110,21 @@ def test_completer_yields_argument_choices_when_command_typed_exactly() -> None:
     `claude` / `instagram` / `aiograpi` — without forcing the user to
     type a space first. Same for `/purge`, etc.
 
-    The choices are yielded with a leading space in their `text` so
-    that accepting `instagram` produces `/theme instagram`, not
-    `/themeinstagram` (the cursor sits at end of `/theme` with no
-    trailing whitespace; without the space-prefix, prompt-toolkit
-    would insert the choice flush against the command name).
+    Each choice is yielded as a *full replacement* of the typed token
+    (`text="/theme instagram"`, ``start_position=-len("/theme")``) so
+    that prompt-toolkit's apply step deletes `/theme` and inserts the
+    full `/theme instagram` line. Replacing-the-whole-token is
+    bulletproof: leading-space-only completions got dropped to
+    `/themeinstagram` on some prompt-toolkit code paths in v0.5.4.
     """
     completer = _completer()
     matches = _completions(completer, "/theme")
-    # Command itself is still in the popup (so Tab can finish-and-submit).
+    # Command itself stays in the popup (so Tab still finishes-and-submits).
     assert "/theme" in matches
-    # Theme choices appear inline, each with a leading space separator.
-    assert " claude" in matches
-    assert " instagram" in matches
-    assert " aiograpi" in matches
-    # And the bare names (no leading space) must NOT be in the list —
-    # that would be the regression we're fixing.
-    assert "claude" not in matches
-    assert "instagram" not in matches
+    # Theme choices are full-line replacements of `/theme`.
+    assert "/theme claude" in matches
+    assert "/theme instagram" in matches
+    assert "/theme aiograpi" in matches
 
 
 def test_completer_meta_uses_command_help() -> None:

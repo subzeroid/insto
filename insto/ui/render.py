@@ -70,6 +70,18 @@ def render_profile(
     row("public email", profile.public_email or "—")
     row("public phone", profile.public_phone or "—")
     row("category", profile.business_category or "—")
+    if profile.avatar_url:
+        # Modern terminals (iTerm2, kitty, Apple Terminal, recent
+        # gnome-terminal) make OSC-8 hyperlinks clickable. Show a short
+        # "open" label with the URL embedded so the panel doesn't get
+        # disfigured by a 200-char signed CDN URL.
+        avatar_link = Text.from_markup(
+            f"[link={profile.avatar_url}]open[/link]"
+            "  · /propic to download",
+        )
+        body.add_row("avatar", avatar_link)
+    else:
+        row("avatar", "—")
     if profile.previous_usernames:
         row("aliases", ", ".join(profile.previous_usernames))
     if about:

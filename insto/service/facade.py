@@ -179,6 +179,13 @@ class OsintFacade:
         posts = await self.user_posts(username, limit=limit)
         return analytics.compute_timeline(posts, target=username, limit=limit)
 
+    async def where(
+        self, username: str, *, limit: int = 50, top: int = 10
+    ) -> analytics.GeoFingerprintResult:
+        """Geo-fingerprint: anchor place + centroid + top places from posts."""
+        posts = await self.user_posts(username, limit=limit)
+        return analytics.compute_geo_fingerprint(posts, target=username, limit=limit, top=top)
+
     async def intersect(
         self,
         username_a: str,

@@ -76,6 +76,19 @@ def _opt_str(value: Any) -> str | None:
     return s or None
 
 
+def _opt_float(value: Any) -> float | None:
+    """Coerce optional value to ``float | None``. Drops NaN."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:
+        return None
+    return f
+
+
 def _to_unix(value: Any, *, endpoint: str, field: str) -> int:
     """Coerce a Pydantic-or-raw timestamp into unix seconds.
 
@@ -237,6 +250,8 @@ def map_post(media: Any) -> Post:
         comment_count=int(_opt(media, "comment_count") or 0),
         location_name=_opt_str(_opt(location, "name")) if location is not None else None,
         location_pk=_opt_str(_opt(location, "pk")) if location is not None else None,
+        location_lat=_opt_float(_opt(location, "lat")) if location is not None else None,
+        location_lng=_opt_float(_opt(location, "lng")) if location is not None else None,
         hashtags=_hashtags(caption),
         mentions=_mentions(caption),
         media_urls=_post_media_urls(media, media_type),

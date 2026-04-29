@@ -82,6 +82,47 @@ class MutualsResult:
     empty: bool = False
 
 
+@dataclass(slots=True, frozen=True)
+class GeoPlace:
+    """One row in :class:`GeoFingerprintResult.places`."""
+
+    name: str
+    pk: str | None
+    lat: float
+    lng: float
+    count: int
+
+
+@dataclass(slots=True)
+class GeoFingerprintResult:
+    """Where-does-this-target-live summary over a bounded post window.
+
+    The output answers two questions an OSINT operator usually has:
+
+    1. **Where's the anchor?** — the place the target geotags most
+       often. Strong proxy for "where they live or work".
+    2. **How wide is the spread?** — centroid + max radius from
+       centroid. A 50 km radius means metro-area-bound; 5000 km
+       means international travel.
+
+    ``analyzed`` is the total post window inspected (capped at the
+    requested ``window``); ``geotagged`` is how many of those carried
+    GPS coordinates. Both are surfaced so the renderer can show the
+    confidence ratio ("38 of 50 posts geotagged").
+    """
+
+    target: str
+    window: int
+    analyzed: int
+    geotagged: int
+    anchor: GeoPlace | None = None
+    centroid_lat: float | None = None
+    centroid_lng: float | None = None
+    radius_km: float | None = None
+    places: list[GeoPlace] = field(default_factory=list)
+    empty: bool = False
+
+
 @dataclass(slots=True)
 class TimelineResult:
     """Posting cadence histogram across a bounded post window.
@@ -319,6 +360,121 @@ def count_wcommented(
         analyzed=len(materialised),
         items=_top_from_counter(counter, top),
         empty=len(materialised) == 0,
+    )
+
+
+def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance between two GPS points in kilometres.
+
+    Standard haversine formula on a 6371 km sphere — accurate to <1%
+    over typical IG geotag spreads. Good enough for "metro area vs
+    cross-country" classification; not a survey-grade tool.
+    """
+    import math
+
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(math.sqrt(a))
+
+
+def compute_geo_fingerprint(
+    posts: Iterable[Post],
+    *,
+    target: str,
+    limit: int = 50,
+    top: int | None = 10,
+) -> GeoFingerprintResult:
+    """Summarise posting locations into anchor + centroid + top-N places.
+
+    Posts without GPS (``location_lat is None``) are counted toward
+    ``analyzed`` but not ``geotagged`` — they don't contribute to the
+    geometry. Two passes:
+
+    1. Bucket by ``location_pk`` (or ``location_name`` if pk is
+       missing) to count occurrences and remember the place metadata.
+    2. Compute the arithmetic mean of (lat, lng) as the centroid and
+       the max haversine distance from centroid as the spread radius.
+
+    Arithmetic-mean centroid is wrong for points spanning the date
+    line or the poles, but right for the 99% of OSINT cases where the
+    target stays within one or two continents. The radius makes any
+    such pathology visible (an anomalous 19000 km radius signals the
+    centroid is meaningless).
+    """
+    _check_limit(limit)
+    window = _take(posts, limit)
+    counter: Counter[str] = Counter()
+    place_meta: dict[str, GeoPlace] = {}
+    geotagged_count = 0
+    total_lat = 0.0
+    total_lng = 0.0
+    geotag_points: list[tuple[float, float]] = []
+
+    for post in window:
+        if post.location_lat is None or post.location_lng is None:
+            continue
+        # Prefer pk as the bucket key so different posts at the
+        # exact same place coalesce. Fall through to name when pk
+        # is absent (older posts, IG quirks).
+        key = post.location_pk or post.location_name or ""
+        if not key:
+            continue
+        counter[key] += 1
+        if key not in place_meta:
+            place_meta[key] = GeoPlace(
+                name=post.location_name or "",
+                pk=post.location_pk,
+                lat=post.location_lat,
+                lng=post.location_lng,
+                count=0,
+            )
+        geotagged_count += 1
+        total_lat += post.location_lat
+        total_lng += post.location_lng
+        geotag_points.append((post.location_lat, post.location_lng))
+
+    if geotagged_count == 0:
+        return GeoFingerprintResult(
+            target=target,
+            window=limit,
+            analyzed=len(window),
+            geotagged=0,
+            empty=len(window) == 0,
+        )
+
+    # Materialise ordered places list with final counts.
+    places = [
+        GeoPlace(
+            name=place_meta[key].name,
+            pk=place_meta[key].pk,
+            lat=place_meta[key].lat,
+            lng=place_meta[key].lng,
+            count=count,
+        )
+        for key, count in counter.most_common(top if top else None)
+    ]
+    anchor = places[0] if places else None
+
+    centroid_lat = total_lat / geotagged_count
+    centroid_lng = total_lng / geotagged_count
+    radius_km = max(
+        _haversine_km(centroid_lat, centroid_lng, lat, lng) for lat, lng in geotag_points
+    )
+
+    return GeoFingerprintResult(
+        target=target,
+        window=limit,
+        analyzed=len(window),
+        geotagged=geotagged_count,
+        anchor=anchor,
+        centroid_lat=centroid_lat,
+        centroid_lng=centroid_lng,
+        radius_km=radius_km,
+        places=places,
+        empty=False,
     )
 
 

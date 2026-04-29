@@ -436,6 +436,73 @@ async def timeline_cmd(ctx: CommandContext, username: str):  # type: ignore[no-u
     return result
 
 
+# ---------------------------------------------------------------------------
+# /where — geo-fingerprint (anchor + centroid + top places)
+# ---------------------------------------------------------------------------
+
+
+@command(
+    "where",
+    "Geo-fingerprint: anchor place + centroid + top geotagged places (OSINT)",
+    csv=False,
+    add_args=add_target_arg,
+)
+@with_target
+async def where_cmd(ctx: CommandContext, username: str):  # type: ignore[no-untyped-def]
+    window = _resolve_window(ctx)
+    result = await ctx.facade.where(username, limit=window, top=10)
+
+    fmt = ctx.output_format()
+    if fmt == "json":
+        # GeoFingerprintResult includes nested GeoPlace dataclasses;
+        # dataclasses.asdict handles them recursively.
+        import dataclasses
+
+        ctx.facade.export_json(
+            dataclasses.asdict(result),
+            command="where",
+            target=username,
+            dest=_resolve_dest(ctx, fmt="json"),
+        )
+        return result
+
+    if result.empty:
+        ctx.print(f"no posts to analyze for @{username}")
+        return result
+    if result.geotagged == 0:
+        ctx.print(f"@{username}: 0 of {result.analyzed} posts had a geotag")
+        return result
+
+    ratio = f"{result.geotagged} of {result.analyzed} posts geotagged"
+    ctx.print(f"@{username} geo fingerprint — {ratio}")
+    ctx.print("")
+
+    # Anchor + centroid + radius — the headline.
+    if result.anchor is not None:
+        a = result.anchor
+        pct = 100 * a.count / result.geotagged
+        ctx.print(
+            f"  anchor:    {a.name or '(unnamed)'}  "
+            f"({a.lat:.4f}°N, {a.lng:.4f}°E) — {a.count} posts ({pct:.0f}%)"
+        )
+    if result.centroid_lat is not None and result.centroid_lng is not None:
+        radius = result.radius_km or 0.0
+        ctx.print(
+            f"  centroid:  {result.centroid_lat:.3f}°N, {result.centroid_lng:.3f}°E "
+            f"— max radius {radius:.0f} km"
+        )
+    ctx.print("")
+
+    # Top places bar chart (place name + horizontal bar + count).
+    peak = max((p.count for p in result.places), default=1)
+    bar_width = 30
+    for p in result.places:
+        bar = "█" * round(p.count / peak * bar_width) if p.count else ""
+        label = (p.name or f"pk={p.pk}")[:30]
+        ctx.print(f"  {label:<30}  {p.count:>3}  {bar}")
+    return result
+
+
 __all__ = [
     "CONTENT_DEFAULT_WINDOW",
     "captions_cmd",
@@ -444,4 +511,5 @@ __all__ = [
     "locations_cmd",
     "mentions_cmd",
     "timeline_cmd",
+    "where_cmd",
 ]

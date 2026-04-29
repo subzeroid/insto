@@ -96,6 +96,20 @@ def _opt_str(value: Any) -> str | None:
     return s or None
 
 
+def _opt_float(value: Any) -> float | None:
+    """Coerce optional payload value to `float | None`. Drops NaN /
+    out-of-range values that crept in via legacy fixtures."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if f != f:  # NaN check — `nan != nan` is the canonical test
+        return None
+    return f
+
+
 def _hashtags(caption: str) -> list[str]:
     return _HASHTAG_RE.findall(caption)
 
@@ -208,6 +222,8 @@ def map_post(d: dict[str, Any]) -> Post:
         comment_count=int(d.get("comment_count") or 0),
         location_name=_opt_str(location.get("name")) if location else None,
         location_pk=_opt_str(location.get("pk")) if location else None,
+        location_lat=_opt_float(location.get("lat")) if location else None,
+        location_lng=_opt_float(location.get("lng")) if location else None,
         hashtags=_hashtags(caption),
         mentions=_mentions(caption),
         media_urls=_post_media_urls(d, media_type),

@@ -173,7 +173,17 @@ class CommandContext:
         The CLI / REPL builds a `Console` once and passes it via this field;
         unit tests usually pass an isolated `record=True` console so the
         rendered output can be captured without writing to the real stdout.
+
+        Stops the active spinner before printing — without this, commands
+        that don't go through `track()` (everything except /fans /wliked
+        /wcommented /dossier) would let the spinner keep painting on
+        stderr while the rich Panel renders to stdout, producing visual
+        interleaving on terminals that don't strictly separate the two
+        streams.
         """
+        from insto.ui.progress import _stop_spinner
+
+        _stop_spinner()
         if self.console is not None:
             self.console.print(renderable)
 

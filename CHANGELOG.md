@@ -2,6 +2,12 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.6.2] - 2026-04-29
+
+### Fixed
+
+- Spinner no longer overlaps the rich Panel on commands that print straight to stdout (`/info`, `/about`, `/resolve`, ...). Two changes: (1) `ctx.print` now stops the spinner before writing, so any first user-facing output cleans the spinner line; (2) `_stop_spinner` erases the line synchronously instead of waiting for the spinner loop's next tick, so a fast follow-up panel doesn't render on top of a half-painted frame.
+
 ## [0.6.1] - 2026-04-29
 
 ### Added

@@ -97,10 +97,23 @@ async def _spinner_loop(label: str, stop: asyncio.Event) -> None:
 
 
 def _stop_spinner() -> None:
-    """Idempotent: signal the loop to exit, drop the global handles."""
+    """Idempotent: signal the loop to exit, drop the global handles.
+
+    Erases the current stderr line *synchronously* before returning —
+    the spinner loop's own line-erase only runs on its next tick (up
+    to ``_FRAME_INTERVAL_S`` later). Without the synchronous clear,
+    a caller that immediately writes to stdout (rich Panel for
+    ``/info``) would render on top of the half-painted spinner frame,
+    producing visual artifacts at the top of the panel.
+    """
     global _SPINNER_TASK, _SPINNER_STOP
     if _SPINNER_STOP is not None and not _SPINNER_STOP.is_set():
         _SPINNER_STOP.set()
+        # \r — cursor to col 0; \033[K — erase to end of line. The
+        # spinner_loop's finally clause will do the same on its next
+        # tick; that's a harmless no-op redundant clear.
+        sys.stderr.write("\r\033[K")
+        sys.stderr.flush()
     _SPINNER_TASK = None
     _SPINNER_STOP = None
 

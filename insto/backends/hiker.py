@@ -841,9 +841,7 @@ class HikerBackend(OSINTBackend):
 
     # ------------------------------------------------------- pinned / reposts
 
-    async def iter_user_pinned(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_pinned(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         # `user_medias_pinned_v1` returns the pinned posts as a *list*
         # directly (no envelope). Each item is a full media dict.
         # Instagram caps pinned posts at 3 per profile; pagination is
@@ -866,9 +864,7 @@ class HikerBackend(OSINTBackend):
             if limit is not None and yielded >= limit:
                 return
 
-    async def iter_user_reposts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_reposts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         # `user_reposts_gql(flat=True)` returns
         # ``{items: [media_dict, ...], more_available: bool, max_id: ...}``.
         # The cursor kwarg is ``repost_next_max_id``.

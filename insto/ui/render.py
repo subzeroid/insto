@@ -76,8 +76,7 @@ def render_profile(
         # "open" label with the URL embedded so the panel doesn't get
         # disfigured by a 200-char signed CDN URL.
         avatar_link = Text.from_markup(
-            f"[link={profile.avatar_url}]open[/link]"
-            "  · /propic to download",
+            f"[link={profile.avatar_url}]open[/link]  · /propic to download",
         )
         body.add_row("avatar", avatar_link)
     else:

@@ -140,15 +140,11 @@ class OSINTBackend(ABC):
         with a category set. Default raises."""
         raise NotImplementedError("this backend does not implement category-recommended lookup")
 
-    def iter_user_pinned(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_user_pinned(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate the user's pinned posts (max 3 on Instagram). Default raises."""
         raise NotImplementedError("this backend does not implement pinned-media listing")
 
-    def iter_user_reposts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_user_reposts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate posts the user has reposted (IG's repost surface).
         Default raises — only HikerAPI exposes this currently."""
         raise NotImplementedError("this backend does not implement repost listing")
@@ -170,9 +166,7 @@ class OSINTBackend(ABC):
         """
         raise NotImplementedError("this backend does not implement place search")
 
-    def iter_place_posts(
-        self, place_pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    def iter_place_posts(self, place_pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate top posts at a given Instagram location pk. Default raises."""
         raise NotImplementedError("this backend does not implement place media listing")
 

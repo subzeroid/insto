@@ -67,11 +67,7 @@ def _place_rows(places: Sequence[Place]) -> list[dict[str, Any]]:
 def _place_maltego_rows(places: Sequence[Place]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for i, p in enumerate(places, 1):
-        gps = (
-            f"{p.lat:.4f},{p.lng:.4f}"
-            if p.lat is not None and p.lng is not None
-            else ""
-        )
+        gps = f"{p.lat:.4f},{p.lng:.4f}" if p.lat is not None and p.lng is not None else ""
         rows.append(
             {
                 "value": p.name,
@@ -97,8 +93,10 @@ async def place_cmd(ctx: CommandContext) -> list[Place]:
     query = (getattr(ctx.args, "query", "") or "").strip()
     if not query:
         raise CommandUsageError("/place needs a non-empty query")
-    n = int(ctx.limit) if ctx.limit is not None and ctx.limit > 0 else int(
-        getattr(ctx.args, "count", 20)
+    n = (
+        int(ctx.limit)
+        if ctx.limit is not None and ctx.limit > 0
+        else int(getattr(ctx.args, "count", 20))
     )
     places = await ctx.facade.search_places(query, limit=n)
 
@@ -173,8 +171,10 @@ async def placeposts_cmd(ctx: CommandContext) -> list[Post]:
     pk = (getattr(ctx.args, "place_pk", "") or "").strip()
     if not pk:
         raise CommandUsageError("/placeposts needs a location pk")
-    n = int(ctx.limit) if ctx.limit is not None and ctx.limit > 0 else int(
-        getattr(ctx.args, "count", 30)
+    n = (
+        int(ctx.limit)
+        if ctx.limit is not None and ctx.limit > 0
+        else int(getattr(ctx.args, "count", 30))
     )
     posts = await ctx.facade.place_posts(pk, limit=n)
 

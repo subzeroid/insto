@@ -641,9 +641,7 @@ class AiograpiBackend(OSINTBackend):
 
     # -------------------------------------------------- pinned / postinfo / place
 
-    async def iter_user_pinned(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_pinned(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         # `user_pinned_medias(user_id)` returns `List[Media]` (Pydantic);
         # IG caps pinned posts at 3 so there's no `amount` parameter to
         # plumb. We slice manually if the caller wants fewer.
@@ -708,9 +706,7 @@ class AiograpiBackend(OSINTBackend):
             pk_int = int(place_pk)
         except (ValueError, TypeError) as exc:
             raise BackendError(f"invalid place pk: {place_pk!r}") from exc
-        items = await self._call(
-            lambda: self._client.location_medias_top_v1(pk_int, amount=amount)
-        )
+        items = await self._call(lambda: self._client.location_medias_top_v1(pk_int, amount=amount))
         for raw in items or []:
             yield map_post(raw)
 

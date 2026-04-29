@@ -293,17 +293,13 @@ class FakeBackend(OSINTBackend):
         self._consume_error("resolve_short_url")
         return self.short_url_redirects.get(url, url)
 
-    async def iter_user_pinned(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_pinned(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         self.request_log.append(("iter_user_pinned", (pk, limit)))
         self._consume_error("iter_user_pinned")
         async for item in self._paged("iter_user_pinned", self.pinned.get(pk, []), limit):
             yield item
 
-    async def iter_user_reposts(
-        self, pk: str, *, limit: int | None = None
-    ) -> AsyncIterator[Post]:
+    async def iter_user_reposts(self, pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         self.request_log.append(("iter_user_reposts", (pk, limit)))
         self._consume_error("iter_user_reposts")
         async for item in self._paged("iter_user_reposts", self.reposts.get(pk, []), limit):

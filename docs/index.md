@@ -71,6 +71,7 @@ See [Backends](backends.md) for the full breakdown.
 ## Where to next
 
 - [Killer features 🔥](killer-features.md) — the OSINT-unique commands with examples.
+- [OSINT recipes 📓](recipes.md) — concrete investigative scenarios as 3-5 command sequences.
 - [Installation](installation.md) — `uv tool install insto`, dev sources, shell completion.
 - [Basic usage](basic-usage.md) — REPL walkthrough, one-shot patterns, pipelines.
 - [CLI reference](cli-reference.md) — every command with flags and examples.

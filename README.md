@@ -221,6 +221,7 @@ Pretty much every command takes `--limit N` (paging cap) and supports `--json` /
 Full docs at <https://subzeroid.github.io/insto/>:
 
 - [**🔥 Killer features**](https://subzeroid.github.io/insto/killer-features/) — `/dossier`, `/where`, `/intersect`, `/fans`, `/place`, `/postinfo`, `/timeline`, `/search` with real output examples.
+- [**📓 OSINT recipes**](https://subzeroid.github.io/insto/recipes/) — concrete investigative scenarios: find someone's likely city, detect sockpuppet rings, evidence-archive a post chain, audit your own footprint, etc.
 - [Installation](https://subzeroid.github.io/insto/installation/)
 - [Basic usage](https://subzeroid.github.io/insto/basic-usage/)
 - [CLI reference](https://subzeroid.github.io/insto/cli-reference/)

@@ -2,6 +2,8 @@
 
 A short tour of the commands that make `insto` worth installing. Each has a copy-pasteable one-shot example, real output, and what to do with it.
 
+> Looking for **multi-step investigative scenarios** rather than per-command examples? See [OSINT recipes](recipes.md) — 7 concrete chains (find someone's likely city, detect sockpuppet rings, evidence-archive a post, audit your own footprint, …).
+
 ---
 
 ## 🔥 `/where` — geo fingerprint

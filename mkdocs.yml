@@ -40,6 +40,7 @@ not_in_nav: |
 nav:
   - Home: index.md
   - Killer features 🔥: killer-features.md
+  - OSINT recipes 📓: recipes.md
   - Installation: installation.md
   - Basic usage: basic-usage.md
   - CLI reference: cli-reference.md

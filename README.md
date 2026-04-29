@@ -104,8 +104,8 @@ supported.
 
 | | insto | [Osintgram](https://github.com/Datalux/Osintgram) | [Toutatis](https://github.com/megadose/toutatis) | [Sherlock](https://github.com/sherlock-project/sherlock) |
 |---|---|---|---|---|
-| Backend | [HikerAPI](https://hikerapi.com) cloud (default), aiograpi optional | Logged-in Instagram session | Logged-in Instagram session | HTTP probes — multi-site |
-| Account ban risk | **None** with HikerAPI backend | High | High | N/A — username probing |
+| Backends supported | [HikerAPI](https://hikerapi.com) (default) + aiograpi | Username/password (default) + HikerAPI ([#2586](https://github.com/Datalux/Osintgram/pull/2586)) | Logged-in Instagram session | HTTP probes — multi-site |
+| Default backend | HikerAPI — no IG session in scope | Logged-in Instagram session | Logged-in Instagram session | N/A — username probing |
 | Scope | Instagram deep dive | Instagram only | Instagram (email/phone focus) | 400+ sites, username search |
 | Geo OSINT (`/where`, `/place`, `/placeposts`) | ✅ unique | ❌ | ❌ | ❌ |
 | Network ops (`/intersect`, `/mutuals`) | ✅ unique | ❌ | ❌ | ❌ |
@@ -117,9 +117,9 @@ supported.
 | One-shot / scriptable | ✅ stdin/stdout pipes | ⚠️ shell only | ✅ | ✅ |
 | Type-safe / strict mypy | ✅ ~93% coverage | ❌ | ❌ | ❌ |
 
-**When to pick insto** — Instagram-specific OSINT where you need account safety, deep network/geo analytics, snapshots over time, and Maltego-ready export. The HikerAPI default backend means no Instagram session is ever in scope, so no challenge-required, login-required, or account-ban surface.
+**When to pick insto** — Instagram-specific OSINT where you want HikerAPI on the default path (no IG session is ever in scope), deep network/geo analytics, snapshots over time, and Maltego-ready export. Modern stack — asyncio, strict mypy, prompt-toolkit REPL with slash-popup completion.
 
-**When to pick Osintgram** — historic OSS standard, large existing community, you have a throwaway Instagram account you don't mind burning. The HikerAPI integration in upstream Osintgram (PR [#2586](https://github.com/Datalux/Osintgram/pull/2586) merged Aug 2025) means you can also run it through HikerAPI, but the command surface stays Osintgram's.
+**When to pick Osintgram** — historic OSS standard, large existing community. As of PR [#2586](https://github.com/Datalux/Osintgram/pull/2586) (merged Aug 2025) it can also run through HikerAPI via `HIKERAPI_TOKEN` so you don't have to use a logged-in Instagram account. The default path is still username/password and the command surface is the original Osintgram one — no `/where`, `/intersect`, `/timeline`, or `/fans` analytics.
 
 **When to pick Toutatis** — narrow goal: extract email + phone hints from a target's `user_info`. It's smaller and single-purpose. insto's `/email` and `/phone` cover the same data through HikerAPI without an Instagram login.
 

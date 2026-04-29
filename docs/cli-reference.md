@@ -10,13 +10,16 @@ Every command inherits these via the global parser. Flag conflicts (e.g. `--json
 |---|---|
 | `--json [DEST]` | Write versioned JSON envelope (`{"_schema": "insto.v1", "command": ..., "target": ..., "captured_at": ..., "data": ...}`). `DEST = -` writes to stdout, `DEST` omitted writes to `output/<user>/<cmd>.json`. |
 | `--csv [DEST]` | Same, flat-row commands only. CSV has no `_schema` envelope (just header + rows). |
-| `--maltego [DEST]` | Maltego entity-import CSV (`Type, Value, Weight, Properties`). Limited to commands with a canonical entity per row (`/followers`, `/followings`, `/mutuals`, `/similar`, `/wcommented`, `/wtagged`, `/hashtags`, `/mentions`, `/locations`). |
+| `--maltego [DEST]` | Maltego entity-import CSV (`Type, Value, Weight, Notes, Properties`). Limited to commands with a canonical entity per row. |
 | `--output-format {json,csv,maltego}` | Long form of the three above. |
 | `--limit N` | Override per-command default. `N=0` means no cap (only honored where the command itself disables the cap). |
 | `--no-download` | Media commands print URLs and skip CDN streaming. |
 | `--yes` | Skip interactive confirmations (`/batch` over 25 targets, `/purge`). |
 | `--proxy URL` | Per-call proxy. Schemes: `http://`, `https://`, `socks5h://` (Tor). |
 | `--hiker-token TOKEN` | Per-call HikerAPI token override. |
+| `--backend {hiker,aiograpi}` | Per-invocation backend selector (overrides `$INSTO_BACKEND` and `config.toml`). |
+| `--no-progress` | Suppress tqdm bars + `⢿ <cmd>...` spinner on long-running commands. |
+| `--non-interactive` | `insto setup` only — read every value from env vars without prompts. CI/automation. |
 | `--verbose` / `--debug` | Bump log level (writes to `~/.insto/logs/insto.log`, rotated). |
 
 ## Top-level subcommands
@@ -46,8 +49,10 @@ Inline target: `/info instagram`. Active target used otherwise.
 
 | Command | Purpose |
 |---|---|
-| `/info` | Full profile + `user_about` payload. |
+| `/info` | Full profile + `user_about` payload (folded into the panel). Avatar URL is rendered as a clickable link; `created` and `country` come from the about call. |
+| `/about` | Raw `user_about` slice on its own (joined date, country, former usernames). One backend call instead of two. |
 | `/propic` | Download HD profile picture. |
+| `/pinned` | Pinned posts (Instagram caps at 3). |
 | `/email` / `/phone` | Public contact fields if present. |
 | `/export` | Profile + about as JSON (always JSON, ignores `--csv`). |
 
@@ -60,6 +65,9 @@ Inline target: `/info instagram`. Active target used otherwise.
 | `/posts [N]` | Last N feed posts (default 12). |
 | `/reels [N]` | Last N reels — pulled from feed and filtered (default 10). |
 | `/tagged [N]` | Posts where the target is tagged (default 10). |
+| `/reposts [N]` | Posts the target reposted via IG's repost surface (HikerAPI only). |
+| `/audio <track_id> [N]` | Clips that use a given audio asset id. |
+| `/postinfo <ref>` | Resolve a media URL / shortcode / pk → full `Post` DTO. No active target needed. |
 
 ### Network
 
@@ -67,8 +75,11 @@ Inline target: `/info instagram`. Active target used otherwise.
 |---|---|
 | `/followers [N]` | First N followers (default 50). |
 | `/followings [N]` | First N accounts the target follows (default 50). |
-| `/mutuals` | Followers ∩ following. Default-capped at 1000 per side; raise with `--limit`. |
-| `/similar` | Suggested similar accounts. |
+| `/mutuals` | Followers ∩ following of one target. Default 1000 per side; `--limit 0` for no cap. |
+| `/intersect <a> <b>` | Followers(@a) ∩ followers(@b) — cross-target shared audience. |
+| `/similar` | IG's "Suggested for you" list (`chaining` API). |
+| `/recommended` | IG's category-based recommendations (business / creator accounts). aiograpi only. |
+| `/search <query> [N]` | Free-text account search (no active target needed). |
 
 ### Content analysis
 
@@ -78,17 +89,36 @@ All content commands operate on a bounded window (default 50 posts; override wit
 |---|---|
 | `/hashtags` | Top hashtags in captions. |
 | `/mentions` | Top @-mentions (caption + usertags). |
-| `/locations` | Top geo-tagged locations. |
 | `/captions` | Dump captions of recent posts. |
 | `/likes` | Aggregate like-count stats. |
+| `/timeline` | Posting cadence histogram — hour-of-day sparkline + day-of-week bars. |
+
+### Geo
+
+| Command | Purpose |
+|---|---|
+| `/locations` | Top geo-tagged location names from the active target's posts. |
+| `/where` | 🔥 Geo fingerprint of the active target — anchor (most-frequent place), centroid, max radius, top places bar chart. |
+| `/place <query> [N]` | Search Instagram places by free text → name + GPS + IG location pk. |
+| `/placeposts <pk> [N]` | Top posts at a given Instagram location pk. |
 
 ### Interactions
+
+All take a bounded post window (default 50). `/wliked` and `/fans` make `N` (or `2N`) backend calls — pass `--limit 10` for cheaper sampling. Concurrency capped at 5 internally.
 
 | Command | Purpose |
 |---|---|
 | `/comments [post_code]` | Comments for one post code, or aggregate across the window. |
 | `/wcommented` | Top users commenting on the target's recent posts. |
+| `/wliked` | Top users liking the target's recent posts. |
 | `/wtagged` | Top users who tagged the target in their posts. |
+| `/fans` | 🔥 Composite ranking: `score = likes + 3×comments`. Output shows ❤️ + 💬 breakdown. |
+
+### Discovery
+
+| Command | Purpose |
+|---|---|
+| `/resolve <url>` | Expand `instagram.com/share/...` short-link → canonical URL. aiograpi only. |
 
 ### Batch
 

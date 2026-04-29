@@ -39,6 +39,7 @@ not_in_nav: |
 
 nav:
   - Home: index.md
+  - Killer features 🔥: killer-features.md
   - Installation: installation.md
   - Basic usage: basic-usage.md
   - CLI reference: cli-reference.md

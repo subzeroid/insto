@@ -220,6 +220,7 @@ Pretty much every command takes `--limit N` (paging cap) and supports `--json` /
 
 Full docs at <https://subzeroid.github.io/insto/>:
 
+- [**🔥 Killer features**](https://subzeroid.github.io/insto/killer-features/) — `/dossier`, `/where`, `/intersect`, `/fans`, `/place`, `/postinfo`, `/timeline`, `/search` with real output examples.
 - [Installation](https://subzeroid.github.io/insto/installation/)
 - [Basic usage](https://subzeroid.github.io/insto/basic-usage/)
 - [CLI reference](https://subzeroid.github.io/insto/cli-reference/)

@@ -50,8 +50,27 @@ Two surfaces over the same command grammar:
 
 See [Backends](backends.md) for the full breakdown.
 
+## Command surface
+
+🔥 marks the killer-feature commands — uniquely-OSINT primitives that don't have obvious equivalents in other tools. See **[Killer features](killer-features.md)** for full examples.
+
+| Group | Commands |
+|---|---|
+| **Profile** | `info` `about` `propic` `email` `phone` `export` `pinned` |
+| **Media** | `posts` `reels` `reposts` `stories` `highlights` `tagged` `audio` `postinfo` 🔥 |
+| **Network** | `followers` `followings` `mutuals` `intersect` 🔥 `similar` `search` 🔥 `recommended` |
+| **Geo** | `locations` `where` 🔥 `place` 🔥 `placeposts` 🔥 |
+| **Content** | `hashtags` `mentions` `captions` `likes` `timeline` 🔥 |
+| **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` 🔥 |
+| **Discovery** | `resolve` |
+| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` |
+| **Operational** | `quota` `health` `config` `purge` |
+| **Session** | `target` `current` `clear` |
+| **Batch / dossier** | `batch` `dossier` 🔥 |
+
 ## Where to next
 
+- [Killer features 🔥](killer-features.md) — the OSINT-unique commands with examples.
 - [Installation](installation.md) — `uv tool install insto`, dev sources, shell completion.
 - [Basic usage](basic-usage.md) — REPL walkthrough, one-shot patterns, pipelines.
 - [CLI reference](cli-reference.md) — every command with flags and examples.

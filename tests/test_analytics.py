@@ -468,14 +468,34 @@ def test_compute_geo_fingerprint_anchor_centroid_radius() -> None:
     from insto.service.analytics import compute_geo_fingerprint
 
     posts = [
-        _post("1", location_pk="223393054", location_name="Maranello",
-              location_lat=44.5256, location_lng=10.8664),
-        _post("2", location_pk="223393054", location_name="Maranello",
-              location_lat=44.5256, location_lng=10.8664),
-        _post("3", location_pk="223393054", location_name="Maranello",
-              location_lat=44.5256, location_lng=10.8664),
-        _post("4", location_pk="206404230", location_name="Niseko, Japan",
-              location_lat=42.8591, location_lng=140.7053),
+        _post(
+            "1",
+            location_pk="223393054",
+            location_name="Maranello",
+            location_lat=44.5256,
+            location_lng=10.8664,
+        ),
+        _post(
+            "2",
+            location_pk="223393054",
+            location_name="Maranello",
+            location_lat=44.5256,
+            location_lng=10.8664,
+        ),
+        _post(
+            "3",
+            location_pk="223393054",
+            location_name="Maranello",
+            location_lat=44.5256,
+            location_lng=10.8664,
+        ),
+        _post(
+            "4",
+            location_pk="206404230",
+            location_name="Niseko, Japan",
+            location_lat=42.8591,
+            location_lng=140.7053,
+        ),
     ]
     res = compute_geo_fingerprint(posts, target="ferrari", limit=50)
     assert res.geotagged == 4
@@ -495,8 +515,7 @@ def test_compute_geo_fingerprint_skips_posts_without_gps() -> None:
 
     posts = [
         _post("1", location_name="Mystery Place"),  # no lat/lng
-        _post("2", location_pk="X", location_name="Real",
-              location_lat=10.0, location_lng=20.0),
+        _post("2", location_pk="X", location_name="Real", location_lat=10.0, location_lng=20.0),
     ]
     res = compute_geo_fingerprint(posts, target="x", limit=50)
     assert res.analyzed == 2
@@ -511,9 +530,7 @@ def test_compute_geo_fingerprint_empty() -> None:
     res = compute_geo_fingerprint([], target="x", limit=50)
     assert res.empty is True
     assert res.anchor is None
-    res2 = compute_geo_fingerprint(
-        [_post("1", location_name="No GPS")], target="x", limit=50
-    )
+    res2 = compute_geo_fingerprint([_post("1", location_name="No GPS")], target="x", limit=50)
     # Window non-empty but no GPS points — empty stays False (we *did*
     # analyse posts), but anchor / centroid are None.
     assert res2.empty is False

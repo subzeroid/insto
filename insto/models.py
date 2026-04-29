@@ -87,6 +87,13 @@ class Post:
     comment_count: int = 0
     location_name: str | None = None
     location_pk: str | None = None
+    # Decimal degrees, signed. Populated when the post carries a
+    # geotag *and* the IG payload included GPS for it. Many posts
+    # have a `location_name` without coordinates (older posts, or
+    # locations IG returns as text-only); analyzers that need real
+    # geometry filter on `location_lat is not None`.
+    location_lat: float | None = None
+    location_lng: float | None = None
     hashtags: list[str] = field(default_factory=list)
     mentions: list[str] = field(default_factory=list)
     media_urls: list[str] = field(default_factory=list)

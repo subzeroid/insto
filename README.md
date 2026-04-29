@@ -186,19 +186,21 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 
 ## Command surface
 
+🔥 marks the killer-feature commands — the ones that are uniquely OSINT-positioned and don't have obvious equivalents in other tools.
+
 | Group | Commands | What it does |
 |---|---|---|
-| **Profile** | `info` `about` `propic` `email` `phone` `export` `pinned` | full profile dump, raw user_about slice, avatar download, contact extraction, JSON export, pinned posts |
-| **Media** | `posts` `reels` `reposts` `stories` `highlights` `tagged` `audio` `postinfo` | feed media + reposts + stories + highlight reels + tagged-in + clips using a given audio + resolve a URL/code/pk to full Post DTO |
-| **Network** | `followers` `followings` `mutuals` `intersect` `similar` `search` `recommended` | follower / following lists, self-intersection, cross-target shared followers, IG's "suggested similar" carousel, free-text search, category recommendations |
-| **Content** | `hashtags` `mentions` `locations` `captions` `likes` `timeline` | top-N hashtags / @mentions / geotags across recent posts, raw captions, like-count stats, posting-cadence histogram |
-| **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` | per-post or aggregated comments, top commenters / likers / taggers, weighted "superfan" ranking |
-| **Geo** | `place` `placeposts` | search Instagram places by text → top posts at a location (geo-OSINT) |
+| **Profile** | `info` `about` `propic` `email` `phone` `export` `pinned` | profile dump, user_about slice, avatar download, contact extraction, JSON export, pinned posts |
+| **Media** | `posts` `reels` `reposts` `stories` `highlights` `tagged` `audio` `postinfo` 🔥 | feed media, reposts, stories, highlights, tagged-in, audio-asset → clips, **`postinfo` resolves any URL/code/pk to full Post DTO** |
+| **Network** | `followers` `followings` `mutuals` `intersect` 🔥 `similar` `search` 🔥 `recommended` | follower lists, self-intersection, **`intersect` = followers(@a) ∩ followers(@b)**, suggested similar, **`search` = free-text account discovery**, category recommendations |
+| **Geo** | `locations` `where` 🔥 `place` 🔥 `placeposts` 🔥 | location frequency, **`where` = geo fingerprint (anchor + centroid + radius)**, **`place` = text → IG locations**, **`placeposts` = top media at a location** |
+| **Content** | `hashtags` `mentions` `captions` `likes` `timeline` 🔥 | top hashtags / @mentions / captions, like-count stats, **`timeline` = posting-cadence histogram (hour-of-day + day-of-week)** |
+| **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` 🔥 | per-post + aggregated comments, top commenters / likers / taggers, **`fans` = weighted superfan ranking (likes + 3×comments)** |
 | **Discovery** | `resolve` | expand `instagram.com/share/...` short-links to canonical URLs (aiograpi only) |
-| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; history of cli invocations |
-| **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite / cache cleanup |
+| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; cli-history |
+| **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite/cache cleanup |
 | **Session** | `target` `current` `clear` | active-target plumbing for the REPL |
-| **Batch / dossier** | `batch` `dossier` | run one command across a target list; full target package (profile + media + network + analytics) with `--maltego` CSV export per section |
+| **Batch / dossier** | `batch` `dossier` 🔥 | run one command across a target list, **`dossier` = full target package (profile + media + network + analytics) with `--maltego` CSV per section** |
 
 Inside the REPL each command may be invoked with or without a leading `/`.
 

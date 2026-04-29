@@ -2,6 +2,18 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.1] - 2026-04-29
+
+### Added
+
+- **`/where <user>` 🔥** — geo-fingerprint analytic. Walks the target's recent posts, extracts GPS coordinates from every geotag, computes the **anchor** (most-frequent place — proxy for "where they live or work"), the **centroid** (arithmetic mean of all geotag points), and the **spread radius** (max haversine distance from centroid). Top-N places rendered as a horizontal bar chart. On @ferrari (15/30 posts geotagged): anchor = Maranello (47%), centroid in N. Italy, max radius 9.5k km — Maranello is HQ, the rest is racing circuits and ski trips.
+- **`Post.location_lat` / `Post.location_lng`** fields. The IG payload always carried these but the mappers were dropping them. Now extracted by both backends; new `_opt_float` helper handles NaN / coercion errors. Snapshot serialisation is unaffected (snapshot diff already serialised the whole Post via `dataclasses.asdict`).
+
+### Changed
+
+- Command surface table in the README marks **🔥 killer-feature commands** so newcomers can immediately spot the OSINT-unique primitives (`/dossier`, `/where`, `/intersect`, `/fans`, `/place`, `/placeposts`, `/postinfo`, `/search`, `/timeline`) vs the trivial wrappers.
+- `/locations` moved from "Content" group to a new "Geo" group alongside `/where`, `/place`, `/placeposts` — they all answer "where" rather than "what about the captions".
+
 ## [0.7.0] - 2026-04-29
 
 ### Added — five new OSINT commands

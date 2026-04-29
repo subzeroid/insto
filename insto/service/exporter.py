@@ -62,6 +62,7 @@ CSV_FLAT_COMMANDS: frozenset[str] = frozenset(
         "locations",
         "captions",
         "posts",
+        "place",
     }
 )
 
@@ -85,6 +86,7 @@ MALTEGO_COMMANDS: frozenset[str] = frozenset(
         "hashtags",
         "mentions",
         "locations",
+        "place",
     }
 )
 

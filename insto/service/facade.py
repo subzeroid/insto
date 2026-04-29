@@ -41,6 +41,7 @@ from insto.models import (
     Comment,
     Highlight,
     HighlightItem,
+    Place,
     Post,
     Profile,
     Quota,
@@ -208,6 +209,28 @@ class OsintFacade:
             target_b=username_b,
             window=window,
         )
+
+    async def user_pinned(self, username: str, *, limit: int = 12) -> list[Post]:
+        """Pinned posts of @username (Instagram allows up to 3)."""
+        pk = await self.resolve_pk(username)
+        return [p async for p in self.backend.iter_user_pinned(pk, limit=limit)]
+
+    async def user_reposts(self, username: str, *, limit: int = 50) -> list[Post]:
+        """Posts the target has reposted (IG repost surface)."""
+        pk = await self.resolve_pk(username)
+        return [p async for p in self.backend.iter_user_reposts(pk, limit=limit)]
+
+    async def post_info(self, ref: str) -> Post:
+        """Resolve a media URL / shortcode / pk to a Post DTO."""
+        return await self.backend.get_post_by_ref(ref)
+
+    async def search_places(self, query: str, *, limit: int = 20) -> list[Place]:
+        """Free-text search for IG places."""
+        return await self.backend.search_places(query, limit=limit)
+
+    async def place_posts(self, place_pk: str, *, limit: int = 50) -> list[Post]:
+        """Top posts at a given Instagram location pk."""
+        return [p async for p in self.backend.iter_place_posts(place_pk, limit=limit)]
 
     async def search_users(self, query: str, *, limit: int = 50) -> list[User]:
         """Free-text user search. Empty query is rejected upstream."""

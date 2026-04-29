@@ -47,7 +47,7 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
-from insto.models import Comment, Highlight, HighlightItem, Post, Profile, Quota, Story, User
+from insto.models import Comment, Highlight, HighlightItem, Place, Post, Profile, Quota, Story, User
 from insto.service.metrics import Metrics, MetricsSnapshot
 
 log = logging.getLogger("insto.backends.aiograpi")
@@ -638,6 +638,81 @@ class AiograpiBackend(OSINTBackend):
                 self._last_error = drift
                 raise
         return out
+
+    # -------------------------------------------------- pinned / postinfo / place
+
+    async def iter_user_pinned(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        # `user_pinned_medias(user_id)` returns `List[Media]` (Pydantic);
+        # IG caps pinned posts at 3 so there's no `amount` parameter to
+        # plumb. We slice manually if the caller wants fewer.
+        from insto.backends._aiograpi_map import map_post
+
+        items = await self._call(lambda: self._client.user_pinned_medias(int(pk)))
+        if limit and limit > 0:
+            items = list(items or [])[:limit]
+        for raw in items or []:
+            yield map_post(raw)
+
+    async def get_post_by_ref(self, ref: str) -> Post:
+        from insto.backends._aiograpi_map import map_post
+
+        cleaned = ref.strip()
+        if cleaned.startswith("http://") or cleaned.startswith("https://"):
+            pk = await self._call(lambda: self._client.media_pk_from_url(cleaned))
+        elif cleaned.isdigit():
+            pk = cleaned
+        else:
+            code = cleaned.strip("/").rsplit("/", 1)[-1]
+            pk = await self._call(lambda: self._client.media_pk_from_code(code))
+        media = await self._call(lambda: self._client.media_info(str(pk)))
+        return map_post(media)
+
+    async def search_places(self, query: str, *, limit: int = 20) -> list[Place]:
+        # aiograpi's `fbsearch_places(query)` returns a list of Location
+        # Pydantic models. They expose pk, name, lat, lng, address as
+        # attributes — wrap into our Place DTO.
+        items = await self._call(lambda: self._client.fbsearch_places(query))
+        out: list[Place] = []
+        for loc in (items or [])[:limit]:
+            pk = getattr(loc, "pk", None)
+            name = getattr(loc, "name", None)
+            if pk is None or not name:
+                continue
+            out.append(
+                Place(
+                    pk=str(pk),
+                    name=str(name),
+                    address=str(getattr(loc, "address", "") or ""),
+                    city=str(getattr(loc, "city", "") or ""),
+                    short_name=str(getattr(loc, "short_name", "") or ""),
+                    lat=getattr(loc, "lat", None),
+                    lng=getattr(loc, "lng", None),
+                    facebook_id=(
+                        str(getattr(loc, "external_id", None))
+                        if getattr(loc, "external_id", None)
+                        else None
+                    ),
+                )
+            )
+        return out
+
+    async def iter_place_posts(
+        self, place_pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        from insto.backends._aiograpi_map import map_post
+
+        amount = int(limit) if limit and limit > 0 else 50
+        try:
+            pk_int = int(place_pk)
+        except (ValueError, TypeError) as exc:
+            raise BackendError(f"invalid place pk: {place_pk!r}") from exc
+        items = await self._call(
+            lambda: self._client.location_medias_top_v1(pk_int, amount=amount)
+        )
+        for raw in items or []:
+            yield map_post(raw)
 
     # ------------------------------------------------------------------ bookkeeping
 

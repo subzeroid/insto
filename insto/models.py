@@ -148,6 +148,29 @@ class HighlightItem:
 
 
 @dataclass(slots=True)
+class Place:
+    """Geo location DTO — matches Instagram's "place" surface.
+
+    Returned by ``backend.search_places`` (text search) and used as
+    the input to ``backend.iter_place_posts`` (top media at this
+    location). ``pk`` is the Instagram location id; ``facebook_id``
+    is the underlying Facebook Places id (Instagram uses Facebook's
+    location graph). ``lat`` / ``lng`` are decimal degrees, signed
+    (positive = north / east). All optional except ``pk`` and
+    ``name`` — IG sometimes elides fields on lesser-known places.
+    """
+
+    pk: str
+    name: str
+    address: str = ""
+    city: str = ""
+    short_name: str = ""
+    lat: float | None = None
+    lng: float | None = None
+    facebook_id: str | None = None
+
+
+@dataclass(slots=True)
 class Quota:
     """Backend quota snapshot.
 

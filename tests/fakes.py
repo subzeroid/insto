@@ -36,6 +36,7 @@ from insto.models import (
     Comment,
     Highlight,
     HighlightItem,
+    Place,
     Post,
     Profile,
     Quota,
@@ -71,6 +72,11 @@ class FakeErrors:
     iter_audio_clips: BackendError | None = None
     get_recommended: BackendError | None = None
     resolve_short_url: BackendError | None = None
+    iter_user_pinned: BackendError | None = None
+    iter_user_reposts: BackendError | None = None
+    get_post_by_ref: BackendError | None = None
+    search_places: BackendError | None = None
+    iter_place_posts: BackendError | None = None
 
 
 @dataclass
@@ -96,6 +102,11 @@ class FakeBackend(OSINTBackend):
     audio_clips: dict[str, list[Post]] = field(default_factory=dict)
     recommended: dict[str, list[User]] = field(default_factory=dict)
     short_url_redirects: dict[str, str] = field(default_factory=dict)
+    pinned: dict[str, list[Post]] = field(default_factory=dict)
+    reposts: dict[str, list[Post]] = field(default_factory=dict)
+    posts_by_ref: dict[str, Post] = field(default_factory=dict)
+    places: dict[str, list[Place]] = field(default_factory=dict)
+    place_posts: dict[str, list[Post]] = field(default_factory=dict)
 
     quota: Quota = field(default_factory=Quota.unknown)
     errors: FakeErrors = field(default_factory=FakeErrors)
@@ -281,6 +292,47 @@ class FakeBackend(OSINTBackend):
         self.request_log.append(("resolve_short_url", (url,)))
         self._consume_error("resolve_short_url")
         return self.short_url_redirects.get(url, url)
+
+    async def iter_user_pinned(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        self.request_log.append(("iter_user_pinned", (pk, limit)))
+        self._consume_error("iter_user_pinned")
+        async for item in self._paged("iter_user_pinned", self.pinned.get(pk, []), limit):
+            yield item
+
+    async def iter_user_reposts(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        self.request_log.append(("iter_user_reposts", (pk, limit)))
+        self._consume_error("iter_user_reposts")
+        async for item in self._paged("iter_user_reposts", self.reposts.get(pk, []), limit):
+            yield item
+
+    async def get_post_by_ref(self, ref: str) -> Post:
+        self.request_log.append(("get_post_by_ref", (ref,)))
+        self._consume_error("get_post_by_ref")
+        post = self.posts_by_ref.get(ref)
+        if post is None:
+            from insto.exceptions import PostNotFound
+
+            raise PostNotFound(ref)
+        return post
+
+    async def search_places(self, query: str, *, limit: int = 20) -> list[Place]:
+        self.request_log.append(("search_places", (query, limit)))
+        self._consume_error("search_places")
+        return list(self.places.get(query, []))[:limit]
+
+    async def iter_place_posts(
+        self, place_pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        self.request_log.append(("iter_place_posts", (place_pk, limit)))
+        self._consume_error("iter_place_posts")
+        async for item in self._paged(
+            "iter_place_posts", self.place_posts.get(place_pk, []), limit
+        ):
+            yield item
 
     def get_quota(self) -> Quota:
         return self.quota

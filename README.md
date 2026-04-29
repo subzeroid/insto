@@ -188,11 +188,12 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 
 | Group | Commands | What it does |
 |---|---|---|
-| **Profile** | `info` `about` `propic` `email` `phone` `export` | full profile dump, raw user_about slice, avatar download, contact extraction, JSON export |
-| **Media** | `posts` `reels` `stories` `highlights` `tagged` `audio` | feed media + active stories + highlight reels + posts the target is tagged in + clips using a given audio asset |
+| **Profile** | `info` `about` `propic` `email` `phone` `export` `pinned` | full profile dump, raw user_about slice, avatar download, contact extraction, JSON export, pinned posts |
+| **Media** | `posts` `reels` `reposts` `stories` `highlights` `tagged` `audio` `postinfo` | feed media + reposts + stories + highlight reels + tagged-in + clips using a given audio + resolve a URL/code/pk to full Post DTO |
 | **Network** | `followers` `followings` `mutuals` `intersect` `similar` `search` `recommended` | follower / following lists, self-intersection, cross-target shared followers, IG's "suggested similar" carousel, free-text search, category recommendations |
 | **Content** | `hashtags` `mentions` `locations` `captions` `likes` `timeline` | top-N hashtags / @mentions / geotags across recent posts, raw captions, like-count stats, posting-cadence histogram |
 | **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` | per-post or aggregated comments, top commenters / likers / taggers, weighted "superfan" ranking |
+| **Geo** | `place` `placeposts` | search Instagram places by text → top posts at a location (geo-OSINT) |
 | **Discovery** | `resolve` | expand `instagram.com/share/...` short-links to canonical URLs (aiograpi only) |
 | **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; history of cli invocations |
 | **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite / cache cleanup |

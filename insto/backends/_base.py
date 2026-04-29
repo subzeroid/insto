@@ -24,6 +24,7 @@ from insto.models import (
     Comment,
     Highlight,
     HighlightItem,
+    Place,
     Post,
     Profile,
     Quota,
@@ -138,6 +139,42 @@ class OSINTBackend(ABC):
         category-based, only meaningful for business / creator accounts
         with a category set. Default raises."""
         raise NotImplementedError("this backend does not implement category-recommended lookup")
+
+    def iter_user_pinned(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        """Iterate the user's pinned posts (max 3 on Instagram). Default raises."""
+        raise NotImplementedError("this backend does not implement pinned-media listing")
+
+    def iter_user_reposts(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        """Iterate posts the user has reposted (IG's repost surface).
+        Default raises — only HikerAPI exposes this currently."""
+        raise NotImplementedError("this backend does not implement repost listing")
+
+    async def get_post_by_ref(self, ref: str) -> Post:
+        """Resolve a media reference (URL / shortcode / pk) to a `Post` DTO.
+
+        Caller passes any of: ``https://www.instagram.com/p/<code>/``,
+        the bare shortcode (e.g. ``DXPduuvEY7S``), or a numeric pk.
+        Backends decide which underlying call to use. Default raises.
+        """
+        raise NotImplementedError("this backend does not implement /postinfo lookup")
+
+    async def search_places(self, query: str, *, limit: int = 20) -> list[Place]:
+        """Free-text search for Instagram places (geo locations).
+
+        Returns a list of :class:`Place` DTOs ordered by IG's relevance
+        ranking. Default raises.
+        """
+        raise NotImplementedError("this backend does not implement place search")
+
+    def iter_place_posts(
+        self, place_pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        """Iterate top posts at a given Instagram location pk. Default raises."""
+        raise NotImplementedError("this backend does not implement place media listing")
 
     @abstractmethod
     def get_quota(self) -> Quota:

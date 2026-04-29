@@ -320,10 +320,29 @@ async def tagged_cmd(ctx: CommandContext, username: str) -> Any:
     )
 
 
+@command(
+    "reposts",
+    "Fetch posts the active target reposted (IG repost surface, hiker only)",
+    add_args=_add_count_arg(20),
+)
+@with_target
+async def reposts_cmd(ctx: CommandContext, username: str) -> Any:
+    n = _resolve_count(ctx, 20)
+    posts = await ctx.facade.user_reposts(username, limit=n)
+    return await _emit_posts(
+        ctx,
+        posts=posts,
+        username=username,
+        command_name="reposts",
+        title=f"reposts by @{username} (last {n})",
+    )
+
+
 __all__ = [
     "highlights_cmd",
     "posts_cmd",
     "reels_cmd",
+    "reposts_cmd",
     "stories_cmd",
     "tagged_cmd",
 ]

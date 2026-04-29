@@ -2,6 +2,24 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.0] - 2026-04-29
+
+### Added — five new OSINT commands
+
+- **`/place <query>`** — search Instagram places by free text (e.g. `Tbilisi`, `Eiffel Tower`). Returns matched locations with name + GPS + IG location pk, plus a hint to `/placeposts` for posts at that place. CSV / JSON / Maltego (`maltego.GPS`) export.
+- **`/placeposts <pk>`** — top posts at a given Instagram location pk. Reveals who, what, when at a place — the geo-OSINT primitive. Pairs with `/place` to find the pk.
+- **`/postinfo <ref>`** — resolve a media reference (full URL / shortcode / numeric pk) to the full Post DTO. Caption, owner, taken_at, hashtags, mentions, location, media URL. Evidence collection: paste a permalink, get metadata. No active target needed.
+- **`/pinned <user>`** — list the target's pinned posts (Instagram caps at 3). What the account *wants* you to see first.
+- **`/reposts <user>`** — posts the target has reposted (IG's repost surface). Reveals amplification network. **HikerAPI only**; aiograpi has no equivalent yet.
+
+### Added — DTO
+
+- **`Place`** — new `dataclass` for IG locations: `pk`, `name`, `address`, `city`, `lat`, `lng`, `facebook_id`. Returned by `backend.search_places`, consumed by `backend.iter_place_posts`.
+
+### Backend ABC
+
+- Five new methods: `iter_user_pinned`, `iter_user_reposts`, `get_post_by_ref`, `search_places`, `iter_place_posts`. Default implementations raise `NotImplementedError` so third-party backends extending `OSINTBackend` keep compiling. HikerAPI implements all five; aiograpi implements four (no reposts).
+
 ## [0.6.2] - 2026-04-29
 
 ### Fixed

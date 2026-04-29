@@ -57,6 +57,7 @@ from insto.models import (
     Comment,
     Highlight,
     HighlightItem,
+    Place,
     Post,
     Profile,
     Quota,
@@ -225,6 +226,33 @@ def _normalise_cursor(value: Any) -> str | None:
     if text == "":
         return None
     return text
+
+
+def _map_place(loc: dict[str, Any]) -> Place:
+    """Map an IG ``location`` dict to a :class:`Place` DTO.
+
+    HikerAPI's ``fbsearch_places_v2`` returns ``{location: {...}, title,
+    subtitle}`` per item; we work off the inner ``location`` dict.
+    Required fields are ``pk`` and ``name`` — anything else is optional
+    (IG elides ``city`` / ``address`` for lesser-known places).
+    """
+    pk = loc.get("pk") or loc.get("id")
+    if pk is None:
+        raise SchemaDrift("fbsearch_places_v2", "pk")
+    name = loc.get("name")
+    if not name:
+        raise SchemaDrift("fbsearch_places_v2", "name")
+    fb_id = loc.get("facebook_places_id") or loc.get("external_id")
+    return Place(
+        pk=str(pk),
+        name=str(name),
+        address=str(loc.get("address") or ""),
+        city=str(loc.get("city") or ""),
+        short_name=str(loc.get("short_name") or ""),
+        lat=loc.get("lat"),
+        lng=loc.get("lng"),
+        facebook_id=str(fb_id) if fb_id else None,
+    )
 
 
 def _extract_single_list(payload: Any, *, keys: tuple[str, ...]) -> list[Any]:
@@ -810,6 +838,164 @@ class HikerBackend(OSINTBackend):
             "/recommended needs the aiograpi backend "
             "(category-recommendations require a logged-in session)."
         )
+
+    # ------------------------------------------------------- pinned / reposts
+
+    async def iter_user_pinned(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        # `user_medias_pinned_v1` returns the pinned posts as a *list*
+        # directly (no envelope). Each item is a full media dict.
+        # Instagram caps pinned posts at 3 per profile; pagination is
+        # not meaningful here, so a single call covers it.
+        try:
+            payload = await self._call(lambda: self._client.user_medias_pinned_v1(user_id=pk))
+        except _NotFoundError as exc:
+            self._raise_not_found(ProfileNotFound(pk), exc)
+        items = payload if isinstance(payload, list) else []
+        endpoint = "user_medias_pinned_v1"
+        for yielded, raw in enumerate(items, start=1):
+            if not isinstance(raw, dict):
+                raise self._record_drift(SchemaDrift(endpoint, "item"))
+            try:
+                yield map_post(raw)
+            except SchemaDrift as exc:
+                raise self._record_drift(exc) from None
+            except (ValueError, TypeError) as exc:
+                raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+            if limit is not None and yielded >= limit:
+                return
+
+    async def iter_user_reposts(
+        self, pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        # `user_reposts_gql(flat=True)` returns
+        # ``{items: [media_dict, ...], more_available: bool, max_id: ...}``.
+        # The cursor kwarg is ``repost_next_max_id``.
+        if limit is not None and limit <= 0:
+            limit = None
+        cursor: str | None = None
+        pages = 0
+        yielded = 0
+        endpoint = "user_reposts_gql"
+        while True:
+            if pages >= self._max_pages:
+                raise BackendError(
+                    f"{endpoint}: cursor did not terminate after {self._max_pages} pages"
+                )
+
+            async def fetch(c: str | None = cursor) -> Any:
+                return await self._client.user_reposts_gql(
+                    user_id=pk, repost_next_max_id=c, flat=True
+                )
+
+            payload = await self._call(fetch)
+            pages += 1
+            if not isinstance(payload, dict):
+                return
+            items = payload.get("items") or []
+            for raw in items:
+                if not isinstance(raw, dict):
+                    raise self._record_drift(SchemaDrift(endpoint, "item"))
+                try:
+                    yield map_post(raw)
+                except SchemaDrift as exc:
+                    raise self._record_drift(exc) from None
+                except (ValueError, TypeError) as exc:
+                    raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            if not payload.get("more_available"):
+                return
+            next_cursor = _normalise_cursor(payload.get("max_id"))
+            if not next_cursor:
+                return
+            cursor = next_cursor
+
+    # ----------------------------------------------------------- /postinfo
+
+    async def get_post_by_ref(self, ref: str) -> Post:
+        # Detect the input form: full URL → media_by_url_v1; bare digits
+        # → media_by_id_v1; otherwise treat as shortcode →
+        # media_by_code_v1. The three return the same payload shape so
+        # `map_post` handles all of them.
+        cleaned = ref.strip()
+        if cleaned.startswith("http://") or cleaned.startswith("https://"):
+            fetcher = lambda: self._client.media_by_url_v1(url=cleaned)  # noqa: E731
+            endpoint = "media_by_url_v1"
+        elif cleaned.isdigit():
+            fetcher = lambda: self._client.media_by_id_v1(id=cleaned)  # noqa: E731
+            endpoint = "media_by_id_v1"
+        else:
+            # Shortcode — the IG `code` parameter. May include a leading
+            # `/p/` if the user copy-pasted the path; strip defensively.
+            code = cleaned.strip("/").rsplit("/", 1)[-1]
+            fetcher = lambda: self._client.media_by_code_v1(code=code)  # noqa: E731
+            endpoint = "media_by_code_v1"
+        try:
+            payload = await self._call(fetcher)
+        except _NotFoundError as exc:
+            self._raise_not_found(PostNotFound(ref), exc)
+        try:
+            return map_post(payload)
+        except SchemaDrift as exc:
+            raise self._record_drift(exc) from None
+        except (ValueError, TypeError) as exc:
+            raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+
+    # ---------------------------------------------------------------- /place
+
+    async def search_places(self, query: str, *, limit: int = 20) -> list[Place]:
+        # `fbsearch_places_v2` returns
+        # ``{items: [{location: {pk, name, lat, lng, ...}, title, subtitle}, ...]}``.
+        # The wrapper carries title/subtitle for IG's display; the
+        # ``location`` dict is the canonical shape we map.
+        payload = await self._call(lambda: self._client.fbsearch_places_v2(query=query))
+        if not isinstance(payload, dict):
+            return []
+        items = payload.get("items") or []
+        out: list[Place] = []
+        for entry in items[:limit]:
+            loc = entry.get("location") if isinstance(entry, dict) else None
+            if not isinstance(loc, dict):
+                continue
+            try:
+                out.append(_map_place(loc))
+            except SchemaDrift as exc:
+                raise self._record_drift(exc) from None
+        return out
+
+    async def iter_place_posts(
+        self, place_pk: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        # `location_medias_top_v1(location_pk: int, amount)` returns a
+        # **list** of media dicts directly (no envelope). amount is the
+        # per-call cap. Pagination beyond a single call is not exposed
+        # by the SDK; the IG endpoint has its own server-side cap.
+        amount = int(limit) if limit and limit > 0 else 50
+        try:
+            pk_int = int(place_pk)
+        except (ValueError, TypeError) as exc:
+            raise BackendError(f"invalid place pk: {place_pk!r}") from exc
+        payload = await self._call(
+            lambda: self._client.location_medias_top_v1(location_pk=pk_int, amount=amount)
+        )
+        items = payload if isinstance(payload, list) else []
+        endpoint = "location_medias_top_v1"
+        yielded = 0
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                yield map_post(raw)
+            except SchemaDrift as exc:
+                raise self._record_drift(exc) from None
+            except (ValueError, TypeError) as exc:
+                raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+            yielded += 1
+            if limit is not None and yielded >= limit:
+                return
 
     # -------------------------------------------------------------- bookkeeping
 

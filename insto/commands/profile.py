@@ -13,6 +13,7 @@ plain note instead of failing — see `_access_note`.
 
 from __future__ import annotations
 
+import argparse
 import dataclasses
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ from insto.commands._base import (
     resolve_export_dest,
     with_target,
 )
-from insto.models import Profile
+from insto.models import Post, Profile
 from insto.service.facade import _safe_pk
 from insto.ui.render import render_profile
 
@@ -261,11 +262,112 @@ async def export_cmd(ctx: CommandContext, username: str) -> Path | None:
     return out
 
 
+# ---------------------------------------------------------------------------
+# /postinfo — resolve a post URL/code/pk to the full Post DTO
+# ---------------------------------------------------------------------------
+
+
+def _add_postinfo_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "ref",
+        help="post reference: full URL (https://www.instagram.com/p/<code>/), "
+        "shortcode (DXPduuvEY7S), or numeric pk",
+    )
+
+
+@command(
+    "postinfo",
+    "Resolve a post URL / shortcode / pk to its full metadata (no target needed)",
+    add_args=_add_postinfo_args,
+)
+async def postinfo_cmd(ctx: CommandContext) -> Post:
+    ref = (getattr(ctx.args, "ref", "") or "").strip()
+    if not ref:
+        raise CommandUsageError("/postinfo needs a URL, shortcode, or pk")
+    post = await ctx.facade.post_info(ref)
+
+    fmt = ctx.output_format()
+    if fmt == "json":
+        dest = resolve_export_dest(ctx.args.json if ctx.args.json is not None else "")
+        ctx.facade.export_json(
+            dataclasses.asdict(post),
+            command="postinfo",
+            target=post.code or post.pk,
+            dest=dest,
+        )
+        return post
+
+    # Render as a key/value Panel — same style as /info but for a post.
+    from rich.panel import Panel
+    from rich.table import Table
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="field", no_wrap=True)
+    grid.add_column(style="value", overflow="fold")
+    grid.add_row("pk", post.pk)
+    grid.add_row("code", post.code)
+    grid.add_row("type", post.media_type)
+    grid.add_row("taken at", str(post.taken_at))
+    grid.add_row("owner", f"@{post.owner_username}" if post.owner_username else "—")
+    grid.add_row("likes", str(post.like_count))
+    grid.add_row("comments", str(post.comment_count))
+    if post.location_name:
+        grid.add_row("location", post.location_name)
+    if post.caption:
+        grid.add_row("caption", post.caption)
+    if post.hashtags:
+        grid.add_row("hashtags", ", ".join(f"#{t}" for t in post.hashtags))
+    if post.mentions:
+        grid.add_row("mentions", ", ".join(f"@{m}" for m in post.mentions))
+    if post.media_urls:
+        grid.add_row("media", post.media_urls[0])
+    title = f"post {post.code or post.pk}"
+    ctx.print(Panel(grid, title=title, border_style="panel.border", padding=(1, 2)))
+    return post
+
+
+# ---------------------------------------------------------------------------
+# /pinned
+# ---------------------------------------------------------------------------
+
+
+@command(
+    "pinned",
+    "Pinned posts of the active target (Instagram allows up to 3)",
+    add_args=add_target_arg,
+)
+@with_target
+async def pinned_cmd(ctx: CommandContext, username: str) -> list[Post]:
+    n = int(ctx.limit) if ctx.limit is not None and ctx.limit > 0 else 12
+    posts = await ctx.facade.user_pinned(username, limit=n)
+
+    fmt = ctx.output_format()
+    if fmt == "json":
+        dest = resolve_export_dest(ctx.args.json if ctx.args.json is not None else "")
+        ctx.facade.export_json(
+            [dataclasses.asdict(p) for p in posts],
+            command="pinned",
+            target=username,
+            dest=dest,
+        )
+        return posts
+
+    from insto.ui.render import render_media_grid
+
+    if not posts:
+        ctx.print(f"@{username} has no pinned posts")
+        return posts
+    ctx.print(render_media_grid(posts, title=f"pinned posts of @{username} ({len(posts)})"))
+    return posts
+
+
 __all__ = [
     "about_cmd",
     "email_cmd",
     "export_cmd",
     "info_cmd",
     "phone_cmd",
+    "pinned_cmd",
+    "postinfo_cmd",
     "propic_cmd",
 ]

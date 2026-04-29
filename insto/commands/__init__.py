@@ -20,6 +20,7 @@ from insto.commands import interactions as _interactions  # noqa: F401  (registe
 from insto.commands import media as _media  # noqa: F401  (registers commands)
 from insto.commands import network as _network  # noqa: F401  (registers commands)
 from insto.commands import operational as _operational  # noqa: F401  (registers commands)
+from insto.commands import places as _places  # noqa: F401  (registers commands)
 from insto.commands import profile as _profile  # noqa: F401  (registers commands)
 from insto.commands import target as _target  # noqa: F401  (registers commands)
 from insto.commands import watch as _watch  # noqa: F401  (registers commands)

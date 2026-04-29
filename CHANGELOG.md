@@ -2,6 +2,18 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.0] - 2026-04-29
+
+### Added
+
+- **`/wliked`** — top likers across the active target's recent N posts. Symmetric to the existing `/wcommented` (which counts commenters). One post-window pull, one likers call per post; default window 50, customisable via `--limit`. Flat-row CSV / JSON / Maltego export — same shape as `/wcommented`. Both backends (uses the existing `iter_post_likers` ABC).
+- **`/fans`** — composite ranking of likers + commenters as a single "superfans" view. Score = `likes + 3*comments` (a comment is ~3x more effortful than a tap-to-like). Output table shows score with the breakdown (`11  (2L + 3C)`); JSON envelope, CSV with `rank,user,likes,comments,score` columns, and Maltego CSV with score-as-weight and `"2L+3C"`-style Notes for human-readable Maltego node labels.
+- New analytics primitives: `count_wliked` (mirrors `count_wcommented` for likers), `count_fans` (composes both into a weighted ranking), `FanRow` and `FansResult` dataclasses.
+
+### Performance / cost notes
+
+- `/fans` makes `2N` backend calls per invocation (one likers + one comments call per post). On the default 50-post window that's 100 backend round-trips per `/fans` run — pass `--limit 10` for cheaper sampling. /wliked is half that cost (just likers).
+
 ## [0.4.0] - 2026-04-29
 
 ### Added

@@ -274,6 +274,132 @@ def count_wcommented(
     )
 
 
+def count_wliked(
+    likers: Iterable[User],
+    *,
+    target: str,
+    limit: int = 50,
+    top: int | None = 20,
+) -> TopList:
+    """Count distinct likers across `likers` (likers list of N posts merged).
+
+    Symmetric to :func:`count_wcommented`: maps
+    ``count[user.username] += 1`` for each occurrence. The same user
+    liking M of the inspected N posts contributes M to its count, which
+    is exactly the "superfan" signal we want — recurring engagement
+    across a recent posting window.
+
+    The caller pre-merges likers across the last ``limit`` posts;
+    ``limit`` here is only the post-window label surfaced via
+    ``window``.
+    """
+    _check_limit(limit)
+    materialised = list(likers)
+    counter: Counter[str] = Counter()
+    for user in materialised:
+        username = (user.username or "").strip()
+        if username:
+            counter[username] += 1
+    return TopList(
+        target=target,
+        kind="wliked",
+        window=limit,
+        analyzed=len(materialised),
+        items=_top_from_counter(counter, top),
+        empty=len(materialised) == 0,
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class FanRow:
+    """One row in :class:`FansResult.items`."""
+
+    username: str
+    likes: int
+    comments: int
+    score: int
+
+
+@dataclass(slots=True)
+class FansResult:
+    """Per-user engagement breakdown across a bounded post window.
+
+    A composite of :func:`count_wliked` and :func:`count_wcommented` —
+    ranks users by a weighted ``score = likes + comment_weight *
+    comments``. The default weight (3) reflects that a comment is a
+    higher-effort signal than a like.
+
+    ``items`` is sorted by ``score`` desc with ties broken by
+    ``username`` asc for stable output. Each entry exposes its
+    breakdown so the renderer (and the Maltego export) can carry both
+    the headline score and the per-channel counts.
+    """
+
+    target: str
+    window: int
+    analyzed_posts: int
+    comment_weight: int
+    items: list[FanRow] = field(default_factory=list)
+    empty: bool = False
+
+
+def count_fans(
+    likers: Iterable[User],
+    comments: Iterable[Comment],
+    *,
+    target: str,
+    limit: int,
+    analyzed_posts: int,
+    comment_weight: int = 3,
+    top: int | None = 20,
+) -> FansResult:
+    """Aggregate likers + commenters into a single ranked "fans" list.
+
+    ``score = likes + comment_weight * comments``. Default weight 3
+    matches the rough engagement-effort ratio (writing a comment costs
+    ~3x more attention than tapping a heart).
+
+    ``analyzed_posts`` is the actual count of posts inspected — kept
+    separate from ``limit`` (the requested cap) so the renderer can
+    show "analysed N of M posts" when the target had fewer posts than
+    the window.
+    """
+    _check_limit(limit)
+    if comment_weight < 0:
+        raise ValueError(f"comment_weight must be >= 0, got {comment_weight}")
+
+    like_counter: Counter[str] = Counter()
+    for user in likers:
+        username = (user.username or "").strip()
+        if username:
+            like_counter[username] += 1
+
+    comment_counter: Counter[str] = Counter()
+    for comment in comments:
+        username = (comment.user_username or "").strip()
+        if username:
+            comment_counter[username] += 1
+
+    everyone = set(like_counter) | set(comment_counter)
+    rows: list[FanRow] = []
+    for username in everyone:
+        likes = like_counter[username]
+        comments_count = comment_counter[username]
+        score = likes + comment_weight * comments_count
+        rows.append(FanRow(username=username, likes=likes, comments=comments_count, score=score))
+    rows.sort(key=lambda r: (-r.score, r.username))
+    if top is not None and top > 0:
+        rows = rows[:top]
+    return FansResult(
+        target=target,
+        window=limit,
+        analyzed_posts=analyzed_posts,
+        comment_weight=comment_weight,
+        items=rows,
+        empty=analyzed_posts == 0,
+    )
+
+
 def count_wtagged(
     tagged_posts: Iterable[Post],
     *,

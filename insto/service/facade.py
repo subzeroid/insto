@@ -234,6 +234,53 @@ class OsintFacade:
             merged.extend(await self.post_comments(post.pk))
         return analytics.count_wcommented(merged, target=username, limit=limit)
 
+    async def wliked(self, username: str, *, limit: int = 50) -> analytics.TopList:
+        """Top likers across the target's last `limit` posts.
+
+        Cost: 1 ``user_posts`` page + N likers calls (one per post).
+        Each likers call is bounded by `post_likers`'s default cap, so
+        a target with 50 posts x 50 likers = 2500 user yields per
+        invocation. /watch-style background callers should pass a
+        smaller `limit`.
+        """
+        posts = await self.user_posts(username, limit=limit)
+        merged: list[User] = []
+        for post in posts:
+            merged.extend(await self.post_likers(post.pk))
+        return analytics.count_wliked(merged, target=username, limit=limit)
+
+    async def fans(
+        self,
+        username: str,
+        *,
+        limit: int = 50,
+        comment_weight: int = 3,
+        top: int | None = 20,
+    ) -> analytics.FansResult:
+        """Top fans of @username across the last `limit` posts.
+
+        Combines likers + commenters into one weighted ranking.
+        Two-pass over posts: first collects all likers, then all
+        comments. The two passes share the post window so the
+        per-post counts are aligned (a user that liked 10 posts and
+        commented on 3 sees both rows).
+        """
+        posts = await self.user_posts(username, limit=limit)
+        likers: list[User] = []
+        comments: list[Comment] = []
+        for post in posts:
+            likers.extend(await self.post_likers(post.pk))
+            comments.extend(await self.post_comments(post.pk))
+        return analytics.count_fans(
+            likers,
+            comments,
+            target=username,
+            limit=limit,
+            analyzed_posts=len(posts),
+            comment_weight=comment_weight,
+            top=top,
+        )
+
     async def wtagged(self, username: str, *, limit: int = 50) -> analytics.TopList:
         pk = await self.resolve_pk(username)
         tagged = [p async for p in self.backend.iter_user_tagged(pk, limit=limit)]

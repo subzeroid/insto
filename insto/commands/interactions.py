@@ -43,7 +43,7 @@ from insto.commands._base import (
     with_target,
 )
 from insto.models import Comment
-from insto.service.analytics import TopList
+from insto.service.analytics import FansResult, TopList
 from insto.ui.render import render_kv
 
 INTERACTIONS_DEFAULT_WINDOW = 50
@@ -326,9 +326,154 @@ async def wtagged_cmd(ctx: CommandContext, username: str) -> TopList:
     )
 
 
+# ---------------------------------------------------------------------------
+# /wliked
+# ---------------------------------------------------------------------------
+
+
+@command(
+    "wliked",
+    "Top users liking the active target's recent posts",
+    csv=True,
+    add_args=add_target_arg,
+)
+@with_target
+async def wliked_cmd(ctx: CommandContext, username: str) -> TopList:
+    window = _resolve_window(ctx)
+    result = await ctx.facade.wliked(username, limit=window)
+    return await _emit_toplist(
+        ctx,
+        result=result,
+        command_name="wliked",
+        key_field="user",
+        header=f"Top likers on @{username} (last {window} posts):",
+        empty_msg=f"no posts to analyze for @{username}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# /fans — composite likers + commenters ranking
+# ---------------------------------------------------------------------------
+
+
+_FANS_DEFAULT_TOP = 20
+_FANS_DEFAULT_COMMENT_WEIGHT = 3
+
+
+def _fans_envelope(result: FansResult) -> dict[str, Any]:
+    return {
+        "target": result.target,
+        "kind": "fans",
+        "window": result.window,
+        "analyzed_posts": result.analyzed_posts,
+        "comment_weight": result.comment_weight,
+        "items": [
+            {
+                "rank": i,
+                "username": row.username,
+                "likes": row.likes,
+                "comments": row.comments,
+                "score": row.score,
+            }
+            for i, row in enumerate(result.items, 1)
+        ],
+        "empty": result.empty,
+    }
+
+
+def _fans_csv_rows(result: FansResult) -> list[dict[str, Any]]:
+    return [
+        {
+            "rank": i,
+            "user": row.username,
+            "likes": row.likes,
+            "comments": row.comments,
+            "score": row.score,
+        }
+        for i, row in enumerate(result.items, 1)
+    ]
+
+
+def _fans_maltego_rows(result: FansResult) -> list[dict[str, Any]]:
+    """Maltego rows for /fans. Notes carries the human-readable
+    breakdown (`12L+3C`) so the Maltego node label is informative
+    without requiring the Properties JSON."""
+    return [
+        {
+            "value": row.username,
+            "weight": row.score,
+            "notes": f"{row.likes}L+{row.comments}C",
+            "rank": i,
+            "likes": row.likes,
+            "comments": row.comments,
+            "score": row.score,
+        }
+        for i, row in enumerate(result.items, 1)
+    ]
+
+
+@command(
+    "fans",
+    "Top fans (likers + commenters, weighted) across the target's recent posts",
+    csv=True,
+    add_args=add_target_arg,
+)
+@with_target
+async def fans_cmd(ctx: CommandContext, username: str) -> FansResult:
+    window = _resolve_window(ctx)
+    result = await ctx.facade.fans(
+        username,
+        limit=window,
+        comment_weight=_FANS_DEFAULT_COMMENT_WEIGHT,
+        top=_FANS_DEFAULT_TOP,
+    )
+    fmt = ctx.output_format()
+    if fmt == "json":
+        ctx.facade.export_json(
+            _fans_envelope(result),
+            command="fans",
+            target=username,
+            dest=_resolve_dest(ctx, fmt="json"),
+        )
+        return result
+    if fmt == "csv":
+        ctx.facade.export_csv(
+            _fans_csv_rows(result),
+            command="fans",
+            target=username,
+            dest=_resolve_dest(ctx, fmt="csv"),
+        )
+        return result
+    if fmt == "maltego":
+        ctx.facade.export_maltego(
+            _fans_maltego_rows(result),
+            command="fans",
+            entity_type="user",
+            target=username,
+        )
+        return result
+
+    ctx.print(
+        f"Top fans of @{username} "
+        f"(last {result.analyzed_posts} of {window} posts, "
+        f"score = likes + {result.comment_weight}*comments):"
+    )
+    if result.empty:
+        ctx.print(f"no posts to analyze for @{username}")
+        return result
+    if not result.items:
+        ctx.print("no engagement found in the analysed window")
+        return result
+    rows = [(f"@{r.username}", f"{r.score:>4}  ({r.likes}L + {r.comments}C)") for r in result.items]
+    ctx.print(render_kv(rows, key_label="user", value_label="score"))
+    return result
+
+
 __all__ = [
     "INTERACTIONS_DEFAULT_WINDOW",
     "comments_cmd",
+    "fans_cmd",
     "wcommented_cmd",
+    "wliked_cmd",
     "wtagged_cmd",
 ]

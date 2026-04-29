@@ -177,8 +177,8 @@ Profile: `info`, `propic`, `email`, `phone`, `export`.
 Media: `posts`, `reels`, `stories`, `highlights`, `tagged`, `audio`.
 Network: `followers`, `followings`, `mutuals`, `similar`, `search`, `recommended`.
 Content: `hashtags`, `mentions`, `locations`, `captions`, `likes`.
+Interactions: `comments`, `wcommented`, `wliked`, `wtagged`, `fans`.
 Discovery: `resolve`.
-Interactions: `comments`, `wcommented`, `wtagged`.
 Watch / diff: `watch`, `unwatch`, `watching`, `diff`, `history`.
 Operational: `quota`, `health`, `config`, `purge`.
 Session: `target`, `current`, `clear`.

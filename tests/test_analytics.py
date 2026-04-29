@@ -13,12 +13,15 @@ import pytest
 
 from insto.models import Comment, Post, User
 from insto.service.analytics import (
+    FanRow,
     LikesStats,
     MutualsResult,
     TopList,
     aggregate_likes,
     compute_mutuals,
+    count_fans,
     count_wcommented,
+    count_wliked,
     count_wtagged,
     extract_hashtags,
     extract_locations,
@@ -208,6 +211,93 @@ def test_count_wcommented_aggregates_repeats() -> None:
     res = count_wcommented(comments, target="alice", limit=50)
     assert dict(res.items) == {"bob": 3, "carol": 1, "dave": 1}
     assert res.items[0] == ("bob", 3)
+
+
+def test_count_wliked_aggregates_repeats() -> None:
+    """Same user liking M of N inspected posts contributes M to its count."""
+    likers = [
+        _user("bob"),
+        _user("bob"),
+        _user("carol"),
+        _user("dave"),
+        _user("bob"),
+    ]
+    res = count_wliked(likers, target="alice", limit=50)
+    assert dict(res.items) == {"bob": 3, "carol": 1, "dave": 1}
+    assert res.items[0] == ("bob", 3)
+    assert res.kind == "wliked"
+
+
+def test_count_wliked_skips_blank_usernames() -> None:
+    """Empty / whitespace-only usernames must not pollute the counter."""
+    likers = [_user("bob"), _user(""), _user("   "), _user("bob")]
+    res = count_wliked(likers, target="alice", limit=50)
+    assert dict(res.items) == {"bob": 2}
+
+
+def test_count_wliked_empty_input() -> None:
+    res = count_wliked([], target="alice", limit=50)
+    assert res.empty is True
+    assert res.items == []
+
+
+def test_count_fans_combines_likes_and_comments_with_weight() -> None:
+    """score = likes + 3 * comments by default; ties broken by username asc."""
+    likers = [
+        _user("bob"),  # bob: 2L
+        _user("bob"),
+        _user("carol"),  # carol: 1L
+        _user("dave"),  # dave: 1L
+    ]
+    comments = [
+        _comment("bob"),  # bob: 1C → score = 2 + 3*1 = 5
+        _comment("eve"),  # eve: 1C → score = 0 + 3*1 = 3
+    ]
+    res = count_fans(
+        likers,
+        comments,
+        target="alice",
+        limit=50,
+        analyzed_posts=10,
+    )
+    by_user = {row.username: row for row in res.items}
+    assert by_user["bob"].score == 5
+    assert by_user["bob"].likes == 2 and by_user["bob"].comments == 1
+    assert by_user["eve"].score == 3
+    assert by_user["eve"].likes == 0 and by_user["eve"].comments == 1
+    # Bob is top of the ranking (score 5 > everyone else)
+    assert res.items[0].username == "bob"
+    assert res.window == 50
+    assert res.analyzed_posts == 10
+    assert res.comment_weight == 3
+
+
+def test_count_fans_custom_weight() -> None:
+    """Setting comment_weight=1 makes likes and comments equal-weighted."""
+    likers = [_user("bob")]  # bob: 1L
+    comments = [_comment("carol")]  # carol: 1C
+    res = count_fans(likers, comments, target="alice", limit=50, analyzed_posts=1, comment_weight=1)
+    by_user = {row.username: row.score for row in res.items}
+    assert by_user["bob"] == 1
+    assert by_user["carol"] == 1
+
+
+def test_count_fans_negative_weight_rejected() -> None:
+    with pytest.raises(ValueError, match="comment_weight"):
+        count_fans([], [], target="alice", limit=50, analyzed_posts=0, comment_weight=-1)
+
+
+def test_count_fans_top_caps_results() -> None:
+    likers = [_user(f"u{i}") for i in range(50)]
+    res = count_fans(likers, [], target="alice", limit=50, analyzed_posts=50, top=5)
+    assert len(res.items) == 5
+    assert all(isinstance(r, FanRow) for r in res.items)
+
+
+def test_count_fans_empty_when_no_posts_analyzed() -> None:
+    res = count_fans([], [], target="alice", limit=50, analyzed_posts=0)
+    assert res.empty is True
+    assert res.items == []
 
 
 def test_count_wtagged_groups_by_owner() -> None:

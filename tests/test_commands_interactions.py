@@ -39,8 +39,8 @@ from insto.commands._base import (
 )
 from insto.commands.interactions import INTERACTIONS_DEFAULT_WINDOW
 from insto.config import Config
-from insto.models import Comment, Post, Profile
-from insto.service.analytics import TopList
+from insto.models import Comment, Post, Profile, User
+from insto.service.analytics import FansResult, TopList
 from insto.service.facade import OsintFacade
 from insto.service.history import HistoryStore
 from insto.ui.theme import INSTO_THEME
@@ -121,11 +121,14 @@ def _captured(console: Console) -> str:
     return console.export_text(styles=False)
 
 
+def _user(pk: str, username: str) -> User:
+    return User(pk=pk, username=username, full_name=username.title())
+
+
 @pytest.fixture
 def interactions_backend() -> FakeBackend:
-    """Two posts of @alice with overlapping commenters; tagged posts owned
-    by various other users.
-    """
+    """Two posts of @alice with overlapping commenters and likers; tagged
+    posts owned by various other users."""
     posts = [
         _post("p1", code="Cp1"),
         _post("p2", code="Cp2"),
@@ -141,6 +144,11 @@ def interactions_backend() -> FakeBackend:
             _comment("c5", media_pk="p2", user="bob", text="nice"),
         ],
     }
+    likers = {
+        # bob: 2L, carol: 2L, dave: 1L, eve: 1L
+        "p1": [_user("u1", "bob"), _user("u2", "carol"), _user("u4", "eve")],
+        "p2": [_user("u1", "bob"), _user("u2", "carol"), _user("u3", "dave")],
+    }
     tagged = [
         _post("t1", code="Ct1", owner_username="bob"),
         _post("t2", code="Ct2", owner_username="carol"),
@@ -151,6 +159,7 @@ def interactions_backend() -> FakeBackend:
         profiles={"42": _profile()},
         posts={"42": posts},
         comments=comments,
+        likers=likers,
         tagged={"42": tagged},
         page_size=2,
     )
@@ -504,6 +513,125 @@ async def test_wtagged_empty_window(
 
 
 # ---------------------------------------------------------------------------
+# /wliked
+# ---------------------------------------------------------------------------
+
+
+async def test_wliked_aggregates_across_post_window(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """bob and carol like both posts → 2 each; dave / eve only one each."""
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    out = await dispatch("/wliked", facade=facade, session=session)
+    assert isinstance(out, TopList)
+    assert dict(out.items) == {"bob": 2, "carol": 2, "dave": 1, "eve": 1}
+    assert out.kind == "wliked"
+
+
+async def test_wliked_csv_export(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    await dispatch("/wliked --csv", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "wliked.csv"
+    assert out_path.exists()
+    rows = out_path.read_text().splitlines()
+    assert rows[0] == "rank,user,count"
+    assert "bob,2" in rows[1] or "carol,2" in rows[1]
+
+
+async def test_wliked_maltego_export(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    await dispatch("/wliked --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "wliked.maltego.csv"
+    assert out_path.exists()
+    rows = out_path.read_text().splitlines()
+    assert rows[0] == "Type,Value,Weight,Notes,Properties"
+    assert any("maltego.Person" in line for line in rows[1:])
+
+
+# ---------------------------------------------------------------------------
+# /fans (composite likers + commenters)
+# ---------------------------------------------------------------------------
+
+
+async def test_fans_combines_likes_and_comments(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    """bob: 2L + 3C → score 2 + 9 = 11. carol: 2L + 1C → 2 + 3 = 5.
+    dave: 1L + 1C → 1 + 3 = 4. eve: 1L + 0C → 1.
+    Default comment_weight is 3."""
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    out = await dispatch("/fans", facade=facade, session=session)
+    assert isinstance(out, FansResult)
+    by_user = {row.username: row for row in out.items}
+    assert by_user["bob"].likes == 2 and by_user["bob"].comments == 3
+    assert by_user["bob"].score == 2 + 3 * 3
+    assert by_user["carol"].score == 2 + 3 * 1
+    assert out.items[0].username == "bob"  # top fan
+    assert out.comment_weight == 3
+
+
+async def test_fans_csv_export_has_breakdown_columns(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    await dispatch("/fans --csv", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "fans.csv"
+    assert out_path.exists()
+    header = out_path.read_text().splitlines()[0]
+    assert header == "rank,user,likes,comments,score"
+
+
+async def test_fans_maltego_export_with_score_weight(
+    interactions_backend: FakeBackend,
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    facade = OsintFacade(backend=interactions_backend, history=history, config=config)
+    await dispatch("/fans --maltego", facade=facade, session=session)
+    out_path = config.output_dir / "alice" / "fans.maltego.csv"
+    assert out_path.exists()
+    rows = list(csv.DictReader(out_path.read_text().splitlines()))
+    # bob is top fan with score 11 (2L+3C)
+    bob_row = next(r for r in rows if r["Value"] == "bob")
+    assert bob_row["Type"] == "maltego.Person"
+    assert bob_row["Weight"] == "11"
+    assert bob_row["Notes"] == "2L+3C"
+
+
+async def test_fans_empty_target_renders_message(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+    recording_console: Console,
+) -> None:
+    backend = FakeBackend(profiles={"42": _profile()}, posts={"42": []})
+    facade = OsintFacade(backend=backend, history=history, config=config)
+    await dispatch("/fans", facade=facade, session=session, console=recording_console)
+    text = _captured(recording_console)
+    assert "no posts to analyze for @alice" in text
+
+
+# ---------------------------------------------------------------------------
 # Cross-cutting
 # ---------------------------------------------------------------------------
 
@@ -515,6 +643,6 @@ async def test_interactions_commands_require_target(
 ) -> None:
     facade = OsintFacade(backend=interactions_backend, history=history, config=config)
     empty_session = Session()
-    for line in ("/comments", "/wcommented", "/wtagged"):
+    for line in ("/comments", "/wcommented", "/wliked", "/wtagged", "/fans"):
         with pytest.raises(CommandUsageError, match="no target set"):
             await dispatch(line, facade=facade, session=empty_session)

@@ -228,9 +228,11 @@ class OsintFacade:
         # the facade default (50/post) — the same cap `/comments` aggregate
         # mode uses — so the spec §9 bounded-window guarantee holds without
         # `--limit` doubling as a per-post comment cap.
+        from insto.ui.progress import track
+
         posts = await self.user_posts(username, limit=limit)
         merged: list[Comment] = []
-        for post in posts:
+        for post in track(posts, desc="fetching comments", total=len(posts)):
             merged.extend(await self.post_comments(post.pk))
         return analytics.count_wcommented(merged, target=username, limit=limit)
 
@@ -243,9 +245,11 @@ class OsintFacade:
         invocation. /watch-style background callers should pass a
         smaller `limit`.
         """
+        from insto.ui.progress import track
+
         posts = await self.user_posts(username, limit=limit)
         merged: list[User] = []
-        for post in posts:
+        for post in track(posts, desc="fetching likers", total=len(posts)):
             merged.extend(await self.post_likers(post.pk))
         return analytics.count_wliked(merged, target=username, limit=limit)
 
@@ -260,15 +264,17 @@ class OsintFacade:
         """Top fans of @username across the last `limit` posts.
 
         Combines likers + commenters into one weighted ranking.
-        Two-pass over posts: first collects all likers, then all
-        comments. The two passes share the post window so the
-        per-post counts are aligned (a user that liked 10 posts and
-        commented on 3 sees both rows).
+        Single pass over posts emitting both calls per item — keeps
+        the progress bar one-dimensional ("posts processed") instead
+        of two stacked bars, and matches the order the cost is
+        actually incurred.
         """
+        from insto.ui.progress import track
+
         posts = await self.user_posts(username, limit=limit)
         likers: list[User] = []
         comments: list[Comment] = []
-        for post in posts:
+        for post in track(posts, desc="fetching engagement", total=len(posts)):
             likers.extend(await self.post_likers(post.pk))
             comments.extend(await self.post_comments(post.pk))
         return analytics.count_fans(

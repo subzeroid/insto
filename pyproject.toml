@@ -1,6 +1,6 @@
 [project]
 name = "insto"
-version = "0.5.1"
+version = "0.5.2"
 description = "Interactive Instagram OSINT CLI on the HikerAPI backend"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -29,6 +29,7 @@ dependencies = [
     "prompt_toolkit>=3.0.43",
     "rich>=13.7",
     "tomli-w>=1.0",
+    "tqdm>=4.66",
 ]
 
 [project.urls]
@@ -100,6 +101,13 @@ ignore_missing_imports = true
 # insto/backends/aiograpi.py needs to fall through gracefully when the
 # package is missing on the type-checker's machine.
 module = ["aiograpi", "aiograpi.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# tqdm has no type stubs installed by default; types-tqdm is its own
+# package. `insto.ui.progress` only uses the high-level callable, so
+# treat it as untyped rather than pulling another dev dep.
+module = ["tqdm", "tqdm.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

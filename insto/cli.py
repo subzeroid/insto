@@ -217,6 +217,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="backend selector for this invocation (overrides $INSTO_BACKEND and config.toml)",
     )
     parser.add_argument(
+        "--no-progress",
+        dest="no_progress",
+        action="store_true",
+        help="suppress tqdm progress bars on long-running commands "
+        "(/fans, /wliked, /wcommented, /dossier). bars auto-suppress "
+        "on non-TTY anyway; this flag forces them off on a TTY too.",
+    )
+    parser.add_argument(
         "--print-completion",
         dest="print_completion",
         choices=("bash", "zsh"),
@@ -590,6 +598,11 @@ def main(argv: list[str] | None = None) -> int:
         # Logging setup failures must never break the CLI itself.
         setup_logging(level)
     log = logging.getLogger("insto.cli")
+
+    if args.no_progress:
+        from insto.ui import progress
+
+        progress.disable()
 
     if args.print_completion:
         return _print_completion(parser, args.print_completion)

@@ -2,6 +2,17 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.2] - 2026-04-29
+
+### Added
+
+- **Progress bars** on long-running aggregation commands (`/fans`, `/wliked`, `/wcommented`). tqdm-based, writes to stderr so JSON / CSV stdout stays clean. Auto-suppresses on non-TTY (CI logs, piped invocations) without configuration; manual override via the new `--no-progress` global flag.
+- New dependency: `tqdm >= 4.66`. Same pattern `insta-dl` uses for download progress.
+
+### Why
+
+`/fans --limit 50` makes 100 backend round-trips per invocation — easily a minute of silent waiting. The bar shows ETA + per-step rate, which is what operators actually need to decide between "wait" and "Ctrl-C, narrow the window".
+
 ## [0.5.1] - 2026-04-29
 
 ### Added

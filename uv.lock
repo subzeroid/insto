@@ -409,7 +409,7 @@ wheels = [
 
 [[package]]
 name = "insto"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "hikerapi" },
@@ -417,6 +417,7 @@ dependencies = [
     { name = "prompt-toolkit" },
     { name = "rich" },
     { name = "tomli-w" },
+    { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
@@ -453,6 +454,7 @@ requires-dist = [
     { name = "rich", specifier = ">=13.7" },
     { name = "shtab", marker = "extra == 'completion'", specifier = ">=1.7" },
     { name = "tomli-w", specifier = ">=1.0" },
+    { name = "tqdm", specifier = ">=4.66" },
 ]
 provides-extras = ["completion", "aiograpi", "docs"]
 

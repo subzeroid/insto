@@ -36,6 +36,9 @@ def _post(
     hashtags: list[str] | None = None,
     mentions: list[str] | None = None,
     location_name: str | None = None,
+    location_pk: str | None = None,
+    location_lat: float | None = None,
+    location_lng: float | None = None,
     like_count: int = 0,
     owner_username: str | None = None,
     taken_at: int = 1700000000,
@@ -49,6 +52,9 @@ def _post(
         hashtags=list(hashtags or []),
         mentions=list(mentions or []),
         location_name=location_name,
+        location_pk=location_pk,
+        location_lat=location_lat,
+        location_lng=location_lng,
         owner_username=owner_username,
     )
 
@@ -449,3 +455,88 @@ def test_hashtag_input_strips_hashes_and_blanks() -> None:
     ]
     res = extract_hashtags(posts, target="alice")
     assert dict(res.items) == {"doublehash": 2}
+
+
+# ---------------------------------------------------------------------------
+# /where — geo fingerprint
+# ---------------------------------------------------------------------------
+
+
+def test_compute_geo_fingerprint_anchor_centroid_radius() -> None:
+    """Three Maranello posts + one Niseko: anchor = Maranello, radius
+    spans the Maranello -> Niseko great-circle (~9000+ km)."""
+    from insto.service.analytics import compute_geo_fingerprint
+
+    posts = [
+        _post("1", location_pk="223393054", location_name="Maranello",
+              location_lat=44.5256, location_lng=10.8664),
+        _post("2", location_pk="223393054", location_name="Maranello",
+              location_lat=44.5256, location_lng=10.8664),
+        _post("3", location_pk="223393054", location_name="Maranello",
+              location_lat=44.5256, location_lng=10.8664),
+        _post("4", location_pk="206404230", location_name="Niseko, Japan",
+              location_lat=42.8591, location_lng=140.7053),
+    ]
+    res = compute_geo_fingerprint(posts, target="ferrari", limit=50)
+    assert res.geotagged == 4
+    assert res.analyzed == 4
+    assert res.anchor is not None
+    assert res.anchor.name == "Maranello"
+    assert res.anchor.count == 3
+    # Centroid is biased toward the Maranello cluster (3-of-4 weight).
+    assert res.centroid_lng is not None and 30 < res.centroid_lng < 60
+    # Radius spans the Niseko outlier — must be at least 7000 km.
+    assert res.radius_km is not None and res.radius_km > 7000
+
+
+def test_compute_geo_fingerprint_skips_posts_without_gps() -> None:
+    """Posts with `location_name` but no lat/lng don't contribute."""
+    from insto.service.analytics import compute_geo_fingerprint
+
+    posts = [
+        _post("1", location_name="Mystery Place"),  # no lat/lng
+        _post("2", location_pk="X", location_name="Real",
+              location_lat=10.0, location_lng=20.0),
+    ]
+    res = compute_geo_fingerprint(posts, target="x", limit=50)
+    assert res.analyzed == 2
+    assert res.geotagged == 1
+    assert res.anchor is not None and res.anchor.name == "Real"
+
+
+def test_compute_geo_fingerprint_empty() -> None:
+    """No geotags at all — empty=True only when the window itself is empty."""
+    from insto.service.analytics import compute_geo_fingerprint
+
+    res = compute_geo_fingerprint([], target="x", limit=50)
+    assert res.empty is True
+    assert res.anchor is None
+    res2 = compute_geo_fingerprint(
+        [_post("1", location_name="No GPS")], target="x", limit=50
+    )
+    # Window non-empty but no GPS points — empty stays False (we *did*
+    # analyse posts), but anchor / centroid are None.
+    assert res2.empty is False
+    assert res2.geotagged == 0
+    assert res2.anchor is None
+
+
+def test_compute_geo_fingerprint_top_caps_places() -> None:
+    """`top=N` caps the rendered places list to N entries."""
+    from insto.service.analytics import compute_geo_fingerprint
+
+    posts = [
+        _post(
+            str(i),
+            location_pk=f"loc{i}",
+            location_name=f"Place {i}",
+            location_lat=10.0 + i,
+            location_lng=20.0 + i,
+        )
+        for i in range(15)
+    ]
+    res = compute_geo_fingerprint(posts, target="x", limit=50, top=5)
+    assert len(res.places) == 5
+    # Anchor count is 1 (every place appears once); the top-5 ordering is
+    # stable but not meaningful, just don't overflow.
+    assert res.geotagged == 15

@@ -525,6 +525,120 @@ class AiograpiBackend(OSINTBackend):
                 return
             cursor = str(next_cursor)
 
+    # --------------------------------------------------- resolve / audio / recommended
+
+    async def resolve_short_url(self, url: str) -> str:
+        """Resolve an Instagram short-link to its canonical URL.
+
+        Uses ``public_head`` (HEAD without body) with
+        ``follow_redirects=False`` so the response carries the
+        ``Location`` header verbatim. If the target server returns 200
+        without a redirect, the URL was already canonical — return it
+        unchanged. If the response is a 4xx/5xx, propagate as
+        ``BackendError`` so the operator sees the upstream status.
+        """
+        # `public_head` is a synchronous-feeling helper; aiograpi runs
+        # it through `httpx_ext.request` which is async. Wrap in `_call`
+        # so the metrics ring sees it like any other call.
+        response = await self._call(lambda: self._client.public_head(url, follow_redirects=False))
+        status = getattr(response, "status_code", None)
+        if status is None:
+            raise BackendError(f"resolve {url!r}: unexpected response shape")
+        if 200 <= status < 300:
+            location = response.headers.get("location")
+            return str(location) if location else url
+        if 300 <= status < 400:
+            location = response.headers.get("location")
+            if location:
+                return str(location)
+            raise BackendError(f"resolve {url!r}: {status} without Location header")
+        raise BackendError(f"resolve {url!r}: HTTP {status}")
+
+    async def iter_audio_clips(
+        self, track_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        """Iterate clips that use a given audio asset.
+
+        Uses ``track_info_by_id`` (the music-page surface) which
+        returns full media payloads under ``items[*].media`` — has
+        ``code`` / ``taken_at`` / ``caption`` etc. The sister
+        ``track_stream_info_by_id`` returns previews only and isn't
+        useful for the OSINT workflow.
+
+        Pagination cursor is at top-level ``next_max_id`` and the
+        endpoint accepts ``max_id`` to advance.
+
+        Each media dict gets ``extract_media_v1`` → ``Media`` Pydantic
+        before reaching ``map_post`` (which needs attribute access).
+        """
+        from aiograpi.extractors import extract_media_v1 as _extract_media_v1
+
+        from insto.backends._aiograpi_map import map_post
+
+        extract_media_v1: Any = _extract_media_v1
+
+        if limit is not None and limit <= 0:
+            limit = None
+        max_id: str = ""
+        yielded = 0
+        while True:
+
+            async def fetch(c: str = max_id) -> Any:
+                return await self._client.track_info_by_id(track_id, max_id=c)
+
+            payload = await self._call(fetch)
+            if not isinstance(payload, dict):
+                return
+            items = payload.get("items") or []
+            for entry in items:
+                raw = entry.get("media") if isinstance(entry, dict) else None
+                if not isinstance(raw, dict):
+                    continue
+                yield map_post(extract_media_v1(raw))
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            next_id = payload.get("next_max_id")
+            if not next_id:
+                return
+            max_id = str(next_id)
+
+    async def get_recommended(self, pk: str) -> list[User]:
+        """Fetch IG's "recommended in same category" list for a target.
+
+        Two-step internally (handled by aiograpi): fetches the target's
+        profile to extract ``category_id``, then calls
+        ``discover/recommended_accounts_for_category/``. Returns an
+        empty list if the target has no business category — IG just
+        gives back an empty payload there, not an error.
+        """
+        from aiograpi.extractors import extract_user_short as _extract_user_short
+
+        from insto.backends._aiograpi_map import map_user_short
+
+        extract_user_short: Any = _extract_user_short
+
+        payload = await self._call(
+            lambda: self._client.discover_recommended_accounts_for_category_v1(str(pk))
+        )
+        if not isinstance(payload, dict):
+            return []
+        # Response shape: {category_id, items: [{user: {...}, ...}], status}
+        # The user dicts are nested one level deeper than `chaining()`.
+        items = payload.get("items") or payload.get("users") or []
+        out: list[User] = []
+        for raw in items:
+            user_dict = raw.get("user") if isinstance(raw, dict) and "user" in raw else raw
+            if not isinstance(user_dict, dict):
+                continue
+            try:
+                out.append(map_user_short(extract_user_short(user_dict)))
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
+        return out
+
     # ------------------------------------------------------------------ bookkeeping
 
     def get_quota(self) -> Quota:

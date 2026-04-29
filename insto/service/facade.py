@@ -176,6 +176,21 @@ class OsintFacade:
         """Free-text user search. Empty query is rejected upstream."""
         return [u async for u in self.backend.iter_search_users(query, limit=limit)]
 
+    async def resolve_short_url(self, url: str) -> str:
+        """Resolve an Instagram short-link (or any IG-hosted redirect)
+        to its canonical URL. Needs a backend with a HEAD-on-public
+        surface (currently aiograpi only)."""
+        return await self.backend.resolve_short_url(url)
+
+    async def audio_clips(self, track_id: str, *, limit: int = 30) -> list[Post]:
+        """List clips that use a given audio asset."""
+        return [p async for p in self.backend.iter_audio_clips(track_id, limit=limit)]
+
+    async def recommended(self, username: str) -> list[User]:
+        """Fetch IG's category-based recommendations for the target."""
+        pk = await self.resolve_pk(username)
+        return await self.backend.get_recommended(pk)
+
     async def mutuals(
         self, username: str, *, follower_limit: int = 1000, following_limit: int = 1000
     ) -> analytics.MutualsResult:

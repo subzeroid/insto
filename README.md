@@ -174,9 +174,10 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 ## Command surface
 
 Profile: `info`, `propic`, `email`, `phone`, `export`.
-Media: `posts`, `reels`, `stories`, `highlights`, `tagged`.
-Network: `followers`, `followings`, `mutuals`, `similar`, `search`.
+Media: `posts`, `reels`, `stories`, `highlights`, `tagged`, `audio`.
+Network: `followers`, `followings`, `mutuals`, `similar`, `search`, `recommended`.
 Content: `hashtags`, `mentions`, `locations`, `captions`, `likes`.
+Discovery: `resolve`.
 Interactions: `comments`, `wcommented`, `wtagged`.
 Watch / diff: `watch`, `unwatch`, `watching`, `diff`, `history`.
 Operational: `quota`, `health`, `config`, `purge`.

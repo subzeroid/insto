@@ -742,6 +742,75 @@ class HikerBackend(OSINTBackend):
                 return
             cursor = next_cursor
 
+    async def iter_audio_clips(
+        self, track_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        # HikerAPI exposes two related audio endpoints:
+        #   - `track_stream_by_id_v2` — newer; returns `stream_rows[*].items`
+        #     where each `media` is a *preview* shape (only `pk`,
+        #     `media_type`, `image_versions2` — no `code` / `taken_at` /
+        #     `caption`). Cheap but unusable for `/audio` because the
+        #     command needs full Post DTOs.
+        #   - `track_by_id_v2` — older; returns `items[*].media` with
+        #     the complete media payload (`code`, `taken_at`, `caption`,
+        #     `clips_metadata`, owner block). What we want.
+        # Pagination cursor lives at top-level `next_page_id`.
+        if limit is not None and limit <= 0:
+            limit = None
+        cursor: str | None = None
+        pages = 0
+        yielded = 0
+        endpoint = "track_by_id_v2"
+        while True:
+            if pages >= self._max_pages:
+                raise BackendError(
+                    f"{endpoint}: cursor did not terminate after {self._max_pages} pages"
+                )
+
+            async def fetch(c: str | None = cursor) -> Any:
+                return await self._client.track_by_id_v2(track_id=track_id, page_id=c)
+
+            payload = await self._call(fetch)
+            pages += 1
+            inner = payload.get("response") if isinstance(payload, dict) else None
+            items = (inner or {}).get("items") or []
+            for entry in items:
+                raw = entry.get("media") if isinstance(entry, dict) else None
+                if not isinstance(raw, dict):
+                    continue
+                try:
+                    yield map_post(raw)
+                except SchemaDrift as exc:
+                    raise self._record_drift(exc) from None
+                except (ValueError, TypeError) as exc:
+                    raise self._record_drift(SchemaDrift(endpoint, str(exc))) from None
+                yielded += 1
+                if limit is not None and yielded >= limit:
+                    return
+            next_cursor = _normalise_cursor(payload.get("next_page_id"))
+            if not next_cursor:
+                return
+            cursor = next_cursor
+
+    async def resolve_short_url(self, url: str) -> str:
+        # HikerAPI doesn't expose a generic HEAD-on-arbitrary-URL
+        # endpoint — its surface is Instagram-private only. Resolving
+        # `instagram.com/share/...` style short-links needs a real
+        # logged-in session, which only aiograpi has.
+        raise BackendError(
+            f"resolve {url!r}: HikerAPI has no short-URL resolver. "
+            "Switch to the aiograpi backend (which uses `public_head`)."
+        )
+
+    async def get_recommended(self, pk: str) -> list[User]:
+        # `discover/recommended_accounts_for_category/` is a logged-in
+        # surface (the IG app uses it for business profiles). Not
+        # exposed by HikerAPI's public OSINT API — needs aiograpi.
+        raise BackendError(
+            "/recommended needs the aiograpi backend "
+            "(category-recommendations require a logged-in session)."
+        )
+
     # -------------------------------------------------------------- bookkeeping
 
     def get_quota(self) -> Quota:

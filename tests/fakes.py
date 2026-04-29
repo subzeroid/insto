@@ -68,6 +68,9 @@ class FakeErrors:
     get_suggested: BackendError | None = None
     iter_hashtag_posts: BackendError | None = None
     iter_search_users: BackendError | None = None
+    iter_audio_clips: BackendError | None = None
+    get_recommended: BackendError | None = None
+    resolve_short_url: BackendError | None = None
 
 
 @dataclass
@@ -90,6 +93,9 @@ class FakeBackend(OSINTBackend):
     suggested: dict[str, list[User]] = field(default_factory=dict)
     hashtag_posts: dict[str, list[Post]] = field(default_factory=dict)
     search_users: dict[str, list[User]] = field(default_factory=dict)
+    audio_clips: dict[str, list[Post]] = field(default_factory=dict)
+    recommended: dict[str, list[User]] = field(default_factory=dict)
+    short_url_redirects: dict[str, str] = field(default_factory=dict)
 
     quota: Quota = field(default_factory=Quota.unknown)
     errors: FakeErrors = field(default_factory=FakeErrors)
@@ -255,6 +261,26 @@ class FakeBackend(OSINTBackend):
         self._consume_error("iter_search_users")
         async for item in self._paged("iter_search_users", self.search_users.get(query, []), limit):
             yield item
+
+    async def iter_audio_clips(
+        self, track_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        self.request_log.append(("iter_audio_clips", (track_id, limit)))
+        self._consume_error("iter_audio_clips")
+        async for item in self._paged(
+            "iter_audio_clips", self.audio_clips.get(track_id, []), limit
+        ):
+            yield item
+
+    async def get_recommended(self, pk: str) -> list[User]:
+        self.request_log.append(("get_recommended", (pk,)))
+        self._consume_error("get_recommended")
+        return list(self.recommended.get(pk, []))
+
+    async def resolve_short_url(self, url: str) -> str:
+        self.request_log.append(("resolve_short_url", (url,)))
+        self._consume_error("resolve_short_url")
+        return self.short_url_redirects.get(url, url)
 
     def get_quota(self) -> Quota:
         return self.quota

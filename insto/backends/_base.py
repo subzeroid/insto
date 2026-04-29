@@ -121,6 +121,24 @@ class OSINTBackend(ABC):
             "this backend does not implement search; override iter_search_users"
         )
 
+    async def resolve_short_url(self, url: str) -> str:
+        """Resolve a short-link URL (e.g. ``instagram.com/share/...``) to
+        its canonical destination. Default raises — only logged-in
+        backends can hit the redirect surface without leaking the
+        target back to a public scraper-style request."""
+        raise NotImplementedError("this backend does not implement short-URL resolution")
+
+    def iter_audio_clips(self, track_id: str, *, limit: int | None = None) -> AsyncIterator[Post]:
+        """Iterate clips that use a given audio asset. Default raises."""
+        raise NotImplementedError("this backend does not implement audio-clip listing")
+
+    async def get_recommended(self, pk: str) -> list[User]:
+        """Fetch IG's "recommended in same category" list for a target.
+        Different surface from :meth:`get_suggested` — this one is
+        category-based, only meaningful for business / creator accounts
+        with a category set. Default raises."""
+        raise NotImplementedError("this backend does not implement category-recommended lookup")
+
     @abstractmethod
     def get_quota(self) -> Quota:
         """Return the last-known quota state for the backend."""

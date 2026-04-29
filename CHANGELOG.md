@@ -2,6 +2,21 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.4.0] - 2026-04-29
+
+### Added
+
+- **`/resolve <url>`** — expand an Instagram short-link (`instagram.com/share/...`) to its canonical URL via a HEAD request through the logged-in session. aiograpi only; HikerAPI raises a clear "switch backend" error.
+- **`/audio <track_id>`** — list clips that use a given audio asset, with full Post DTOs (code, taken_at, owner). Both backends — hiker via `track_by_id_v2`, aiograpi via `track_info_by_id`. Bypasses the preview-only `track_stream_*` surface that returned skeleton media (no `code` field, breaks `/post`-style integrations).
+- **`/recommended`** — IG's category-based account recommendations for the active target. aiograpi only (the surface needs a logged-in session). For `@ferrari` returns 30 automotive-category accounts (Porsche creators, etc.).
+
+All three commands route their results through the existing JSON / CSV / Maltego export pipeline — `/recommended --maltego` writes `recommended.maltego.csv` with `maltego.Person` rows.
+
+### Changed
+
+- `[aiograpi]` extra now requires `aiograpi >= 0.8.5` (unchanged in this release; the wave-2 endpoints all landed in the 0.8.x series).
+- New `OSINTBackend` ABC methods: `resolve_short_url`, `iter_audio_clips`, `get_recommended`. Default implementations raise `NotImplementedError` so third-party backends extending the ABC don't need to implement everything to keep compiling.
+
 ## [0.3.0] - 2026-04-29
 
 ### Added

@@ -2,6 +2,14 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.6.1] - 2026-04-29
+
+### Added
+
+- **`/about <user>`** — surface the raw IG `user_about` payload as its own command (joined date, country, former usernames, verified flag). Cheaper than `/info` (one fewer call) and JSON-exportable for pipelines that want only this slice.
+- **`/info` shows the avatar URL** as an OSC-8 hyperlink ("open"); modern terminals (iTerm2, kitty, Apple Terminal) make it clickable. The full signed CDN URL is hidden behind the link so the panel stays tidy. Hint to `/propic` for offline downloads.
+- **`/info` surfaces more `user_about` fields**: `created` (account-joined date), `former usernames`. Were silently dropped before because the renderer was looking for the wrong keys.
+
 ## [0.6.0] - 2026-04-29
 
 ### Added

@@ -188,7 +188,7 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 
 | Group | Commands | What it does |
 |---|---|---|
-| **Profile** | `info` `propic` `email` `phone` `export` | full profile dump, avatar download, contact extraction, JSON export |
+| **Profile** | `info` `about` `propic` `email` `phone` `export` | full profile dump, raw user_about slice, avatar download, contact extraction, JSON export |
 | **Media** | `posts` `reels` `stories` `highlights` `tagged` `audio` | feed media + active stories + highlight reels + posts the target is tagged in + clips using a given audio asset |
 | **Network** | `followers` `followings` `mutuals` `intersect` `similar` `search` `recommended` | follower / following lists, self-intersection, cross-target shared followers, IG's "suggested similar" carousel, free-text search, category recommendations |
 | **Content** | `hashtags` `mentions` `locations` `captions` `likes` `timeline` | top-N hashtags / @mentions / geotags across recent posts, raw captions, like-count stats, posting-cadence histogram |

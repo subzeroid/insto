@@ -73,6 +73,51 @@ async def info_cmd(ctx: CommandContext, username: str) -> tuple[Profile, dict[st
 
 
 # ---------------------------------------------------------------------------
+# /about
+# ---------------------------------------------------------------------------
+
+
+@command(
+    "about",
+    "Show the IG `user_about` payload (joined date, country, former usernames)",
+    add_args=add_target_arg,
+)
+@with_target
+async def about_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
+    """Surface the raw ``user_about`` dict.
+
+    `/info` already folds the populated about-fields into the profile
+    panel, but `/about` is for analysts who want the dict on its own —
+    cheaper than `/info` (one fewer call) and JSON-exportable for
+    pipelines that don't care about the rest of the profile.
+    """
+    pk = await ctx.facade.resolve_pk(username)
+    payload = await ctx.facade.backend.get_user_about(pk)
+    if ctx.output_format() == "json":
+        dest_arg = ctx.args.json if ctx.args.json is not None else ""
+        dest = resolve_export_dest(dest_arg)
+        ctx.facade.export_json(payload, command="about", target=username, dest=dest)
+        return payload
+    if not payload:
+        ctx.print(f"@{username} has no user_about data")
+        return payload
+    # Render as a compact two-column key/value grid. No Panel — this is
+    # meant to be a quick-look companion to /info, not its replacement.
+    from rich.table import Table
+
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="field", no_wrap=True)
+    grid.add_column(style="value", overflow="fold")
+    for key, value in payload.items():
+        if value in (None, ""):
+            continue
+        grid.add_row(key.replace("_", " "), str(value))
+    ctx.print(f"@{username} — user_about:")
+    ctx.print(grid)
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # /propic
 # ---------------------------------------------------------------------------
 
@@ -217,6 +262,7 @@ async def export_cmd(ctx: CommandContext, username: str) -> Path | None:
 
 
 __all__ = [
+    "about_cmd",
     "email_cmd",
     "export_cmd",
     "info_cmd",

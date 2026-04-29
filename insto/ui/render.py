@@ -85,8 +85,22 @@ def render_profile(
     if profile.previous_usernames:
         row("aliases", ", ".join(profile.previous_usernames))
     if about:
-        for key in ("country", "country_code", "is_eligible_to_show_email"):
-            if key in about and about[key] not in (None, ""):
+        # Real `user_about` payload from HikerAPI returns a small fixed
+        # set of fields: country, date (when the account was created),
+        # former_usernames, plus mirrors of profile fields. Surface
+        # everything that's actually populated so /info doesn't hide
+        # OSINT-relevant signal under a separate /about command.
+        if about.get("country"):
+            row("country", about["country"])
+        if about.get("date"):
+            row("created", about["date"])
+        former = about.get("former_usernames")
+        if former and str(former).strip():
+            row("former usernames", former)
+        # Older fields that may appear on aiograpi or future hiker
+        # responses — show only if non-empty.
+        for key in ("country_code", "is_eligible_to_show_email"):
+            if about.get(key) not in (None, ""):
                 row(key.replace("_", " "), about[key])
 
     title = Text.assemble(

@@ -73,6 +73,28 @@ def _build_prompt_style(theme_name: str) -> Style:
     )
 
 
+def _first_positional_choices(spec: Any) -> tuple[str, ...]:
+    """Return ``argparse choices=`` for the first positional of `spec`, or ``()``.
+
+    Used by the slash popup to surface inline argument suggestions when
+    the user has typed the full command name without a trailing space
+    (e.g. `/theme<Tab>` → `claude / instagram / aiograpi`). Builds the
+    parser the same way ``_argument_completions`` does so the two
+    completion paths stay in sync.
+    """
+    from insto.commands._base import build_parser_for
+
+    parser = build_parser_for(spec)
+    for action in parser._actions:
+        if action.option_strings or action.dest == "help":
+            continue
+        choices = action.choices
+        if not choices:
+            return ()
+        return tuple(str(c) for c in choices)
+    return ()
+
+
 class _SlashCommandCompleter(Completer):
     """Slack/Claude-Code-style command completer.
 
@@ -131,14 +153,22 @@ class _SlashCommandCompleter(Completer):
         #    a trailing space before Tab does anything useful — confusing
         #    on first use because the popup shows `/theme [name]` but
         #    pressing Tab just re-inserts `/theme` and stops.
+        #
+        #    The cursor is at end-of-`/theme` (no trailing space yet), so
+        #    completion text *must* include the separator — otherwise
+        #    accepting `instagram` produces `/themeinstagram` instead of
+        #    `/theme instagram`.
         from insto.commands._base import COMMANDS
 
         spec = COMMANDS.get(user_typed)
         if spec is not None:
-            yield from self._argument_completions(
-                text=f"{text} ",
-                stripped=f"{stripped} ",
-            )
+            for choice in _first_positional_choices(spec):
+                yield Completion(
+                    text=f" {choice}",
+                    start_position=0,  # insert at cursor, replace nothing
+                    display=choice,
+                    display_meta="",
+                )
 
     def _argument_completions(self, text: str, stripped: str) -> Iterable[Completion]:
         """Per-command positional-argument completion.

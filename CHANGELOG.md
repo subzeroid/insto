@@ -2,6 +2,12 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.5.4] - 2026-04-29
+
+### Fixed
+
+- v0.5.3 fixed `/theme<Tab>` to *show* the theme choices inline, but accepting one produced `/themeinstagram` (no separator) — prompt-toolkit inserted the completion at the cursor without the implicit space. Now the choices include a leading space in their completion text, so `/theme<Tab>` → arrow to `instagram` → Enter produces `/theme instagram`.
+
 ## [0.5.3] - 2026-04-29
 
 ### Fixed

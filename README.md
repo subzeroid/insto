@@ -79,6 +79,13 @@ HikerAPI token, output directory, sqlite store path, and optional proxy.
 The token is read with `getpass` so it does not echo to the terminal; pass
 `-` for the proxy to clear a previously-saved value.
 
+> 💸 **HikerAPI gives you 100 free requests** to try things out — no card,
+> no email-verification dance, just sign up and a token is waiting:
+> <https://hikerapi.com/p/6k1q1388>. That's enough for a couple of full
+> `/dossier` runs or many `/info` / `/where` / `/timeline` calls — pick a
+> target you already know to test the surface before deciding whether to
+> top up.
+
 Token precedence is **flag > env (`HIKERAPI_TOKEN`) > config.toml**; the same
 precedence applies to the proxy (`--proxy`, `HIKERAPI_PROXY`,
 `[hiker].proxy`). `socks5h://` (Tor) and `http://` proxies are both

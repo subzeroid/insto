@@ -43,7 +43,7 @@ Two surfaces over the same command grammar:
 | | **hiker** (default in v0.1) | **aiograpi** (v0.2) |
 |---|---|---|
 | Auth | API token | Instagram login + 2FA |
-| Cost | Pay-per-call, [free trial credits](https://hikerapi.com/p/18j4ib4j) at signup | Free |
+| Cost | Pay-per-call, [100 free requests](https://hikerapi.com/p/6k1q1388) at signup (no card) | Free |
 | Account ban risk | None | Real |
 | Stability | High | Brittle |
 | Private-account access | No | Yes (only for accounts you follow) |

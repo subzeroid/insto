@@ -90,7 +90,7 @@ insto setup
 
 Interactive wizard. Writes `~/.insto/config.toml` (mode `0600`) with:
 
-- `hiker.token` — your [HikerAPI](https://hikerapi.com) access key.
+- `hiker.token` — your [HikerAPI](https://hikerapi.com) access key. New here? Sign up via <https://hikerapi.com/p/6k1q1388> for **100 free requests** (no card required) to try the CLI.
 - `hiker.proxy` (optional) — `http://`, `https://`, or `socks5h://` proxy URL.
 - `output_dir` — where downloads and exports land (resolved to absolute).
 - `db_path` — where the sqlite store lives (default `~/.insto/store.db`).

@@ -83,14 +83,34 @@ async def test_where_anchor_and_centroid(
         profiles={"42": _profile()},
         posts={
             "42": [
-                _post("a", location_pk="L1", location_name="Maranello",
-                      location_lat=44.5256, location_lng=10.8664),
-                _post("b", location_pk="L1", location_name="Maranello",
-                      location_lat=44.5256, location_lng=10.8664),
-                _post("c", location_pk="L1", location_name="Maranello",
-                      location_lat=44.5256, location_lng=10.8664),
-                _post("d", location_pk="L2", location_name="Niseko",
-                      location_lat=42.86, location_lng=140.71),
+                _post(
+                    "a",
+                    location_pk="L1",
+                    location_name="Maranello",
+                    location_lat=44.5256,
+                    location_lng=10.8664,
+                ),
+                _post(
+                    "b",
+                    location_pk="L1",
+                    location_name="Maranello",
+                    location_lat=44.5256,
+                    location_lng=10.8664,
+                ),
+                _post(
+                    "c",
+                    location_pk="L1",
+                    location_name="Maranello",
+                    location_lat=44.5256,
+                    location_lng=10.8664,
+                ),
+                _post(
+                    "d",
+                    location_pk="L2",
+                    location_name="Niseko",
+                    location_lat=42.86,
+                    location_lng=140.71,
+                ),
             ]
         },
     )
@@ -116,15 +136,14 @@ async def test_where_zero_geotagged(
     assert result.anchor is None
 
 
-async def test_where_json_export(
-    history: HistoryStore, config: Config, session: Session
-) -> None:
+async def test_where_json_export(history: HistoryStore, config: Config, session: Session) -> None:
     backend = FakeBackend(
         profiles={"42": _profile()},
         posts={
             "42": [
-                _post("a", location_pk="L1", location_name="HQ",
-                      location_lat=10.0, location_lng=20.0),
+                _post(
+                    "a", location_pk="L1", location_name="HQ", location_lat=10.0, location_lng=20.0
+                ),
             ]
         },
     )

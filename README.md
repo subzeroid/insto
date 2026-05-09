@@ -1,6 +1,6 @@
 # insto
 
-Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend.
+Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend and [aiograpi](https://github.com/subzeroid/aiograpi) lib.
 
 ![demo](docs/demo.gif)
 

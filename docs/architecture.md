@@ -7,15 +7,15 @@ UI:        REPL (prompt_toolkit) │ one-shot CLI (argparse)
 Dispatch:  parse → validate → run → render
 Commands:  commands/{target,profile,media,network,content,interactions,batch,watch,operational,dossier}.py
 Service:   facade · history · analytics · exporter · watch
-Backends:  OSINTBackend ABC · HikerBackend (v0.1) · AiograpiBackend (v0.2)
+Backends:  OSINTBackend ABC · HikerBackend · AiograpiBackend
 Models:    @dataclass(slots=True) DTOs — Profile, Post, Story, User, Comment, Quota, ...
 ```
 
 ## Conventions
 
 - **Async everywhere.** `httpx` (transitive via `hikerapi`), `asyncio` for fan-out, `asyncio.to_thread` for sqlite calls.
-- **Backend boundary is a hard wall.** Raw HikerAPI / aiograpi dicts never leave `backends/`. Mappers in `_hiker_map.py` (and the future `_aiograpi_map.py`) are the only converters.
-- **Lazy backend imports.** `import hikerapi` happens only inside `make_backend("hiker")`. v0.2's `import aiograpi` will be the same. Import errors stay localized.
+- **Backend boundary is a hard wall.** Raw HikerAPI / aiograpi dicts never leave `backends/`. Mappers in `_hiker_map.py` and `_aiograpi_map.py` are the only converters.
+- **Lazy backend imports.** `import hikerapi` and `import aiograpi` happen only inside `make_backend(...)`. Import errors stay localized.
 - **Retry / backoff lives in one place.** `backends/_retry.py` decorates SDK-method calls inside `HikerBackend`; commands never know retries exist.
 - **CDN streaming through a single helper.** `backends/_cdn.py` is the only code that pulls untrusted bytes off the network. Host allowlist, MIME sniff, byte budget, atomic write — every download passes through it.
 - **Pagination as `AsyncIterator[T]` + `limit: int | None`.** Every collection method is an async generator. Cursor management lives inside the backend; commands consume one item at a time and stop on `limit`.
@@ -79,7 +79,7 @@ JSON exports are versioned: every file has `{"_schema": "insto.v1", "command": .
 
 ## Watch
 
-Session-only in v0.1 (daemon mode is v0.2). `/watch <user> <interval>` registers an `asyncio.Task` on the same loop that runs `PromptSession.prompt_async()`. Each tick is wrapped in `asyncio.shield(...)` and a single retry; two consecutive failures mark the watch `paused`. Notifications go through `prompt_toolkit.patch_stdout` so the user's in-progress input line is not corrupted.
+Session-only today; daemon mode is tracked as deferred work. `/watch <user> <interval>` registers an `asyncio.Task` on the same loop that runs `PromptSession.prompt_async()`. Each tick is wrapped in `asyncio.shield(...)` and a single retry; two consecutive failures mark the watch `paused`. Notifications go through `prompt_toolkit.patch_stdout` so the user's in-progress input line is not corrupted.
 
 Session limits: max 3 active watches, 5-minute floor on the interval, all watches cancelled cleanly on REPL exit.
 

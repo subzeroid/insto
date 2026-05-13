@@ -150,15 +150,15 @@ def _translate_http_status(exc: httpx.HTTPStatusError) -> BackendError:
         # Instagram itself returns, not HikerAPI's plan / scope error.
         # Typical causes:
         #   1. The endpoint is login-walled (Instagram demands a session
-        #      cookie). v0.1 hiker has no cookie; v0.2 aiograpi will.
+        #      cookie). Hiker has no cookie; aiograpi does.
         #   2. The target's profile is region-restricted, age-gated, or
         #      throttling third-party introspection.
         # 401 stays the only "your HikerAPI access is wrong" signal.
         # /info / /quota for other targets will keep working.
         return Banned(
             "Instagram returned 403 for this lookup (login-walled or "
-            "target-restricted). v0.1 hiker can't log in; this endpoint "
-            "will likely need the v0.2 aiograpi backend. Other commands "
+            "target-restricted). The hiker backend can't log in; this "
+            "endpoint will likely need the aiograpi backend. Other commands "
             "and other targets should still work."
         )
     if status == 404:

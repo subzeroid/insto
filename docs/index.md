@@ -32,7 +32,7 @@ Two surfaces over the same command grammar:
 
 ## What it is NOT
 
-- Not a scraper. v0.1 talks to HikerAPI exclusively (paid, no account-ban risk). v0.2 will add `aiograpi` for private-account access.
+- Not a scraper. The default backend is HikerAPI (paid, no account-ban risk). The optional `aiograpi` backend uses a real logged-in Instagram account for private-account access and carries account-ban risk.
 - Not an account hijacker / DM-flooder / ban-evader.
 - No AI / LLM features. No web UI.
 
@@ -42,7 +42,7 @@ Two surfaces over the same command grammar:
 
 ## Pick a backend
 
-| | **hiker** (default in v0.1) | **aiograpi** (v0.2) |
+| | **hiker** (default) | **aiograpi** (`insto[aiograpi]`) |
 |---|---|---|
 | Auth | API token | Instagram login + 2FA |
 | Cost | Pay-per-call, [100 free requests](https://hikerapi.com/p/6k1q1388) at signup (no card) | Free |

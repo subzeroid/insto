@@ -2,7 +2,7 @@
 
 `insto` is split between command surface and backend. The backend is the only layer that touches a third-party API; everything above it consumes DTOs (`Profile`, `Post`, `User`, `Comment`, ...) and never sees a raw HikerAPI / aiograpi dict.
 
-The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementations ship as of 0.2.0:
+The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementations ship:
 
 | | **hiker** (default install) | **aiograpi** (`insto[aiograpi]`) |
 |---|---|---|
@@ -11,13 +11,13 @@ The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementation
 | Account ban risk | None | Real |
 | Stability | High | Brittle (Instagram churn) |
 | Sees private accounts you follow | No | Yes |
-| Sees DMs / saved feed | No | Yes (planned) |
+| Sees DMs / saved feed | No | aiograpi has SDK methods; insto does not expose CLI commands yet |
 | Quota visibility | Yes (`/sys/balance`) | No |
 | Install footprint | base | `pip install 'insto[aiograpi]'` |
 
 ## Pick a backend
 
-Default is **hiker**. Switch to aiograpi when you need data behind Instagram's login wall — private profiles you follow, saved feed, posts on accounts that 403 from logged-out HTTP. For OSINT on public profiles, hiker is the right choice nine times out of ten and carries no account-ban risk.
+Default is **hiker**. Switch to aiograpi when you need data behind Instagram's login wall — private profiles you follow or posts on accounts that 403 from logged-out HTTP. For OSINT on public profiles, hiker is the right choice nine times out of ten and carries no account-ban risk.
 
 You can flip backends mid-session at any time by editing `~/.insto/config.toml` (or running `insto setup` again):
 
@@ -84,13 +84,13 @@ pip install 'insto[aiograpi]'           # in a venv only — see installation.md
 
 Then run `insto setup`, pick `aiograpi`, paste your Instagram username + password, and (optionally) the TOTP seed for 2FA.
 
-What works on aiograpi (≥ 0.8.0):
+What works on aiograpi (>= 0.9.6):
 
 - Every command — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/dossier`.
 - Reads private profiles you follow.
 - Login is **lazy** — the constructor stores credentials, the actual `client.login()` fires on the first network call. The session is then dumped to `~/.insto/aiograpi.session.json` (mode `0600`); subsequent runs reuse it without re-authenticating.
 
-aiograpi 0.7 was missing `chaining` / `fetch_suggestion_details` (used by `/similar`); insto's `[aiograpi]` extra now requires aiograpi ≥ 0.8.0 so this is settled at install time.
+aiograpi 0.9.x also exposes a much larger Direct, private GraphQL, music, archive, and collection surface. Insto intentionally exposes only read-oriented OSINT commands today. Read-only Direct inbox and saved-collection support are tracked as follow-up work in the [Roadmap](roadmap.md).
 
 ### Account-ban risk
 
@@ -120,4 +120,4 @@ Don't have the seed? Either re-enable 2FA in Instagram's settings to capture it,
 | `blocked` | n/a | ✓ (only via aiograpi error response) |
 | `deleted` | ✓ | ✓ |
 
-Commands that strictly need a logged-in account (DMs, saved feed, posts of a private profile you follow) carry a `requires=("followed",)` annotation. They run cleanly on aiograpi; on hiker they exit with a typed message.
+Commands that strictly need a logged-in account carry a `requires=("followed",)` annotation. They run cleanly on aiograpi; on hiker they exit with a typed message.

@@ -7,7 +7,7 @@ Every model is a `@dataclass(slots=True)` so that:
 - Memory footprint stays small even for long iterators (followers / posts).
 - `dataclasses.asdict(...)` produces a stable dict for JSON export.
 
-Backend mappers (`backends/_hiker_map.py` and future aiograpi mapper) are
+Backend mappers (`backends/_hiker_map.py` and `_aiograpi_map.py`) are
 the *only* code allowed to construct these DTOs from raw provider payloads;
 above the backend layer, code consumes DTOs and never sees raw dicts.
 """
@@ -29,9 +29,9 @@ class Profile:
     is mutable metadata: when a rename is detected during snapshot diff, the
     old value is appended to `previous_usernames`.
 
-    `access` reports visibility from the backend's vantage point. v0.1
-    (hiker) only ever returns `public | private | deleted`; v0.2 (aiograpi)
-    adds `followed | blocked`. `requires_followed=True` means the command
+    `access` reports visibility from the backend's vantage point. HikerAPI
+    returns `public | private | deleted`; aiograpi can also return
+    `followed | blocked`. `requires_followed=True` means the command
     that produced this DTO needs a logged-in / following session — used by
     commands that gate on follower-only content.
     """
@@ -216,7 +216,7 @@ class Quota:
 
     @classmethod
     def unknown(cls) -> Quota:
-        """Backend that does not expose quota (aiograpi v0.2)."""
+        """Backend that does not expose quota (aiograpi)."""
         return cls(remaining=None, limit=None, reset_at=None)
 
 

@@ -69,7 +69,7 @@ insto @nasa -c hashtags --csv - | awk -F, '$2=="space"{print $3}'
 /unwatch nasa
 ```
 
-Watches are session-local — they die when you exit. Persistent watches (daemon mode) are deferred to v0.2.
+Watches are session-local — they die when you exit. Persistent watches (daemon mode) are deferred.
 
 ## Privacy
 

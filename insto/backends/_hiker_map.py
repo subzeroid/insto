@@ -150,8 +150,8 @@ def map_profile(d: dict[str, Any]) -> Profile:
     """Map a HikerAPI `user` payload to a `Profile` DTO.
 
     Required: `pk`, `username`. Avatar URL prefers `_hd` then base.
-    `access` is derived from `is_private` (v0.1: HikerAPI cannot represent
-    `followed` / `blocked` — those land with the aiograpi backend in v0.2).
+    `access` is derived from `is_private`; HikerAPI cannot represent
+    `followed` / `blocked`, which are logged-in aiograpi-only states.
     """
     pk = _require(d, "pk", "user")
     username = _require(d, "username", "user")

@@ -1,6 +1,8 @@
 # insto
 
-Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend.
+Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend.
+
+![insto demo](demo.gif)
 
 ```sh
 uv tool install insto

@@ -1,6 +1,6 @@
 # insto
 
-Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com) backend and [aiograpi](https://github.com/subzeroid/aiograpi) lib.
+Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend and [aiograpi](https://github.com/subzeroid/aiograpi) lib.
 
 ![demo](docs/demo.gif)
 
@@ -104,7 +104,7 @@ supported.
 
 | | insto | [Osintgram](https://github.com/Datalux/Osintgram) | [Toutatis](https://github.com/megadose/toutatis) | [Sherlock](https://github.com/sherlock-project/sherlock) |
 |---|---|---|---|---|
-| Backends supported | [HikerAPI](https://hikerapi.com) (default) + aiograpi | Username/password (default) + HikerAPI ([#2586](https://github.com/Datalux/Osintgram/pull/2586)) | Logged-in Instagram session | HTTP probes — multi-site |
+| Backends supported | [HikerAPI](https://hikerapi.com/p/6k1q1388) (default) + aiograpi | Username/password (default) + HikerAPI ([#2586](https://github.com/Datalux/Osintgram/pull/2586)) | Logged-in Instagram session | HTTP probes — multi-site |
 | Default backend | HikerAPI — no IG session in scope | Logged-in Instagram session | Logged-in Instagram session | N/A — username probing |
 | Scope | Instagram deep dive | Instagram only | Instagram (email/phone focus) | 400+ sites, username search |
 | Geo OSINT (`/where`, `/place`, `/placeposts`) | ✅ unique | ❌ | ❌ | ❌ |

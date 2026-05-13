@@ -22,6 +22,8 @@ import pytest
 
 from insto.backends._aiograpi_map import (
     about_payload,
+    map_direct_message,
+    map_direct_thread,
     map_comment,
     map_highlight,
     map_highlight_item,
@@ -366,3 +368,106 @@ def test_about_payload_serialises_extended_fields() -> None:
     assert out["public_phone_country_code"] == "+1"
     assert out["is_business"] is True
     assert out["is_private"] is False
+
+
+# ---- Direct ---------------------------------------------------------------
+
+
+def test_map_direct_message_text() -> None:
+    msg = map_direct_message(
+        _bag(
+            id="m1",
+            user_id="100",
+            thread_id=123,
+            timestamp=datetime(2026, 4, 17, 17, 45, 12, tzinfo=UTC),
+            item_type="text",
+            text="hello",
+        )
+    )
+
+    assert msg.pk == "m1"
+    assert msg.thread_id == "123"
+    assert msg.sender_pk == "100"
+    assert msg.timestamp == 1776447912
+    assert msg.item_type == "text"
+    assert msg.text == "hello"
+    assert msg.media_pk is None
+    assert msg.media_code is None
+    assert msg.link_url is None
+
+
+def test_map_direct_message_uses_explicit_thread_id_when_raw_omits_it() -> None:
+    msg = map_direct_message(
+        _bag(
+            id="m2",
+            user_id="100",
+            thread_id=None,
+            timestamp=1_700_000_000,
+            item_type="text",
+            text="fallback",
+        ),
+        thread_id="t1",
+    )
+
+    assert msg.thread_id == "t1"
+
+
+def test_map_direct_message_media_share_and_link_refs() -> None:
+    msg = map_direct_message(
+        _bag(
+            id="m3",
+            user_id="100",
+            thread_id=123,
+            timestamp=datetime(2026, 4, 17, 17, 45, 12, tzinfo=UTC),
+            item_type="media_share",
+            text=None,
+            media_share=_bag(pk="media1", code="ABC123"),
+            link=_bag(url="https://example.test/story"),
+        )
+    )
+
+    assert msg.media_pk == "media1"
+    assert msg.media_code == "ABC123"
+    assert msg.link_url == "https://example.test/story"
+    assert msg.text is None
+
+
+def test_map_direct_thread_summary_maps_users_flags_and_preview_messages() -> None:
+    thread = map_direct_thread(
+        _bag(
+            id="t1",
+            pk="thread-pk",
+            thread_title="Alice, Bob",
+            users=[
+                _bag(pk="100", username="alice", full_name="Alice", is_private=False),
+                _bag(pk="101", username="bob", full_name="Bob", is_private=True),
+            ],
+            last_activity_at=datetime(2026, 4, 17, 17, 45, 12, tzinfo=UTC),
+            messages=[
+                _bag(
+                    id="m1",
+                    user_id="100",
+                    thread_id=None,
+                    timestamp=datetime(2026, 4, 17, 17, 45, 12, tzinfo=UTC),
+                    item_type="text",
+                    text="hello",
+                )
+            ],
+            is_group=True,
+            pending=True,
+            archived=False,
+            muted=True,
+        )
+    )
+
+    assert thread.pk == "t1"
+    assert thread.title == "Alice, Bob"
+    assert [user.username for user in thread.users] == ["alice", "bob"]
+    assert thread.users[1].is_private is True
+    assert thread.last_activity_at == 1776447912
+    assert thread.message_count == 1
+    assert thread.is_group is True
+    assert thread.is_pending is True
+    assert thread.is_archived is False
+    assert thread.is_muted is True
+    assert thread.messages[0].thread_id == "t1"

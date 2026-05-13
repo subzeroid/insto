@@ -14,6 +14,7 @@ __pycache__/
 # Tooling caches
 .pytest_cache/
 .mypy_cache/
+.playwright-mcp/
 .ruff_cache/
 .coverage
 .coverage.*

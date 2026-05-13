@@ -13,7 +13,7 @@ In August 2025 I shipped [PR #2586](https://github.com/Datalux/Osintgram/pull/25
 to [Osintgram](https://github.com/Datalux/Osintgram), the most popular
 Instagram OSINT CLI on GitHub (12k stars at the time). The PR added a
 `hikercli` module that replicates every Osintgram command through
-[HikerAPI](https://hikerapi.com) — a third-party endpoint over Instagram's
+[HikerAPI](https://hikerapi.com/p/6k1q1388) — a third-party endpoint over Instagram's
 public surface — so users no longer had to feed in their own IG
 credentials and watch the account get suspended within a week. The PR
 got merged.

@@ -47,7 +47,7 @@ Precedence is **flag > env > toml > default** for every key:
 
 ## hiker — HikerAPI
 
-Authenticates with a [HikerAPI](https://hikerapi.com) token. Pay-per-call, no Instagram login, no account-ban risk.
+Authenticates with a [HikerAPI](https://hikerapi.com/p/6k1q1388) token. Pay-per-call, no Instagram login, no account-ban risk.
 
 ```sh
 insto setup                                            # token wizard

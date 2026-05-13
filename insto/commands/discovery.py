@@ -1,8 +1,8 @@
-"""Discovery / utility commands powered by aiograpi 0.8.x ports.
+"""Discovery / utility commands powered by aiograpi ports.
 
 Three commands grouped here because they share a single source of new
-capability (aiograpi >= 0.8.x) and don't fit neatly into the existing
-``profile`` / ``network`` / ``media`` modules:
+capability and don't fit neatly into the existing ``profile`` / ``network`` /
+``media`` modules:
 
   - ``/resolve <url>`` — expand an Instagram short-link
     (``instagram.com/share/...``) to the canonical URL via a HEAD

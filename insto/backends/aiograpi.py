@@ -19,10 +19,10 @@ them into the insto taxonomy in `insto/exceptions.py` so the command
 layer never sees a raw aiograpi exception. New aiograpi exception
 classes are caught by the `ClientError` fallback as `Transient`.
 
-All `OSINTBackend` methods are implemented. `get_suggested(pk)` and
-`iter_user_tagged(pk)` need aiograpi ≥ 0.8.0 (the release that added
-`chaining` / `fetch_suggestion_details` and exposed `usertag_medias_v1`).
-The `[aiograpi]` extra in `pyproject.toml` enforces this minimum.
+All `OSINTBackend` methods are implemented. The `[aiograpi]` extra pins to
+aiograpi >= 0.9.6 so this backend gets the current Direct, private GraphQL,
+music, archive, and media pagination fixes while keeping insto's own command
+surface read-oriented.
 """
 
 from __future__ import annotations

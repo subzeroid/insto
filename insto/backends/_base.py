@@ -1,9 +1,8 @@
 """Abstract OSINT backend interface.
 
-`OSINTBackend` is the contract every backend (HikerAPI v0.1, aiograpi v0.2,
-future TikTok / Bluesky / Threads providers) must implement. The command and
-service layers depend on this ABC, never on a concrete backend — that is what
-keeps v0.2 a pure addition.
+`OSINTBackend` is the contract every backend (HikerAPI, aiograpi, future
+TikTok / Bluesky / Threads providers) must implement. The command and service
+layers depend on this ABC, never on a concrete backend.
 
 All collection-returning methods are async generators (`AsyncIterator[T]`)
 with an optional `limit: int | None` parameter. Cursors / page tokens are an
@@ -45,8 +44,8 @@ class OSINTBackend(ABC):
     # Capability tokens this backend exposes. Commands declare what they need
     # via `@command(..., requires=("followed",))`; the dispatcher rejects the
     # call when the active backend does not advertise the required tokens.
-    # HikerAPI exposes only public OSINT, so the default is empty; an
-    # `aiograpi` backend would extend this with `{"followed", ...}`.
+    # HikerAPI exposes only public OSINT, so the default is empty.
+    # AiograpiBackend extends this with `{"followed", ...}`.
     capabilities: frozenset[str] = frozenset()
 
     @abstractmethod

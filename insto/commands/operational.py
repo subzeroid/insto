@@ -45,7 +45,7 @@ from insto.config import effective_config_report
 async def quota_cmd(ctx: CommandContext) -> dict[str, Any]:
     # Fresh fetch so /quota always reflects the live balance, not a stale
     # header captured from the previous command's response. Backends that
-    # do not implement refresh_quota (e.g. FakeBackend, aiograpi v0.2)
+    # do not implement refresh_quota (e.g. FakeBackend, aiograpi)
     # silently fall back to the cached value.
     refresh = getattr(ctx.facade.backend, "refresh_quota", None)
     if refresh is not None:

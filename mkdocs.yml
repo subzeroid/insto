@@ -45,6 +45,7 @@ nav:
   - Basic usage: basic-usage.md
   - CLI reference: cli-reference.md
   - Backends: backends.md
+  - Roadmap: roadmap.md
   - Architecture: architecture.md
   - Troubleshooting: troubleshooting.md
   - Contributing: contributing.md

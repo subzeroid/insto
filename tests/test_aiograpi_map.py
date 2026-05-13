@@ -22,9 +22,9 @@ import pytest
 
 from insto.backends._aiograpi_map import (
     about_payload,
+    map_comment,
     map_direct_message,
     map_direct_thread,
-    map_comment,
     map_highlight,
     map_highlight_item,
     map_post,

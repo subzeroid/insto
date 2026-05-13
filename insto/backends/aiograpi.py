@@ -348,9 +348,7 @@ class AiograpiBackend(OSINTBackend):
 
     # ------------------------------------------------------------------ direct
 
-    async def iter_direct_threads(
-        self, *, limit: int | None = None
-    ) -> AsyncIterator[DirectThread]:
+    async def iter_direct_threads(self, *, limit: int | None = None) -> AsyncIterator[DirectThread]:
         from insto.backends._aiograpi_map import map_direct_thread
 
         amount = int(limit) if limit is not None and limit > 0 else 20

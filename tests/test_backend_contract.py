@@ -91,8 +91,7 @@ def test_base_direct_messages_default_requires_aiograpi() -> None:
 async def test_fake_direct_threads_respects_limit_and_stops_early() -> None:
     backend = FakeBackend(
         direct_threads=[
-            DirectThread(pk=f"t{i}", title=f"Thread {i}", last_activity_at=i)
-            for i in range(10)
+            DirectThread(pk=f"t{i}", title=f"Thread {i}", last_activity_at=i) for i in range(10)
         ],
         page_size=2,
     )

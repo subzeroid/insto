@@ -336,9 +336,7 @@ class FakeBackend(OSINTBackend):
         ):
             yield item
 
-    async def iter_direct_threads(
-        self, *, limit: int | None = None
-    ) -> AsyncIterator[DirectThread]:
+    async def iter_direct_threads(self, *, limit: int | None = None) -> AsyncIterator[DirectThread]:
         self.request_log.append(("iter_direct_threads", (limit,)))
         self._consume_error("iter_direct_threads")
         async for item in self._paged("iter_direct_threads", self.direct_threads, limit):

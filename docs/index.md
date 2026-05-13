@@ -32,9 +32,7 @@ Two surfaces over the same command grammar:
 
 ## What it is NOT
 
-- Not a scraper. The default backend is HikerAPI (paid, no account-ban risk).
-  The optional `aiograpi` backend uses a real logged-in Instagram account for
-  private-account access and carries account-ban risk.
+- Not a scraper. The default backend is HikerAPI (paid, no account-ban risk). The optional `aiograpi` backend uses a real logged-in Instagram account for private-account access and carries account-ban risk.
 - Not an account hijacker / DM-flooder / ban-evader.
 - No AI / LLM features. No web UI.
 

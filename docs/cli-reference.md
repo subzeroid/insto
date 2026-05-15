@@ -129,6 +129,15 @@ All take a bounded post window (default 50). `/wliked` and `/fans` make `N` (or 
 
 Direct commands are aiograpi-only, read-only, and support JSON export. They intentionally expose no send, reaction, seen, unsend, mute, approve, upload, or title-update flows.
 
+### Saved
+
+| Command | Purpose |
+|---|---|
+| `/collections [N]` | List saved collections for the logged-in aiograpi account (default 20). |
+| `/saved [--collection ID_OR_NAME] [N]` | List saved posts, optionally scoped to a saved collection id or exact collection name (default 20). |
+
+Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They intentionally expose no save, unsave, collection-create, edit, delete, or other account-mutation flows.
+
 ### Batch
 
 ```sh

@@ -44,6 +44,7 @@ from insto.models import (
     HighlightItem,
     Post,
     Profile,
+    SavedCollection,
     Story,
     User,
 )
@@ -183,6 +184,21 @@ def map_user_short(user: Any) -> User:
         full_name=_opt_str(_opt(user, "full_name")) or "",
         is_verified=bool(_opt(user, "is_verified")),
         is_private=bool(_opt(user, "is_private")),
+    )
+
+
+# ---- saved collections -----------------------------------------------------
+
+
+def map_saved_collection(collection: Any) -> SavedCollection:
+    """Map an aiograpi `Collection` to a read-only DTO."""
+    pk = _require(collection, "id", "saved_collection")
+    name = _require(collection, "name", "saved_collection")
+    return SavedCollection(
+        pk=str(pk),
+        name=str(name),
+        collection_type=_opt_str(_opt(collection, "type")) or "",
+        media_count=int(_opt(collection, "media_count") or 0),
     )
 
 

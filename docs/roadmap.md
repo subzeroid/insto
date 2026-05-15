@@ -15,21 +15,20 @@ Status, 2026-05-15:
 - Added an opt-in live audit at `tests/live/aiograpi_saved_feed_audit.py`.
 - Live audit with two configured burner sessions passed auth, `collections()`, the
   generic saved-media surface, and `get_timeline_feed()`.
-- The tested burner sessions had no saved media or named collections, so
-  collection-media pagination still needs a non-empty fixture before a public
-  command is designed.
+- Prepared a burner saved-media fixture and validated generic saved media plus
+  named collection media pagination on a non-empty account.
+- Added aiograpi-only `/collections` and `/saved [--collection ID_OR_NAME]`
+  commands. They reuse the existing `Post` DTO for saved media and expose no
+  save, unsave, collection-create, edit, delete, or other mutation flows.
 - `get_timeline_feed()` returns a large raw dict. Keep personal feed out of the
   command surface until it has a reduced read-only DTO and privacy-safe rendering
   contract.
 
 Next:
 
-- Validate `collection_medias(<collection_id>, amount=N)` on a non-empty saved
-  collection fixture.
-- Decide whether saved media can reuse the existing `Post` DTO or needs a small
-  saved-specific wrapper.
-- Only then add an aiograpi-only read command with small default limits and no
-  write, mutate, or automation flows.
+- Design a reduced read-only DTO before exposing personal timeline feed.
+- Keep saved command defaults small and verify them in opt-in live smoke before
+  releases.
 
 Priority: P3
 

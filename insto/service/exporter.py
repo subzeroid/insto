@@ -52,6 +52,7 @@ CSV_FLAT_COMMANDS: frozenset[str] = frozenset(
         "search",
         "recommended",
         "comments",
+        "collections",
         "likes",
         "wcommented",
         "wliked",
@@ -62,6 +63,7 @@ CSV_FLAT_COMMANDS: frozenset[str] = frozenset(
         "locations",
         "captions",
         "posts",
+        "saved",
         "place",
     }
 )

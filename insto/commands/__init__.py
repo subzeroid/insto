@@ -23,6 +23,7 @@ from insto.commands import network as _network  # noqa: F401  (registers command
 from insto.commands import operational as _operational  # noqa: F401  (registers commands)
 from insto.commands import places as _places  # noqa: F401  (registers commands)
 from insto.commands import profile as _profile  # noqa: F401  (registers commands)
+from insto.commands import saved as _saved  # noqa: F401  (registers commands)
 from insto.commands import target as _target  # noqa: F401  (registers commands)
 from insto.commands import watch as _watch  # noqa: F401  (registers commands)
 from insto.commands._base import (

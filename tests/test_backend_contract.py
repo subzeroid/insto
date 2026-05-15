@@ -33,7 +33,7 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
-from insto.models import DirectMessage, DirectThread, Post, Profile
+from insto.models import DirectMessage, DirectThread, Post, Profile, SavedCollection
 from tests.fakes import FakeBackend, FakeErrors
 
 
@@ -87,6 +87,20 @@ def test_base_direct_messages_default_requires_aiograpi() -> None:
         OSINTBackend.iter_direct_messages(backend, "t1", limit=1)
 
 
+def test_base_saved_collections_default_requires_aiograpi() -> None:
+    backend = FakeBackend()
+
+    with pytest.raises(BackendError, match="needs aiograpi backend"):
+        OSINTBackend.iter_saved_collections(backend, limit=1)
+
+
+def test_base_saved_posts_default_requires_aiograpi() -> None:
+    backend = FakeBackend()
+
+    with pytest.raises(BackendError, match="needs aiograpi backend"):
+        OSINTBackend.iter_saved_posts(backend, collection="research", limit=1)
+
+
 @pytest.mark.asyncio
 async def test_fake_direct_threads_respects_limit_and_stops_early() -> None:
     backend = FakeBackend(
@@ -114,6 +128,44 @@ async def test_fake_direct_messages_respects_limit_and_stops_early() -> None:
     assert [message.pk for message in collected] == ["0", "1", "2", "3", "4"]
     assert backend.page_requests["iter_direct_messages"] == 3
     assert backend.request_log == [("iter_direct_messages", ("t1", 5))]
+
+
+@pytest.mark.asyncio
+async def test_fake_saved_collections_respects_limit_and_stops_early() -> None:
+    backend = FakeBackend(
+        saved_collections=[
+            SavedCollection(pk=f"c{i}", name=f"Collection {i}", media_count=i) for i in range(10)
+        ],
+        page_size=2,
+    )
+
+    collected = [collection async for collection in backend.iter_saved_collections(limit=5)]
+
+    assert [collection.pk for collection in collected] == ["c0", "c1", "c2", "c3", "c4"]
+    assert backend.page_requests["iter_saved_collections"] == 3
+
+
+@pytest.mark.asyncio
+async def test_fake_saved_posts_respects_limit_and_collection_key() -> None:
+    backend = FakeBackend(
+        saved_posts={
+            None: [_make_post(f"generic-{i}") for i in range(10)],
+            "research": [_make_post(f"research-{i}") for i in range(10)],
+        },
+        page_size=2,
+    )
+
+    collected = [post async for post in backend.iter_saved_posts(collection="research", limit=5)]
+
+    assert [post.pk for post in collected] == [
+        "research-0",
+        "research-1",
+        "research-2",
+        "research-3",
+        "research-4",
+    ]
+    assert backend.page_requests["iter_saved_posts"] == 3
+    assert backend.request_log == [("iter_saved_posts", ("research", 5))]
 
 
 @pytest.mark.asyncio

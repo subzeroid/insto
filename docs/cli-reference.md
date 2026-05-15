@@ -157,7 +157,7 @@ Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They i
 |---|---|
 | `/watch <user> [interval]` | Add a session-scoped watch (≥ 5 min interval, max 3 active). |
 | `/unwatch <user>` | Stop watching. |
-| `/watching` | List active watches with their state (`ok` / `paused`). |
+| `/watching` | List active watches with their state (`active` / `paused`). |
 | `/diff <user>` | Diff current profile vs the most recent stored snapshot. |
 | `/history [N]` | Last N rows of `cli_history`. |
 

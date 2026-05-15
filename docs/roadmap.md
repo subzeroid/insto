@@ -71,6 +71,25 @@ Priority: P2
 
 Turn session-local `/watch` registrations into a persistent daemon with restart recovery and a control surface from REPL / one-shot CLI.
 
+Use case: a local long-running monitor for a small set of important targets,
+so profile snapshots and `/diff` history keep moving after the REPL exits or
+the machine restarts. It should capture target changes such as username,
+biography, external URL, public contact fields, follower/following/media
+counts, avatar/banner hash, and recent post ids for provenance.
+
+Operating envelope:
+
+- Keep the current max of 3 active watches and 300-second interval floor.
+- Worst case at the floor is 36 ticks/hour; each tick currently does roughly
+  one profile read plus one recent-posts read.
+- Practical default is 1-3 targets at 10-60 minute intervals.
+- HikerAPI users pay in quota/cost; aiograpi users pay in rate-limit and
+  account-ban risk. The daemon must keep that visible.
+
+Non-goals for the first slice: broad discovery crawling, high-volume watch
+lists, a network service, an HTTP API, telemetry, phone-home, or lowering the
+interval floor outside tests.
+
 Priority: P2
 
 ### At-rest store encryption

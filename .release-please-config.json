@@ -9,7 +9,7 @@
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         {
-          "type": "python",
+          "type": "generic",
           "path": "insto/_version.py"
         }
       ],

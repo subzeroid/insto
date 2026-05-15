@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.5](https://github.com/subzeroid/insto/compare/v0.7.4...v0.7.5) (2026-05-15)
+
+
+### Added
+
+* filter Direct threads by participant ([31770ff](https://github.com/subzeroid/insto/commit/31770ffd55ccae07d4dc2fb7a2aef91d7545c305))
+
 ## [0.7.4](https://github.com/subzeroid/insto/compare/v0.7.3...v0.7.4) (2026-05-15)
 
 

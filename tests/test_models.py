@@ -15,6 +15,7 @@ from insto.models import (
     Post,
     Profile,
     Quota,
+    SavedCollection,
     Snapshot,
     Story,
     User,
@@ -26,6 +27,7 @@ ALL_MODELS = [
     User,
     DirectMessage,
     DirectThread,
+    SavedCollection,
     Post,
     Comment,
     Story,
@@ -176,6 +178,22 @@ def test_user_construction() -> None:
     assert u.is_verified is False
 
 
+def test_saved_collection_asdict_shape() -> None:
+    collection = SavedCollection(
+        pk="178",
+        name="research",
+        collection_type="MEDIA",
+        media_count=3,
+    )
+
+    assert asdict(collection) == {
+        "pk": "178",
+        "name": "research",
+        "collection_type": "MEDIA",
+        "media_count": 3,
+    }
+
+
 def test_direct_message_asdict_shape() -> None:
     message = DirectMessage(
         pk="m1",
@@ -265,6 +283,8 @@ def _make_sample(cls: type) -> object:
         return DirectMessage(pk="m1", thread_id="t1", sender_pk="u1", timestamp=0)
     if cls is DirectThread:
         return DirectThread(pk="t1", title="thread")
+    if cls is SavedCollection:
+        return SavedCollection(pk="c1", name="saved")
     if cls is Post:
         return Post(pk="1", code="A", taken_at=0, media_type="image")
     if cls is Comment:

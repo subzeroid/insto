@@ -47,6 +47,7 @@ from insto.models import (
     Post,
     Profile,
     Quota,
+    SavedCollection,
     Story,
     User,
 )
@@ -267,6 +268,14 @@ class OsintFacade:
     async def direct_messages(self, thread_id: str, *, limit: int = 20) -> list[DirectMessage]:
         """Read-only Direct messages for one thread."""
         return [m async for m in self.backend.iter_direct_messages(thread_id, limit=limit)]
+
+    async def saved_collections(self, *, limit: int = 20) -> list[SavedCollection]:
+        """Read-only saved-media collections for the logged-in aiograpi account."""
+        return [c async for c in self.backend.iter_saved_collections(limit=limit)]
+
+    async def saved_posts(self, *, collection: str | None = None, limit: int = 20) -> list[Post]:
+        """Read-only saved media for the logged-in aiograpi account."""
+        return [p async for p in self.backend.iter_saved_posts(collection=collection, limit=limit)]
 
     async def mutuals(
         self, username: str, *, follower_limit: int = 1000, following_limit: int = 1000

@@ -106,6 +106,16 @@ class DirectThread:
 
 
 @dataclass(slots=True)
+class SavedCollection:
+    """Read-only saved-media collection summary for the logged-in account."""
+
+    pk: str
+    name: str
+    collection_type: str = ""
+    media_count: int = 0
+
+
+@dataclass(slots=True)
 class Post:
     """Instagram media item (image, video, carousel)."""
 

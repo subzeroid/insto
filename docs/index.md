@@ -65,6 +65,7 @@ See [Backends](backends.md) for the full breakdown.
 | **Content** | `hashtags` `mentions` `captions` `likes` `timeline` 🔥 |
 | **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` 🔥 |
 | **Discovery** | `resolve` |
+| **Direct** | `direct` `direct-thread` |
 | **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` |
 | **Operational** | `quota` `health` `config` `purge` |
 | **Session** | `target` `current` `clear` |

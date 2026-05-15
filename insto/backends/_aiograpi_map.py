@@ -38,6 +38,8 @@ from typing import Any
 from insto.exceptions import SchemaDrift
 from insto.models import (
     Comment,
+    DirectMessage,
+    DirectThread,
     Highlight,
     HighlightItem,
     Post,
@@ -181,6 +183,74 @@ def map_user_short(user: Any) -> User:
         full_name=_opt_str(_opt(user, "full_name")) or "",
         is_verified=bool(_opt(user, "is_verified")),
         is_private=bool(_opt(user, "is_private")),
+    )
+
+
+# ---- direct ----------------------------------------------------------------
+
+
+def _direct_media_ref(message: Any) -> tuple[str | None, str | None]:
+    media = _opt(message, "media_share") or _opt(message, "clip")
+    if media is None:
+        return None, None
+    return _opt_str(_opt(media, "pk") or _opt(media, "id")), _opt_str(_opt(media, "code"))
+
+
+def map_direct_message(message: Any, *, thread_id: str | None = None) -> DirectMessage:
+    """Map an aiograpi `DirectMessage` to a read-only DTO."""
+    pk = _require(message, "id", "direct_message")
+    timestamp = _to_unix(
+        _require(message, "timestamp", "direct_message"),
+        endpoint="direct_message",
+        field="timestamp",
+    )
+    media_pk, media_code = _direct_media_ref(message)
+    link = _opt(message, "link")
+    return DirectMessage(
+        pk=str(pk),
+        thread_id=str(_opt(message, "thread_id") or thread_id or ""),
+        sender_pk=str(_opt(message, "user_id") or ""),
+        timestamp=timestamp,
+        item_type=str(_opt(message, "item_type") or ""),
+        text=_opt_str(_opt(message, "text")),
+        media_pk=media_pk,
+        media_code=media_code,
+        link_url=_opt_str(_opt(link, "url")) if link is not None else None,
+    )
+
+
+def map_direct_thread(thread: Any) -> DirectThread:
+    """Map an aiograpi `DirectThread` preview to a read-only DTO."""
+    pk = _require(thread, "id", "direct_thread")
+    messages = [
+        map_direct_message(message, thread_id=str(pk))
+        for message in (_opt(thread, "messages") or [])
+    ]
+    users = [
+        User(
+            pk=str(_opt(user, "pk") or ""),
+            username=str(_opt(user, "username") or ""),
+            full_name=str(_opt(user, "full_name") or ""),
+            is_private=bool(_opt(user, "is_private")),
+            is_verified=bool(_opt(user, "is_verified")),
+        )
+        for user in (_opt(thread, "users") or [])
+    ]
+    return DirectThread(
+        pk=str(pk),
+        title=str(_opt(thread, "thread_title") or ""),
+        users=users,
+        last_activity_at=_to_unix(
+            _require(thread, "last_activity_at", "direct_thread"),
+            endpoint="direct_thread",
+            field="last_activity_at",
+        ),
+        message_count=len(messages),
+        is_group=bool(_opt(thread, "is_group")),
+        is_pending=bool(_opt(thread, "pending")),
+        is_archived=bool(_opt(thread, "archived")),
+        is_muted=bool(_opt(thread, "muted")),
+        messages=messages,
     )
 
 

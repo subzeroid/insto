@@ -34,6 +34,8 @@ from insto.exceptions import (
 )
 from insto.models import (
     Comment,
+    DirectMessage,
+    DirectThread,
     Highlight,
     HighlightItem,
     Place,
@@ -77,6 +79,8 @@ class FakeErrors:
     get_post_by_ref: BackendError | None = None
     search_places: BackendError | None = None
     iter_place_posts: BackendError | None = None
+    iter_direct_threads: BackendError | None = None
+    iter_direct_messages: BackendError | None = None
 
 
 @dataclass
@@ -107,6 +111,8 @@ class FakeBackend(OSINTBackend):
     posts_by_ref: dict[str, Post] = field(default_factory=dict)
     places: dict[str, list[Place]] = field(default_factory=dict)
     place_posts: dict[str, list[Post]] = field(default_factory=dict)
+    direct_threads: list[DirectThread] = field(default_factory=list)
+    direct_messages: dict[str, list[DirectMessage]] = field(default_factory=dict)
 
     quota: Quota = field(default_factory=Quota.unknown)
     errors: FakeErrors = field(default_factory=FakeErrors)
@@ -327,6 +333,22 @@ class FakeBackend(OSINTBackend):
         self._consume_error("iter_place_posts")
         async for item in self._paged(
             "iter_place_posts", self.place_posts.get(place_pk, []), limit
+        ):
+            yield item
+
+    async def iter_direct_threads(self, *, limit: int | None = None) -> AsyncIterator[DirectThread]:
+        self.request_log.append(("iter_direct_threads", (limit,)))
+        self._consume_error("iter_direct_threads")
+        async for item in self._paged("iter_direct_threads", self.direct_threads, limit):
+            yield item
+
+    async def iter_direct_messages(
+        self, thread_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[DirectMessage]:
+        self.request_log.append(("iter_direct_messages", (thread_id, limit)))
+        self._consume_error("iter_direct_messages")
+        async for item in self._paged(
+            "iter_direct_messages", self.direct_messages.get(thread_id, []), limit
         ):
             yield item
 

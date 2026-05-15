@@ -19,8 +19,11 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Any
 
+from insto.exceptions import BackendError
 from insto.models import (
     Comment,
+    DirectMessage,
+    DirectThread,
     Highlight,
     HighlightItem,
     Place,
@@ -168,6 +171,16 @@ class OSINTBackend(ABC):
     def iter_place_posts(self, place_pk: str, *, limit: int | None = None) -> AsyncIterator[Post]:
         """Iterate top posts at a given Instagram location pk. Default raises."""
         raise NotImplementedError("this backend does not implement place media listing")
+
+    def iter_direct_threads(self, *, limit: int | None = None) -> AsyncIterator[DirectThread]:
+        """Iterate read-only Direct threads. Default requires aiograpi."""
+        raise BackendError("needs aiograpi backend")
+
+    def iter_direct_messages(
+        self, thread_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[DirectMessage]:
+        """Iterate read-only Direct messages in one thread. Default requires aiograpi."""
+        raise BackendError("needs aiograpi backend")
 
     @abstractmethod
     def get_quota(self) -> Quota:

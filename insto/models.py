@@ -75,6 +75,37 @@ class User:
 
 
 @dataclass(slots=True)
+class DirectMessage:
+    """Read-only Direct message summary."""
+
+    pk: str
+    thread_id: str
+    sender_pk: str
+    timestamp: int
+    item_type: str = ""
+    text: str | None = None
+    media_pk: str | None = None
+    media_code: str | None = None
+    link_url: str | None = None
+
+
+@dataclass(slots=True)
+class DirectThread:
+    """Read-only Direct thread summary."""
+
+    pk: str
+    title: str
+    users: list[User] = field(default_factory=list)
+    last_activity_at: int = 0
+    message_count: int = 0
+    is_group: bool = False
+    is_pending: bool = False
+    is_archived: bool = False
+    is_muted: bool = False
+    messages: list[DirectMessage] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class Post:
     """Instagram media item (image, video, carousel)."""
 

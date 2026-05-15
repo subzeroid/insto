@@ -11,7 +11,7 @@ The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementation
 | Account ban risk | None | Real |
 | Stability | High | Brittle (Instagram churn) |
 | Sees private accounts you follow | No | Yes |
-| Sees DMs / saved feed | No | aiograpi has SDK methods; insto does not expose CLI commands yet |
+| Sees DMs / saved feed | No | Read-only Direct threads/messages exposed; saved/feed still planned |
 | Quota visibility | Yes (`/sys/balance`) | No |
 | Install footprint | base | `pip install 'insto[aiograpi]'` |
 
@@ -86,11 +86,13 @@ Then run `insto setup`, pick `aiograpi`, paste your Instagram username + passwor
 
 What works on aiograpi (>= 0.9.6):
 
-- Every command — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/dossier`.
+- Every command — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/direct`, `/direct-thread`, `/dossier`.
 - Reads private profiles you follow.
 - Login is **lazy** — the constructor stores credentials, the actual `client.login()` fires on the first network call. The session is then dumped to `~/.insto/aiograpi.session.json` (mode `0600`); subsequent runs reuse it without re-authenticating.
 
-aiograpi 0.9.x also exposes a much larger Direct, private GraphQL, music, archive, and collection surface. Insto intentionally exposes only read-oriented OSINT commands today. Read-only Direct inbox and saved-collection support are tracked as follow-up work in the [Roadmap](roadmap.md).
+aiograpi 0.9.x also exposes a much larger Direct, private GraphQL, music, archive, and collection surface. Insto intentionally exposes only read-oriented OSINT commands today: Direct support is limited to `/direct` and `/direct-thread`; saved-collection, feed, and private GraphQL audits remain tracked in the [Roadmap](roadmap.md).
+
+Direct commands are read-only. Insto does not expose send, reaction, seen, unsend, mute, approve, upload, or title-update operations.
 
 ### Account-ban risk
 

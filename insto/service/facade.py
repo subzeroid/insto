@@ -39,6 +39,8 @@ from insto.config import Config
 from insto.exceptions import BackendError
 from insto.models import (
     Comment,
+    DirectMessage,
+    DirectThread,
     Highlight,
     HighlightItem,
     Place,
@@ -257,6 +259,14 @@ class OsintFacade:
         """Fetch IG's category-based recommendations for the target."""
         pk = await self.resolve_pk(username)
         return await self.backend.get_recommended(pk)
+
+    async def direct_threads(self, *, limit: int = 20) -> list[DirectThread]:
+        """Read-only Direct threads for the logged-in aiograpi account."""
+        return [t async for t in self.backend.iter_direct_threads(limit=limit)]
+
+    async def direct_messages(self, thread_id: str, *, limit: int = 20) -> list[DirectMessage]:
+        """Read-only Direct messages for one thread."""
+        return [m async for m in self.backend.iter_direct_messages(thread_id, limit=limit)]
 
     async def mutuals(
         self, username: str, *, follower_limit: int = 1000, following_limit: int = 1000

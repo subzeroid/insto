@@ -46,9 +46,9 @@ Commands never `except BackendError` themselves. The dispatcher catches everythi
 All persistent state lives in one DB at `~/.insto/store.db` (mode `0600`):
 
 ```text
-_meta             schema_version, last_migrated_at
+_meta             schema_version
 cli_history       cmd, target, ts            (90-day retention, indexed on ts)
-watches           user, interval, last_ok, last_error, paused
+watches           user, interval_seconds, last_ok, last_error, status
 snapshots         target_pk, captured_at, profile_fields_json, last_post_pks_json,
                   avatar_url_hash, banner_url_hash    (30-day retention, max 100/target)
 ```
@@ -79,13 +79,13 @@ JSON exports are versioned: every file has `{"_schema": "insto.v1", "command": .
 
 ## Watch
 
-Session-only today; daemon mode is tracked as deferred work. `/watch <user> <interval>` registers an `asyncio.Task` on the same loop that runs `PromptSession.prompt_async()`. Each tick is wrapped in `asyncio.shield(...)` and a single retry; two consecutive failures mark the watch `paused`. Notifications go through `prompt_toolkit.patch_stdout` so the user's in-progress input line is not corrupted.
+Session-only today; daemon mode is tracked as deferred work. `/watch <user> <interval>` registers an `asyncio.Task` on the same loop that runs `PromptSession.prompt_async()`. Each tick runs through a tracked child task with a single retry; two consecutive failures mark the watch `paused`. Notifications go through `prompt_toolkit.patch_stdout` so the user's in-progress input line is not corrupted.
 
 Session limits: max 3 active watches, 5-minute floor on the interval, all watches cancelled cleanly on REPL exit.
 
 ## Test strategy
 
-- 700+ unit + integration tests, no live API calls in CI.
+- 850+ unit + integration tests, no live API calls in CI.
 - Fixtures: one frozen HikerAPI dict per profile-access state (`public`, `private`, `deleted`, `empty`, `schema_drift`).
 - `tests/fakes.py:FakeBackend` implements `OSINTBackend` from fixtures with per-method error injection covering every entry of the error taxonomy.
 - 3 e2e flows under `tests/e2e/`: subprocess one-shot, prompt_toolkit pty REPL session, `/watch` tick with `patch_stdout` capture.

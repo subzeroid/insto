@@ -26,7 +26,7 @@ The suite is fully offline — no real HikerAPI or Instagram calls. There's also
 HIKERAPI_TOKEN_TEST=<token> uv run python tests/live/smoke.py
 ```
 
-Eight REQ checks (resolve / profile / posts / followers / tagged / hashtag / quota / 404) plus one OPT check (`/similar`, per-target flaky). Skips with exit 0 if `HIKERAPI_TOKEN_TEST` is unset, so it's safe to wire into release-prep gates. Costs ~10 requests, single-digit cents. **Run before each release tag** — caught a real `iter_hashtag_posts` bug that mocks couldn't.
+Nine REQ checks (resolve / profile / posts / followers / tagged / hashtag / search / quota / 404) plus one OPT check (`/similar`, per-target flaky). Skips with exit 0 if `HIKERAPI_TOKEN_TEST` is unset, so it's safe to wire into release-prep gates. Costs ~10 requests, single-digit cents. **Run before each release tag** — caught a real `iter_hashtag_posts` bug that mocks couldn't.
 
 Coverage targets: keep pure-logic modules at 100% (`models`, `_redact`, `exceptions`, mappers). Everything else: 90%+ on touched code.
 
@@ -65,7 +65,7 @@ insto/
 ├── exceptions.py           # backend error taxonomy
 ├── models.py               # DTOs (Profile, Post, Story, Quota, ...)
 ├── ui/                     # banner, theme, render helpers
-├── backends/               # OSINTBackend ABC, HikerBackend, _retry, _cdn
+├── backends/               # OSINTBackend ABC, HikerBackend, AiograpiBackend, mappers
 ├── service/                # facade, history, analytics, exporter, watch
 └── commands/               # one file per group (target/profile/media/...)
 tests/

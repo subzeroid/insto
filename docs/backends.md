@@ -90,7 +90,7 @@ What works on aiograpi (>= 0.9.6):
 - Reads private profiles you follow.
 - Login is **lazy** — the constructor stores credentials, the actual `client.login()` fires on the first network call. The session is then dumped to `~/.insto/aiograpi.session.json` (mode `0600`); subsequent runs reuse it without re-authenticating.
 
-aiograpi 0.9.x also exposes a much larger Direct, private GraphQL, music, archive, and collection surface. Insto intentionally exposes only read-oriented OSINT commands today: Direct support is limited to `/direct` and `/direct-thread`; saved support is limited to `/collections` and `/saved`; personal feed and private GraphQL audits remain tracked in the [Roadmap](roadmap.md).
+aiograpi 0.9.x also exposes a much larger Direct, private GraphQL, music, archive, and collection surface. Insto intentionally exposes only read-oriented OSINT commands today: Direct support is limited to `/direct` and `/direct-thread`; saved support is limited to `/collections` and `/saved`; personal feed remains tracked in the [Roadmap](roadmap.md), and the private GraphQL switch is deferred there until the audit shows equal or better stability.
 
 Direct commands are read-only. Insto does not expose send, reaction, seen, unsend, mute, approve, upload, or title-update operations.
 

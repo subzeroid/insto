@@ -38,6 +38,28 @@ Compare the current `user_followers`, `user_following`, and media methods with t
 
 Why: private GraphQL may improve stability for followers, following, clips, inbox, and search, but it may also increase ban risk. Switch only after fixture diffs and small-limit live-smoke checks.
 
+Status, 2026-05-15:
+
+- Added an opt-in live audit at `tests/live/aiograpi_private_graphql_audit.py`.
+- The audit compares current aiograpi wrappers with raw private GraphQL
+  followers/following responses and the direct media GraphQL pagination path.
+  It prints only counts, overlap totals, cursor presence, and sanitized errors.
+- Live smoke on one burner account plus a stable public target authenticated
+  successfully, but private GraphQL followers/following returned zero candidate
+  rows where current wrappers returned rows, and the media GraphQL path failed
+  inside aiograpi's media extractor.
+- Decision: keep insto on the existing aiograpi wrapper methods. Do not switch
+  followers, following, or media pagination to private GraphQL until a future
+  aiograpi release shows equal id overlap and no extractor failures in this
+  audit.
+
+Next:
+
+- Re-run the audit when aiograpi updates the private GraphQL doc ids, response
+  parsing, or media normalisation.
+- Only switch a backend path after the audit shows equal or better small-limit
+  behavior on both a burner self-target and a stable public target.
+
 Priority: P2
 
 ## Existing deferred work

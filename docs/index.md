@@ -1,6 +1,6 @@
 # insto
 
-Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend.
+Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend and optional [aiograpi](https://github.com/subzeroid/aiograpi) logged-in backend.
 
 ![insto demo](demo.gif)
 
@@ -23,7 +23,7 @@ Two surfaces over the same command grammar:
 
 ## What you get
 
-- 24 OSINT slash-commands across profile / media / network / content / interactions / batch / watch / operational.
+- 50+ OSINT and operational slash-commands across profile / media / network / content / interactions / direct / saved / batch / watch.
 - A killer `/dossier` command that collects a full target package (info + posts + followers + following + mutuals + hashtags + mentions + locations + wcommented + wtagged) into a structured directory with a `MANIFEST.md` summary.
 - Hardened CDN streamer for media downloads: host allowlist, MIME cross-check, byte budgets, atomic writes, disk guard.
 - Sqlite-backed history / snapshots / watches at `~/.insto/store.db` (mode `0600`, schema-versioned).

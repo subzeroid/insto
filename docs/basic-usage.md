@@ -63,13 +63,16 @@ insto @nasa -c hashtags --csv - | awk -F, '$2=="space"{print $3}'
 ## Watching for changes
 
 ```text
-/watch nasa 10m            # poll every 10 minutes (5m is the floor)
+/watch nasa 600            # poll every 10 minutes (300s is the floor)
 /watching                  # list active watches
 /diff nasa                 # diff vs the most recent snapshot
 /unwatch nasa
 ```
 
-Watches are session-local — they die when you exit. Persistent watches (daemon mode) are deferred.
+Watches are session-local today: registrations are stored in sqlite, but the
+polling task dies when the REPL exits. Persistent daemon recovery is tracked in
+the [Roadmap](roadmap.md) and stays intentionally small: 1-3 targets, 10-60
+minute intervals for normal use.
 
 ## Privacy
 

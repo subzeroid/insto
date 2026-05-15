@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.7](https://github.com/subzeroid/insto/compare/v0.7.6...v0.7.7) (2026-05-15)
+
+
+### Documentation
+
+* defer personal feed surface ([#16](https://github.com/subzeroid/insto/issues/16)) ([3423d1f](https://github.com/subzeroid/insto/commit/3423d1f6c47e7c2cf311fefc0077836eeab1bb71))
+
 ## [0.7.6](https://github.com/subzeroid/insto/compare/v0.7.5...v0.7.6) (2026-05-15)
 
 

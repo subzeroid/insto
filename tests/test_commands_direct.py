@@ -63,11 +63,18 @@ def _message(pk: str, *, thread_id: str = "t1", text: str = "hello") -> DirectMe
     )
 
 
-def _thread(pk: str, *, title: str, username: str, message_count: int = 1) -> DirectThread:
+def _thread(
+    pk: str,
+    *,
+    title: str,
+    username: str,
+    full_name: str = "",
+    message_count: int = 1,
+) -> DirectThread:
     return DirectThread(
         pk=pk,
         title=title,
-        users=[User(pk="100", username=username)],
+        users=[User(pk="100", username=username, full_name=full_name)],
         last_activity_at=1_700_000_000,
         message_count=message_count,
         messages=[_message("m1", thread_id=pk, text="preview")],
@@ -141,6 +148,48 @@ async def test_direct_thread_lists_messages(
     assert "ABC123" not in captured
 
 
+async def test_direct_filters_threads_by_participant_username(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+    recording_console: Console,
+) -> None:
+    backend = _direct_backend()
+    facade = OsintFacade(backend=backend, history=history, config=config)
+
+    out = await dispatch(
+        "/direct --participant @bo 3",
+        facade=facade,
+        session=session,
+        console=recording_console,
+    )
+
+    assert [thread.pk for thread in out] == ["t2"]
+    captured = _captured(recording_console)
+    assert "Bob" in captured
+    assert "Alice" not in captured
+    assert backend.request_log == [("iter_direct_threads", (3,))]
+
+
+async def test_direct_filters_threads_by_participant_full_name(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    backend = FakeBackend(
+        direct_threads=[
+            _thread("t1", title="Ops", username="alice", full_name="Alice Example"),
+            _thread("t2", title="Research", username="bobby", full_name="Robert Example"),
+        ]
+    )
+    backend.capabilities = frozenset({"direct_read"})
+    facade = OsintFacade(backend=backend, history=history, config=config)
+
+    out = await dispatch("/direct --participant robert", facade=facade, session=session)
+
+    assert [thread.pk for thread in out] == ["t2"]
+
+
 async def test_direct_json_export(
     history: HistoryStore,
     config: Config,
@@ -156,6 +205,21 @@ async def test_direct_json_export(
     assert payload["command"] == "direct"
     assert payload["target"] is None
     assert [thread["pk"] for thread in payload["data"]] == ["t1", "t2"]
+
+
+async def test_direct_json_export_respects_participant_filter(
+    history: HistoryStore,
+    config: Config,
+    session: Session,
+) -> None:
+    backend = _direct_backend()
+    facade = OsintFacade(backend=backend, history=history, config=config)
+
+    await dispatch("/direct --participant car --json", facade=facade, session=session)
+
+    out_path = config.output_dir / "_" / "direct.json"
+    payload = json.loads(out_path.read_text())
+    assert [thread["pk"] for thread in payload["data"]] == ["t3"]
 
 
 async def test_direct_thread_json_stdout(

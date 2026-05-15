@@ -4,14 +4,6 @@ Deferred work that is still relevant after the aiograpi 0.9.x update.
 
 ## aiograpi follow-ups
 
-### Direct inbox search
-
-`/direct` and `/direct-thread` are shipped. Follow-up: add read-only search/filter by participant if aiograpi's search surface is stable enough. Do not add send, reaction, or unsend commands to the core CLI.
-
-Why: aiograpi 0.9.x synced the current Direct API surface, including message requests, single-message lookup, reactions, title updates, unsend, and voice/video attachments. For insto's OSINT surface, only the read-only subset fits the product boundary.
-
-Priority: P2
-
 ### Saved collections / personal feed read-only
 
 Audit the current aiograpi collection and feed surfaces, then add read-only commands only if the API is stable on a live-smoke burner account.

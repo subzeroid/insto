@@ -20,6 +20,13 @@ from insto.models import DirectMessage, DirectThread
 
 def _add_direct_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
+        "--participant",
+        "--user",
+        dest="participant",
+        default="",
+        help="filter threads by participant username, display name, or thread title",
+    )
+    parser.add_argument(
         "count",
         nargs="?",
         type=int,
@@ -71,6 +78,31 @@ def _thread_flags(thread: DirectThread) -> str:
     if thread.is_muted:
         flags.append("muted")
     return ", ".join(flags)
+
+
+def _normalize_participant_filter(value: str) -> str:
+    return value.strip().lstrip("@").casefold()
+
+
+def _thread_matches_participant(thread: DirectThread, query: str) -> bool:
+    needle = _normalize_participant_filter(query)
+    if not needle:
+        return True
+
+    candidates = [thread.title]
+    for user in thread.users:
+        candidates.extend([user.username, user.full_name])
+    return any(
+        needle in _normalize_participant_filter(candidate) for candidate in candidates if candidate
+    )
+
+
+def _filter_threads_by_participant(
+    threads: list[DirectThread], participant: str
+) -> list[DirectThread]:
+    if not participant:
+        return threads
+    return [thread for thread in threads if _thread_matches_participant(thread, participant)]
 
 
 def _message_preview(message: DirectMessage) -> str:
@@ -130,7 +162,9 @@ def _render_messages(thread_id: str, messages: list[DirectMessage]) -> Table:
 )
 async def direct_cmd(ctx: CommandContext) -> list[DirectThread]:
     count = _resolve_count(ctx)
+    participant = str(getattr(ctx.args, "participant", "") or "").strip()
     threads = await ctx.facade.direct_threads(limit=count)
+    threads = _filter_threads_by_participant(threads, participant)
 
     if ctx.output_format() == "json":
         ctx.facade.export_json(

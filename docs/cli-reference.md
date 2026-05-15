@@ -124,7 +124,7 @@ All take a bounded post window (default 50). `/wliked` and `/fans` make `N` (or 
 
 | Command | Purpose |
 |---|---|
-| `/direct [N]` | List recent Direct threads for the logged-in aiograpi account (default 20). |
+| `/direct [--participant QUERY] [N]` | List recent Direct threads for the logged-in aiograpi account (default 20); optional filter matches participant username, display name, or thread title. |
 | `/direct-thread <thread_id> [N]` | Show recent messages in one Direct thread (default 20). |
 
 Direct commands are aiograpi-only, read-only, and support JSON export. They intentionally expose no send, reaction, seen, unsend, mute, approve, upload, or title-update flows.

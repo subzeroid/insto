@@ -231,6 +231,7 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 | **Content** | `hashtags` `mentions` `captions` `likes` `timeline` 🔥 | top hashtags / @mentions / captions, like-count stats, **`timeline` = posting-cadence histogram (hour-of-day + day-of-week)** |
 | **Interactions** | `comments` `wcommented` `wliked` `wtagged` `fans` 🔥 | per-post + aggregated comments, top commenters / likers / taggers, **`fans` = weighted superfan ranking (likes + 3×comments)** |
 | **Discovery** | `resolve` | expand `instagram.com/share/...` short-links to canonical URLs (aiograpi only) |
+| **Direct** | `direct` `direct-thread` | read-only Direct threads and messages (aiograpi only) |
 | **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; cli-history |
 | **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite/cache cleanup |
 | **Session** | `target` `current` `clear` | active-target plumbing for the REPL |

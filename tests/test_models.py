@@ -8,6 +8,8 @@ import pytest
 
 from insto.models import (
     Comment,
+    DirectMessage,
+    DirectThread,
     Highlight,
     HighlightItem,
     Post,
@@ -22,6 +24,8 @@ from insto.models import (
 ALL_MODELS = [
     Profile,
     User,
+    DirectMessage,
+    DirectThread,
     Post,
     Comment,
     Story,
@@ -172,12 +176,95 @@ def test_user_construction() -> None:
     assert u.is_verified is False
 
 
+def test_direct_message_asdict_shape() -> None:
+    message = DirectMessage(
+        pk="m1",
+        thread_id="t1",
+        sender_pk="100",
+        timestamp=1_700_000_000,
+        item_type="text",
+        text="hello",
+    )
+
+    assert asdict(message) == {
+        "pk": "m1",
+        "thread_id": "t1",
+        "sender_pk": "100",
+        "timestamp": 1_700_000_000,
+        "item_type": "text",
+        "text": "hello",
+        "media_pk": None,
+        "media_code": None,
+        "link_url": None,
+    }
+
+
+def test_direct_thread_asdict_shape() -> None:
+    message = DirectMessage(
+        pk="m1",
+        thread_id="t1",
+        sender_pk="100",
+        timestamp=1_700_000_000,
+        item_type="text",
+        text="hello",
+    )
+    thread = DirectThread(
+        pk="t1",
+        title="Alice",
+        users=[User(pk="100", username="alice")],
+        last_activity_at=1_700_000_000,
+        message_count=1,
+        is_group=False,
+        is_pending=False,
+        is_archived=False,
+        is_muted=False,
+        messages=[message],
+    )
+
+    assert asdict(thread) == {
+        "pk": "t1",
+        "title": "Alice",
+        "users": [
+            {
+                "pk": "100",
+                "username": "alice",
+                "full_name": "",
+                "is_private": False,
+                "is_verified": False,
+            }
+        ],
+        "last_activity_at": 1_700_000_000,
+        "message_count": 1,
+        "is_group": False,
+        "is_pending": False,
+        "is_archived": False,
+        "is_muted": False,
+        "messages": [
+            {
+                "pk": "m1",
+                "thread_id": "t1",
+                "sender_pk": "100",
+                "timestamp": 1_700_000_000,
+                "item_type": "text",
+                "text": "hello",
+                "media_pk": None,
+                "media_code": None,
+                "link_url": None,
+            }
+        ],
+    }
+
+
 def _make_sample(cls: type) -> object:
     """Build a minimum-viable instance of any DTO for slot-attribute checks."""
     if cls is Profile:
         return Profile(pk="1", username="a", access="public")
     if cls is User:
         return User(pk="1", username="a")
+    if cls is DirectMessage:
+        return DirectMessage(pk="m1", thread_id="t1", sender_pk="u1", timestamp=0)
+    if cls is DirectThread:
+        return DirectThread(pk="t1", title="thread")
     if cls is Post:
         return Post(pk="1", code="A", taken_at=0, media_type="image")
     if cls is Comment:

@@ -47,7 +47,19 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
-from insto.models import Comment, Highlight, HighlightItem, Place, Post, Profile, Quota, Story, User
+from insto.models import (
+    Comment,
+    DirectMessage,
+    DirectThread,
+    Highlight,
+    HighlightItem,
+    Place,
+    Post,
+    Profile,
+    Quota,
+    Story,
+    User,
+)
 from insto.service.metrics import Metrics, MetricsSnapshot
 
 log = logging.getLogger("insto.backends.aiograpi")
@@ -141,6 +153,7 @@ class AiograpiBackend(OSINTBackend):
     """
 
     name = "aiograpi"
+    capabilities = frozenset({"followed", "direct_read"})
 
     def __init__(
         self,
@@ -332,6 +345,42 @@ class AiograpiBackend(OSINTBackend):
             items = items[: int(limit)]
         for raw in items:
             yield map_highlight_item(raw, highlight_pk=str(highlight_id))
+
+    # ------------------------------------------------------------------ direct
+
+    async def iter_direct_threads(self, *, limit: int | None = None) -> AsyncIterator[DirectThread]:
+        from insto.backends._aiograpi_map import map_direct_thread
+
+        amount = int(limit) if limit is not None and limit > 0 else 20
+        items = await self._call(
+            lambda: self._client.direct_threads(amount=amount, thread_message_limit=1)
+        )
+        for raw in items or []:
+            try:
+                yield map_direct_thread(raw)
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
+
+    async def iter_direct_messages(
+        self, thread_id: str, *, limit: int | None = None
+    ) -> AsyncIterator[DirectMessage]:
+        from insto.backends._aiograpi_map import map_direct_message
+
+        try:
+            thread_pk = int(thread_id)
+        except (TypeError, ValueError) as exc:
+            raise BackendError(f"invalid direct thread id: {thread_id!r}") from exc
+        amount = int(limit) if limit is not None and limit > 0 else 20
+        items = await self._call(lambda: self._client.direct_messages(thread_pk, amount=amount))
+        for raw in items or []:
+            try:
+                yield map_direct_message(raw, thread_id=str(thread_pk))
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
 
     # ------------------------------------------------------------------ network
 

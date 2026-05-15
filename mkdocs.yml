@@ -37,6 +37,11 @@ not_in_nav: |
   plans/
   superpowers/
 
+exclude_docs: |
+  internal/
+  plans/
+  superpowers/
+
 nav:
   - Home: index.md
   - Killer features 🔥: killer-features.md

@@ -17,6 +17,7 @@ import sys
 
 import pytest
 
+from insto.backends._base import OSINTBackend
 from insto.exceptions import (
     AuthInvalid,
     BackendError,
@@ -32,12 +33,23 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
-from insto.models import Post, Profile
+from insto.models import DirectMessage, DirectThread, Post, Profile
 from tests.fakes import FakeBackend, FakeErrors
 
 
 def _make_post(pk: str) -> Post:
     return Post(pk=pk, code=f"c{pk}", taken_at=0, media_type="image")
+
+
+def _make_direct_message(pk: str, thread_id: str = "t1") -> DirectMessage:
+    return DirectMessage(
+        pk=pk,
+        thread_id=thread_id,
+        sender_pk="100",
+        timestamp=1_700_000_000,
+        item_type="text",
+        text=f"message {pk}",
+    )
 
 
 @pytest.mark.asyncio
@@ -59,6 +71,49 @@ async def test_iter_user_posts_respects_limit_and_stops_early() -> None:
     # 25 / 12 = 2.08 → 3 pages fetched. Asserting upper bound: must not have
     # paged into the 5th page worth of posts.
     assert backend.page_requests["iter_user_posts"] == 3
+
+
+def test_base_direct_threads_default_requires_aiograpi() -> None:
+    backend = FakeBackend()
+
+    with pytest.raises(BackendError, match="needs aiograpi backend"):
+        OSINTBackend.iter_direct_threads(backend, limit=1)
+
+
+def test_base_direct_messages_default_requires_aiograpi() -> None:
+    backend = FakeBackend()
+
+    with pytest.raises(BackendError, match="needs aiograpi backend"):
+        OSINTBackend.iter_direct_messages(backend, "t1", limit=1)
+
+
+@pytest.mark.asyncio
+async def test_fake_direct_threads_respects_limit_and_stops_early() -> None:
+    backend = FakeBackend(
+        direct_threads=[
+            DirectThread(pk=f"t{i}", title=f"Thread {i}", last_activity_at=i) for i in range(10)
+        ],
+        page_size=2,
+    )
+
+    collected = [thread async for thread in backend.iter_direct_threads(limit=5)]
+
+    assert [thread.pk for thread in collected] == ["t0", "t1", "t2", "t3", "t4"]
+    assert backend.page_requests["iter_direct_threads"] == 3
+
+
+@pytest.mark.asyncio
+async def test_fake_direct_messages_respects_limit_and_stops_early() -> None:
+    backend = FakeBackend(
+        direct_messages={"t1": [_make_direct_message(str(i)) for i in range(10)]},
+        page_size=2,
+    )
+
+    collected = [message async for message in backend.iter_direct_messages("t1", limit=5)]
+
+    assert [message.pk for message in collected] == ["0", "1", "2", "3", "4"]
+    assert backend.page_requests["iter_direct_messages"] == 3
+    assert backend.request_log == [("iter_direct_messages", ("t1", 5))]
 
 
 @pytest.mark.asyncio

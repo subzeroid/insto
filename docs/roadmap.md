@@ -4,11 +4,11 @@ Deferred work that is still relevant after the aiograpi 0.9.x update.
 
 ## aiograpi follow-ups
 
-### Saved collections / personal feed read-only
+### Saved collections shipped; personal feed intentionally not exposed
 
-Audit the current aiograpi collection and feed surfaces, then add read-only commands only if the API is stable on a live-smoke burner account.
+Saved collections/media are exposed as read-only commands. Personal timeline feed is intentionally not part of insto's command surface.
 
-Why: the SDK has collection/feed capability, but insto does not yet have a CLI contract for saved media or personal feed data.
+Why: `get_timeline_feed()` is personalized to the logged-in account, mixes target media with recommended users, feed controls, and other account-specific rows, and has weaker OSINT provenance than target-scoped commands.
 
 Status, 2026-05-15:
 
@@ -20,17 +20,20 @@ Status, 2026-05-15:
 - Added aiograpi-only `/collections` and `/saved [--collection ID_OR_NAME]`
   commands. They reuse the existing `Post` DTO for saved media and expose no
   save, unsave, collection-create, edit, delete, or other mutation flows.
-- `get_timeline_feed()` returns a large raw dict. Keep personal feed out of the
-  command surface until it has a reduced read-only DTO and privacy-safe rendering
-  contract.
+- `get_timeline_feed()` passed basic auth and shape checks, but returns a large
+  raw dict with mixed feed wrappers, pagination/session flags, and
+  account-personalized recommendations.
+- Decision: do not add `/feed`, `/timeline`, or a personal-feed DTO unless a
+  concrete OSINT use case appears.
 
 Next:
 
-- Design a reduced read-only DTO before exposing personal timeline feed.
 - Keep saved command defaults small and verify them in opt-in live smoke before
   releases.
+- Reopen personal-feed design only if a user can name target-scoped OSINT
+  questions that it answers better than existing commands.
 
-Priority: P3
+Priority: deferred
 
 ### Private GraphQL pagination audit
 

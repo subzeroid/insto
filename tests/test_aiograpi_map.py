@@ -29,6 +29,7 @@ from insto.backends._aiograpi_map import (
     map_highlight_item,
     map_post,
     map_profile,
+    map_saved_collection,
     map_story,
     map_user_short,
 )
@@ -135,6 +136,28 @@ def test_map_user_short_pk_coerced_to_string() -> None:
 def test_map_user_short_missing_username_raises_schema_drift() -> None:
     with pytest.raises(SchemaDrift):
         map_user_short(_bag(pk="9", username=None))
+
+
+# ---- map_saved_collection --------------------------------------------------
+
+
+def test_map_saved_collection_full_payload() -> None:
+    collection = map_saved_collection(
+        _bag(id="17851406186124602", name="Research", type="MEDIA", media_count=3)
+    )
+
+    assert collection.pk == "17851406186124602"
+    assert collection.name == "Research"
+    assert collection.collection_type == "MEDIA"
+    assert collection.media_count == 3
+
+
+def test_map_saved_collection_missing_name_raises_schema_drift() -> None:
+    with pytest.raises(SchemaDrift) as exc:
+        map_saved_collection(_bag(id="178", name=None))
+
+    assert exc.value.endpoint == "saved_collection"
+    assert exc.value.missing_field == "name"
 
 
 # ---- map_post --------------------------------------------------------------

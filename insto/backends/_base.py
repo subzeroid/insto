@@ -30,6 +30,7 @@ from insto.models import (
     Post,
     Profile,
     Quota,
+    SavedCollection,
     Story,
     User,
 )
@@ -180,6 +181,16 @@ class OSINTBackend(ABC):
         self, thread_id: str, *, limit: int | None = None
     ) -> AsyncIterator[DirectMessage]:
         """Iterate read-only Direct messages in one thread. Default requires aiograpi."""
+        raise BackendError("needs aiograpi backend")
+
+    def iter_saved_collections(self, *, limit: int | None = None) -> AsyncIterator[SavedCollection]:
+        """Iterate read-only saved-media collections. Default requires aiograpi."""
+        raise BackendError("needs aiograpi backend")
+
+    def iter_saved_posts(
+        self, *, collection: str | None = None, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        """Iterate read-only saved media. Default requires aiograpi."""
         raise BackendError("needs aiograpi backend")
 
     @abstractmethod

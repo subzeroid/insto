@@ -57,6 +57,7 @@ from insto.models import (
     Post,
     Profile,
     Quota,
+    SavedCollection,
     Story,
     User,
 )
@@ -87,6 +88,9 @@ def _translate(exc: BaseException) -> BackendError:
         # aiograpi.exceptions.UserNotFound carries the username on `.username`.
         username = getattr(exc, "username", None) or str(exc)
         return ProfileNotFound(str(username))
+    if isinstance(exc, ae.CollectionNotFound):
+        name = getattr(exc, "name", None) or str(exc)
+        return BackendError(f"collection not found: {name}")
     if isinstance(exc, ae.MediaNotFound):
         return PostNotFound(str(exc))
     if isinstance(exc, ae.PrivateAccount):
@@ -153,7 +157,7 @@ class AiograpiBackend(OSINTBackend):
     """
 
     name = "aiograpi"
-    capabilities = frozenset({"followed", "direct_read"})
+    capabilities = frozenset({"followed", "direct_read", "saved_read"})
 
     def __init__(
         self,
@@ -377,6 +381,51 @@ class AiograpiBackend(OSINTBackend):
         for raw in items or []:
             try:
                 yield map_direct_message(raw, thread_id=str(thread_pk))
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
+
+    # ------------------------------------------------------------------ saved
+
+    async def iter_saved_collections(
+        self, *, limit: int | None = None
+    ) -> AsyncIterator[SavedCollection]:
+        from insto.backends._aiograpi_map import map_saved_collection
+
+        items = await self._call(lambda: self._client.collections())
+        if limit is not None and limit > 0:
+            items = list(items or [])[: int(limit)]
+        for raw in items or []:
+            try:
+                yield map_saved_collection(raw)
+            except SchemaDrift as drift:
+                self._drift_count += 1
+                self._last_error = drift
+                raise
+
+    async def iter_saved_posts(
+        self, *, collection: str | None = None, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        from insto.backends._aiograpi_map import map_post
+
+        amount = int(limit) if limit is not None and limit > 0 else 20
+        collection_ref = (collection or "").strip()
+        if collection_ref:
+            if collection_ref.isdigit():
+                collection_pk = collection_ref
+            else:
+                collection_pk = str(
+                    await self._call(lambda: self._client.collection_pk_by_name(collection_ref))
+                )
+        else:
+            collection_pk = "saved"
+        items = await self._call(
+            lambda: self._client.collection_medias(collection_pk, amount=amount)
+        )
+        for raw in items or []:
+            try:
+                yield map_post(raw)
             except SchemaDrift as drift:
                 self._drift_count += 1
                 self._last_error = drift

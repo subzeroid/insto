@@ -1,4 +1,4 @@
-"""AiograpiBackend Direct read-method wiring tests.
+"""AiograpiBackend read-only private-surface wiring tests.
 
 These tests install a tiny fake ``aiograpi`` module into ``sys.modules`` so
 the optional dependency is not required in CI. They only verify insto's wiring
@@ -69,6 +69,41 @@ class _FakeClient:
             )
         ]
 
+    async def collections(self) -> list[Any]:
+        self.calls.append(("collections", (), {}))
+        return [SimpleNamespace(id="c1", name="Research", type="MEDIA", media_count=1)]
+
+    async def collection_pk_by_name(self, name: str) -> int:
+        self.calls.append(("collection_pk_by_name", (name,), {}))
+        return 123
+
+    async def collection_medias(
+        self,
+        collection_pk: str,
+        amount: int = 21,
+        last_media_pk: int = 0,
+    ) -> list[Any]:
+        self.calls.append(
+            (
+                "collection_medias",
+                (collection_pk,),
+                {"amount": amount, "last_media_pk": last_media_pk},
+            )
+        )
+        return [
+            SimpleNamespace(
+                pk="m1",
+                code="ABC123",
+                taken_at=datetime(2026, 4, 17, 17, 45, 12, tzinfo=UTC),
+                media_type=1,
+                caption_text="saved",
+                like_count=1,
+                comment_count=0,
+                thumbnail_url="https://cdn.example/saved.jpg",
+                user=SimpleNamespace(pk="25025320", username="instagram"),
+            )
+        ]
+
 
 @pytest.fixture
 def fake_aiograpi(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
@@ -124,3 +159,44 @@ async def test_direct_messages_rejects_non_numeric_thread_id(
 
     with pytest.raises(BackendError, match="invalid direct thread id"):
         [message async for message in backend.iter_direct_messages("not-a-number", limit=5)]
+
+
+async def test_saved_collections_calls_read_only_sdk_method(
+    fake_aiograpi: type[_FakeClient],
+) -> None:
+    backend = _backend()
+    client = backend._client
+
+    collections = [collection async for collection in backend.iter_saved_collections(limit=1)]
+
+    assert collections[0].pk == "c1"
+    assert collections[0].name == "Research"
+    assert client.calls == [("collections", (), {})]
+
+
+async def test_saved_posts_calls_generic_saved_surface(
+    fake_aiograpi: type[_FakeClient],
+) -> None:
+    backend = _backend()
+    client = backend._client
+
+    posts = [post async for post in backend.iter_saved_posts(limit=2)]
+
+    assert posts[0].pk == "m1"
+    assert posts[0].owner_username == "instagram"
+    assert client.calls == [("collection_medias", ("saved",), {"amount": 2, "last_media_pk": 0})]
+
+
+async def test_saved_posts_resolves_named_collection(
+    fake_aiograpi: type[_FakeClient],
+) -> None:
+    backend = _backend()
+    client = backend._client
+
+    posts = [post async for post in backend.iter_saved_posts(collection="Research", limit=2)]
+
+    assert posts[0].pk == "m1"
+    assert client.calls == [
+        ("collection_pk_by_name", ("Research",), {}),
+        ("collection_medias", ("123",), {"amount": 2, "last_media_pk": 0}),
+    ]

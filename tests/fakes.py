@@ -42,6 +42,7 @@ from insto.models import (
     Post,
     Profile,
     Quota,
+    SavedCollection,
     Story,
     User,
 )
@@ -81,6 +82,8 @@ class FakeErrors:
     iter_place_posts: BackendError | None = None
     iter_direct_threads: BackendError | None = None
     iter_direct_messages: BackendError | None = None
+    iter_saved_collections: BackendError | None = None
+    iter_saved_posts: BackendError | None = None
 
 
 @dataclass
@@ -113,6 +116,8 @@ class FakeBackend(OSINTBackend):
     place_posts: dict[str, list[Post]] = field(default_factory=dict)
     direct_threads: list[DirectThread] = field(default_factory=list)
     direct_messages: dict[str, list[DirectMessage]] = field(default_factory=dict)
+    saved_collections: list[SavedCollection] = field(default_factory=list)
+    saved_posts: dict[str | None, list[Post]] = field(default_factory=dict)
 
     quota: Quota = field(default_factory=Quota.unknown)
     errors: FakeErrors = field(default_factory=FakeErrors)
@@ -349,6 +354,24 @@ class FakeBackend(OSINTBackend):
         self._consume_error("iter_direct_messages")
         async for item in self._paged(
             "iter_direct_messages", self.direct_messages.get(thread_id, []), limit
+        ):
+            yield item
+
+    async def iter_saved_collections(
+        self, *, limit: int | None = None
+    ) -> AsyncIterator[SavedCollection]:
+        self.request_log.append(("iter_saved_collections", (limit,)))
+        self._consume_error("iter_saved_collections")
+        async for item in self._paged("iter_saved_collections", self.saved_collections, limit):
+            yield item
+
+    async def iter_saved_posts(
+        self, *, collection: str | None = None, limit: int | None = None
+    ) -> AsyncIterator[Post]:
+        self.request_log.append(("iter_saved_posts", (collection, limit)))
+        self._consume_error("iter_saved_posts")
+        async for item in self._paged(
+            "iter_saved_posts", self.saved_posts.get(collection, []), limit
         ):
             yield item
 

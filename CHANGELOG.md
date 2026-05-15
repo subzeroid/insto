@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.6](https://github.com/subzeroid/insto/compare/v0.7.5...v0.7.6) (2026-05-15)
+
+
+### Added
+
+* add read-only saved commands ([#11](https://github.com/subzeroid/insto/issues/11)) ([39566d3](https://github.com/subzeroid/insto/commit/39566d39bda660917771029246c52e4ddf6def36))
+
 ## [0.7.5](https://github.com/subzeroid/insto/compare/v0.7.4...v0.7.5) (2026-05-15)
 
 

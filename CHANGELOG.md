@@ -2,6 +2,24 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.4](https://github.com/subzeroid/insto/compare/v0.7.3...v0.7.4) (2026-05-15)
+
+
+### Added
+
+* add read-only aiograpi direct commands ([a3ad550](https://github.com/subzeroid/insto/commit/a3ad550f4eb082e3662657f038d7f67820005a15))
+
+
+### Fixed
+
+* repair release-please version updater ([80b0e5c](https://github.com/subzeroid/insto/commit/80b0e5c0f34983201f65aa5b608142d0d467d496))
+
+
+### Documentation
+
+* refresh aiograpi roadmap ([#3](https://github.com/subzeroid/insto/issues/3)) ([d98d9f7](https://github.com/subzeroid/insto/commit/d98d9f7bc9cecd38aa71f6cb9df458c8b2894bca))
+* update hiker links and home demo ([62bc540](https://github.com/subzeroid/insto/commit/62bc5407bc4ce3a6c99b60b0d0005fb56b859016))
+
 ## [0.7.3](https://github.com/subzeroid/insto/compare/v0.7.2...v0.7.3) (2026-04-29)
 
 

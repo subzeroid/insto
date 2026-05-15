@@ -10,6 +10,27 @@ Audit the current aiograpi collection and feed surfaces, then add read-only comm
 
 Why: the SDK has collection/feed capability, but insto does not yet have a CLI contract for saved media or personal feed data.
 
+Status, 2026-05-15:
+
+- Added an opt-in live audit at `tests/live/aiograpi_saved_feed_audit.py`.
+- Live audit with two configured burner sessions passed auth, `collections()`, the
+  generic saved-media surface, and `get_timeline_feed()`.
+- The tested burner sessions had no saved media or named collections, so
+  collection-media pagination still needs a non-empty fixture before a public
+  command is designed.
+- `get_timeline_feed()` returns a large raw dict. Keep personal feed out of the
+  command surface until it has a reduced read-only DTO and privacy-safe rendering
+  contract.
+
+Next:
+
+- Validate `collection_medias(<collection_id>, amount=N)` on a non-empty saved
+  collection fixture.
+- Decide whether saved media can reuse the existing `Post` DTO or needs a small
+  saved-specific wrapper.
+- Only then add an aiograpi-only read command with small default limits and no
+  write, mutate, or automation flows.
+
 Priority: P3
 
 ### Private GraphQL pagination audit

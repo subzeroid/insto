@@ -38,6 +38,7 @@ from insto.commands._base import (
     dispatch,
     download_or_print_url,
     parse_command_line,
+    resolve_and_select_target,
     resolve_export_dest,
     validate_global_flags,
     with_pk,
@@ -645,3 +646,59 @@ def test_exporter_accepts_binary_stream() -> None:
     )
     assert out2 is None
     assert buf2.getvalue().startswith(b"username,pk")
+
+
+# ---------------------------------------------------------------------------
+# resolve_and_select_target — shared /target + startup selection helper
+# ---------------------------------------------------------------------------
+
+
+async def test_resolve_and_select_target_sets_session(
+    facade: OsintFacade, session: Session
+) -> None:
+    result = await resolve_and_select_target(facade, session, "alice")
+    assert result == "alice"
+    assert session.target == "alice"
+
+
+async def test_resolve_and_select_target_strips_at_sign(
+    facade: OsintFacade, session: Session
+) -> None:
+    result = await resolve_and_select_target(facade, session, "@alice")
+    assert result == "alice"
+    assert session.target == "alice"
+
+
+async def test_resolve_and_select_target_pre_resolves_pk(
+    facade: OsintFacade, session: Session
+) -> None:
+    await resolve_and_select_target(facade, session, "alice")
+    assert facade._pk_cache.get("alice") == "42"
+
+
+async def test_resolve_and_select_target_empty_raises(
+    facade: OsintFacade, session: Session
+) -> None:
+    with pytest.raises(CommandUsageError, match="usage: /target <username>"):
+        await resolve_and_select_target(facade, session, "@")
+    assert session.target is None
+
+
+async def test_resolve_and_select_target_invalid_skips_resolve(
+    facade: OsintFacade, backend: FakeBackend, session: Session
+) -> None:
+    with pytest.raises(CommandUsageError):
+        await resolve_and_select_target(facade, session, "a/b")
+    # Validation must fail BEFORE any network resolve happens.
+    assert not any(name == "resolve_target" for name, _ in backend.request_log)
+    assert session.target is None
+
+
+async def test_resolve_and_select_target_unknown_propagates(
+    facade: OsintFacade, session: Session
+) -> None:
+    from tests.fakes import ProfileNotFound
+
+    with pytest.raises(ProfileNotFound):
+        await resolve_and_select_target(facade, session, "ghost")
+    assert session.target is None

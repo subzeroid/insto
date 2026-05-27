@@ -470,3 +470,25 @@ def test_main_print_completion_dispatches(monkeypatch: pytest.MonkeyPatch) -> No
     rc = cli_mod.main(["--print-completion", "zsh"])
     assert rc == 0
     assert captured["shell"] == "zsh"
+
+
+# ---------------------------------------------------------------------------
+# REPL launch wiring — `insto @user` threads the positional into run_repl
+# ---------------------------------------------------------------------------
+
+
+def test_main_passes_positional_target_to_run_repl(monkeypatch: pytest.MonkeyPatch) -> None:
+    import insto.repl as repl_mod
+
+    captured: dict[str, Any] = {}
+
+    def fake_run_repl(
+        config: Any = None, *, email: str | None = None, target: str | None = None
+    ) -> None:
+        captured["target"] = target
+
+    monkeypatch.setattr(repl_mod, "run_repl", fake_run_repl)
+    # --interactive forces the REPL path even without a configured token.
+    rc = cli_mod.main(["@ferrari", "--interactive"])
+    assert rc == 0
+    assert captured["target"] == "@ferrari"

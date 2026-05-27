@@ -264,3 +264,18 @@ def test_wasp_banner_is_static_logotype() -> None:
     WASP_BANNER.encode("ascii")
     # ~5 figlet rows + a leading newline strip = at least 4 internal newlines.
     assert WASP_BANNER.count("\n") >= 4
+
+
+def test_welcome_shows_active_target_wide(_facade: OsintFacade) -> None:
+    out = _capture(render_welcome(_facade, width=120, target="instagram"), width=120)
+    assert "target · @instagram" in out
+
+
+def test_welcome_shows_active_target_narrow(_facade: OsintFacade) -> None:
+    out = _capture(render_welcome(_facade, width=80, target="instagram"), width=80)
+    assert "target · @instagram" in out
+
+
+def test_welcome_no_target_line_when_unset(_facade: OsintFacade) -> None:
+    out = _capture(render_welcome(_facade, width=120, target=None), width=120)
+    assert "target ·" not in out

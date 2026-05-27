@@ -54,6 +54,15 @@ _TIPS: tuple[tuple[str, str], ...] = (
     ("/help", "list all commands"),
 )
 
+# REPL hotkeys advertised in the welcome banner. Kept in sync with the key
+# bindings registered in `repl.Repl._build_key_bindings`.
+_SHORTCUTS: tuple[tuple[str, str], ...] = (
+    ("Ctrl+L", "redraw"),
+    ("Ctrl+T", "show target"),
+    ("Ctrl+C", "cancel line"),
+    ("Ctrl+D", "exit"),
+)
+
 
 def _banner_text(theme_name: str | None = None, target: str | None = None) -> RenderableType:
     """Render the INSTO logotype + anagram tagline + target/theme footer.
@@ -102,6 +111,24 @@ def _tips_table() -> Table:
     table.add_column(justify="left")
     for cmd, desc in _TIPS:
         table.add_row(Text(cmd, style="tip.cmd"), Text(desc, style="tip.desc"))
+    return table
+
+
+def _shortcuts_table() -> Table:
+    """Compact two-up grid of REPL hotkeys (key, desc, key, desc)."""
+    table = Table.grid(padding=(0, 2))
+    for _ in range(4):
+        table.add_column(no_wrap=True)
+    pairs = list(_SHORTCUTS)
+    for i in range(0, len(pairs), 2):
+        lkey, ldesc = pairs[i]
+        rkey, rdesc = pairs[i + 1] if i + 1 < len(pairs) else ("", "")
+        table.add_row(
+            Text(lkey, style="tip.cmd"),
+            Text(ldesc, style="tip.desc"),
+            Text(rkey, style="tip.cmd"),
+            Text(rdesc, style="tip.desc"),
+        )
     return table
 
 
@@ -161,6 +188,9 @@ def _right_column(facade: OsintFacade, email: str | None) -> RenderableType:
     blocks: list[RenderableType] = [
         Text("Tips for getting started", style="section"),
         _tips_table(),
+        Text(""),
+        Text("Shortcuts", style="section"),
+        _shortcuts_table(),
         Text(""),
         Text("Recent activity", style="section"),
         _recent_block(recent),

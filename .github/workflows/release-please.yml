@@ -34,4 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.release.outputs.tag_name }}
-        run: gh workflow run release.yml --ref "$TAG"
+          REPO: ${{ github.repository }}
+        # -R is required: this job has no checkout, so `gh` cannot infer the
+        # repo from a local .git dir. REPO/TAG are trusted Actions contexts.
+        run: gh workflow run release.yml --ref "$TAG" -R "$REPO"

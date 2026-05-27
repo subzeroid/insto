@@ -469,3 +469,41 @@ async def test_help_separator_column_is_aligned(
     text = console.export_text()
     cols = {line.index("—") for line in text.splitlines() if "—" in line}
     assert len(cols) == 1, f"misaligned separators at columns {sorted(cols)}"
+
+
+# ---------------------------------------------------------------------------
+# /theme
+# ---------------------------------------------------------------------------
+
+
+async def test_theme_read_only_lists_catalog(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    result = await dispatch("/theme", facade=facade, session=session, console=console)
+    assert result["switched"] is False
+    assert result["active"] == facade.config.theme
+    out = console.export_text()
+    assert "available:" in out
+
+
+async def test_theme_switch_persists(
+    facade: OsintFacade,
+    session: Session,
+    console: Console,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Sandbox write_config (writes to $INSTO_HOME/config.toml).
+    monkeypatch.setenv("INSTO_HOME", str(tmp_path / ".insto"))
+    result = await dispatch("/theme hacker", facade=facade, session=session, console=console)
+    assert result["switched"] is True
+    assert result["active"] == "hacker"
+    assert facade.config.theme == "hacker"
+
+
+async def test_theme_switch_to_same_is_noop(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    current = facade.config.theme
+    result = await dispatch(f"/theme {current}", facade=facade, session=session, console=console)
+    assert result["switched"] is False

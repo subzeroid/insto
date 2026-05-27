@@ -14,6 +14,7 @@ from insto.ui.theme import (
     get_theme,
     is_known,
     list_themes,
+    theme_description,
 )
 
 # Style keys every theme must resolve (mirrors `_make_theme`).
@@ -65,3 +66,17 @@ def test_unknown_theme_falls_back_to_default() -> None:
     assert get_theme("nope") is THEMES[DEFAULT_THEME_NAME]
     assert get_palette(None) is get_palette(DEFAULT_THEME_NAME)
     assert not is_known("nope")
+
+
+def test_every_theme_has_a_description() -> None:
+    seen = set()
+    for name in list_themes():
+        desc = theme_description(name)
+        assert desc, f"theme {name!r} has no description"
+        seen.add(desc)
+    # descriptions are distinct (not the same generic line for all)
+    assert len(seen) == len(list_themes())
+
+
+def test_theme_description_hacker() -> None:
+    assert "green" in theme_description("hacker").lower()

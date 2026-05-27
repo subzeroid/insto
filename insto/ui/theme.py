@@ -133,6 +133,23 @@ _PALETTES: dict[str, _Palette] = {
 }
 
 
+# One-line descriptions surfaced in /theme completion and the picker. Keep a
+# key for every palette above (guarded by tests/test_theme.py).
+_DESCRIPTIONS: dict[str, str] = {
+    "aiograpi": "instagrapi violet → blue (default)",
+    "claude": "Claude Code burnt orange",
+    "instagram": "Instagram brand gradient",
+    "hacker": "matrix phosphor green on black",
+    "amber": "80s amber CRT phosphor",
+    "cyberpunk": "neon cyan → magenta → green",
+}
+
+
+def theme_description(name: str | None) -> str:
+    """One-line description of a theme (for /theme completion + picker footer)."""
+    return _DESCRIPTIONS.get(name or DEFAULT_THEME_NAME, "")
+
+
 THEMES: dict[str, Theme] = {name: _make_theme(p) for name, p in _PALETTES.items()}
 
 DEFAULT_THEME_NAME: str = "aiograpi"

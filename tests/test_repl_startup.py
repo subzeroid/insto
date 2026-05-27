@@ -21,7 +21,7 @@ from insto.models import Profile
 from insto.repl import Repl
 from insto.service.facade import OsintFacade
 from insto.service.history import HistoryStore
-from insto.ui.theme import INSTO_THEME
+from insto.ui.theme import INSTO_THEME, list_themes
 from tests.fakes import FakeBackend
 
 
@@ -114,3 +114,23 @@ def test_run_repl_pre_selects_startup_target(
         hist.close()
 
     assert captured["target"] == "alice"
+
+
+def test_theme_switch_applies_live(repl: Repl) -> None:
+    # Simulate `/theme <other>`: the command layer sets config.theme; the REPL
+    # must apply it to the live session (no restart) on the next sync.
+    start = repl.config.theme
+    other = next(t for t in list_themes() if t != start)
+    before_style = repl.prompt_session.style
+
+    repl.config.theme = other
+    repl._sync_theme()
+
+    assert repl._applied_theme == other
+    assert repl.prompt_session.style is not before_style  # popup style rebuilt
+    assert "insto v" in repl.console.export_text()  # banner repainted
+
+
+def test_theme_sync_is_noop_when_unchanged(repl: Repl) -> None:
+    repl._sync_theme()  # theme not changed since construction
+    assert repl.console.export_text() == ""  # nothing repainted

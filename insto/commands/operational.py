@@ -228,10 +228,9 @@ async def theme_cmd(ctx: CommandContext) -> dict[str, Any]:
     write_config(payload)
 
     cfg.theme = requested
-    ctx.print(
-        f"theme: {current} → {requested}. "
-        "Restart `insto` to apply across the welcome banner and prompt popup."
-    )
+    # In the REPL the change is applied live (banner + prompt repaint) right
+    # after this command returns; the written config makes it stick next launch.
+    ctx.print(f"theme: {current} → {requested}")
     return {"active": requested, "previous": current, "available": available, "switched": True}
 
 

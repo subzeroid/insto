@@ -134,3 +134,72 @@ def test_theme_switch_applies_live(repl: Repl) -> None:
 def test_theme_sync_is_noop_when_unchanged(repl: Repl) -> None:
     repl._sync_theme()  # theme not changed since construction
     assert repl.console.export_text() == ""  # nothing repainted
+
+
+# ---------------------------------------------------------------------------
+# Interactive theme picker (/theme with no args → arrow-key live preview)
+# ---------------------------------------------------------------------------
+
+
+def test_render_banner_ansi_per_theme(repl: Repl) -> None:
+    # The picker renders the banner to an isolated string for a candidate
+    # theme without touching the live console.
+    out = repl._render_banner_ansi("hacker")
+    assert "i n s t o" in out  # tagline present in the rendered banner
+
+
+def test_theme_picker_down_then_enter_returns_next_theme(repl: Repl) -> None:
+    import asyncio as _asyncio
+
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    themes = list_themes()
+    start = themes.index(repl.config.theme)
+    expected = themes[(start + 1) % len(themes)]
+
+    async def run() -> str | None:
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            pipe.send_text("\x1b[B\r")  # Down, Enter
+            return await repl._pick_theme()
+
+    assert _asyncio.run(run()) == expected
+
+
+def test_theme_picker_quit_cancels(repl: Repl) -> None:
+    import asyncio as _asyncio
+
+    from prompt_toolkit.application import create_app_session
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    async def run() -> str | None:
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            pipe.send_text("q")  # cancel
+            return await repl._pick_theme()
+
+    assert _asyncio.run(run()) is None
+
+
+async def test_bare_theme_invokes_picker_and_applies(
+    repl: Repl, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("INSTO_HOME", str(tmp_path / ".insto"))  # sandbox write_config
+    target_theme = next(t for t in list_themes() if t != repl.config.theme)
+
+    async def fake_pick() -> str:
+        return target_theme
+
+    monkeypatch.setattr(repl, "_pick_theme", fake_pick)
+
+    handled = await repl._maybe_pick_theme("/theme")
+    assert handled is True
+    assert repl.config.theme == target_theme
+
+
+async def test_maybe_pick_theme_ignores_non_bare(repl: Repl) -> None:
+    # `/theme <name>` (direct switch) and other commands go through normal
+    # dispatch, not the picker.
+    assert await repl._maybe_pick_theme("/theme hacker") is False
+    assert await repl._maybe_pick_theme("/info") is False

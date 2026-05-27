@@ -45,7 +45,7 @@ from insto.commands import COMMANDS, CommandUsageError, Session, dispatch
 from insto.config import Config, cli_history_path, load_config
 from insto.exceptions import BackendError
 from insto.ui.banner import render_welcome
-from insto.ui.theme import get_palette, get_theme
+from insto.ui.theme import get_palette, get_theme, list_themes
 
 if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
@@ -348,6 +348,113 @@ class Repl:
             )
         )
 
+    def _render_banner_ansi(self, theme_name: str) -> str:
+        """Render the welcome banner for `theme_name` to an ANSI string.
+
+        Uses a throwaway `Console` writing to a buffer, so previewing a theme
+        in the picker never touches the live console.
+        """
+        import io
+
+        sink = io.StringIO()
+        buf = Console(
+            theme=get_theme(theme_name),
+            width=self.console.size.width,
+            file=sink,
+            force_terminal=True,
+            color_system="truecolor",
+        )
+        buf.print(
+            render_welcome(
+                self.facade,
+                width=self.console.size.width,
+                email=self.email,
+                target=self.session.target,
+            )
+        )
+        return sink.getvalue()
+
+    async def _maybe_pick_theme(self, stripped: str) -> bool:
+        """If `stripped` is a bare `/theme`, run the picker and apply the choice.
+
+        Returns True if it handled the line (so the run loop skips normal
+        dispatch). `/theme <name>` (with an argument) is left to normal dispatch
+        for a direct switch. The picker resolves a name, then the choice is
+        applied through the normal `/theme <name>` path so persistence stays in
+        one place.
+        """
+        if stripped != "/theme":
+            return False
+        chosen = await self._pick_theme()
+        if chosen and chosen != self.config.theme:
+            await self._execute(f"/theme {chosen}")
+            self._sync_theme()
+        return True
+
+    async def _pick_theme(self) -> str | None:
+        """Full-screen theme picker with live banner preview.
+
+        ↑/↓ move through the catalogue and repaint the banner in the
+        highlighted theme (rendered to an isolated buffer — the real console
+        is untouched). Enter returns the chosen name; Esc / q / Ctrl-C return
+        None. The caller applies the choice through the normal `/theme <name>`
+        path so persistence stays in one place.
+        """
+        from prompt_toolkit.application import Application
+        from prompt_toolkit.formatted_text import ANSI
+        from prompt_toolkit.key_binding import KeyBindings
+        from prompt_toolkit.layout import HSplit, Layout, Window
+        from prompt_toolkit.layout.controls import FormattedTextControl
+
+        themes = list_themes()
+        idx = themes.index(self.config.theme) if self.config.theme in themes else 0
+        state = {"i": idx}
+
+        def banner() -> ANSI:
+            return ANSI(self._render_banner_ansi(themes[state["i"]]))
+
+        def footer() -> ANSI:
+            name = themes[state["i"]]
+            return ANSI(f"\n  ↑/↓ preview · Enter apply · Esc cancel    theme: {name}")
+
+        kb = KeyBindings()
+
+        @kb.add("up")
+        @kb.add("c-p")
+        def _up(event: KeyPressEvent) -> None:
+            state["i"] = (state["i"] - 1) % len(themes)
+            event.app.invalidate()
+
+        @kb.add("down")
+        @kb.add("c-n")
+        def _down(event: KeyPressEvent) -> None:
+            state["i"] = (state["i"] + 1) % len(themes)
+            event.app.invalidate()
+
+        @kb.add("enter")
+        def _apply(event: KeyPressEvent) -> None:
+            event.app.exit(result=themes[state["i"]])
+
+        @kb.add("escape")
+        @kb.add("q")
+        @kb.add("c-c")
+        def _cancel(event: KeyPressEvent) -> None:
+            event.app.exit(result=None)
+
+        app: Application[str | None] = Application(
+            layout=Layout(
+                HSplit(
+                    [
+                        Window(FormattedTextControl(banner)),
+                        Window(FormattedTextControl(footer), height=2),
+                    ]
+                )
+            ),
+            key_bindings=kb,
+            full_screen=True,
+        )
+        return await app.run_async()
+
     def quick_show_target(self) -> None:
         """Print the active target on its own line (used by Ctrl+T)."""
         if self.session.target:
@@ -460,6 +567,9 @@ class Repl:
             if head in EXIT_COMMANDS:
                 self.console.print("bye", style="muted")
                 return
+            # Bare `/theme` (no name) opens the interactive live-preview picker.
+            if await self._maybe_pick_theme(stripped):
+                continue
             await self._execute(stripped)
             # A `/theme` switch only mutated config; apply it to the live
             # session (console palette, popup style, banner) here.

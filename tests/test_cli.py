@@ -492,3 +492,51 @@ def test_main_passes_positional_target_to_run_repl(monkeypatch: pytest.MonkeyPat
     rc = cli_mod.main(["@ferrari", "--interactive"])
     assert rc == 0
     assert captured["target"] == "@ferrari"
+
+
+# ---------------------------------------------------------------------------
+# One-shot dispatch (`insto <target> -c <cmd>`)
+# ---------------------------------------------------------------------------
+
+
+def test_run_oneshot_dispatches_against_fake_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from insto.models import Profile
+    from tests.fakes import FakeBackend
+
+    monkeypatch.setenv("HIKERAPI_TOKEN", "tok-oneshot-123456")
+    monkeypatch.setenv("INSTO_OUTPUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setenv("INSTO_DB_PATH", str(tmp_path / "store.db"))
+    fake = FakeBackend(profiles={"1": Profile(pk="1", username="alice", access="public")})
+    monkeypatch.setattr(cli_mod, "_build_backend", lambda config: fake)
+
+    rc = cli_mod.main(["alice", "-c", "info"])
+    assert rc == 0
+    # the command actually ran against the fake
+    assert any(name == "get_profile" for name, _ in fake.request_log)
+
+
+def test_run_oneshot_hiker_without_token_emits_hint(capsys: pytest.CaptureFixture[str]) -> None:
+    # backend defaults to hiker; no token configured -> setup hint, rc 1.
+    rc = cli_mod.main(["alice", "-c", "info"])
+    assert rc == 1
+    assert SETUP_HINT in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Non-interactive setup (`insto setup --non-interactive`)
+# ---------------------------------------------------------------------------
+
+
+def test_setup_non_interactive_hiker_writes_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HIKERAPI_TOKEN", "tok-ni-1234567890")
+    rc = cli_mod.main(["setup", "--non-interactive"])
+    assert rc == 0
+    assert load_config().hiker_token == "tok-ni-1234567890"
+
+
+def test_setup_non_interactive_missing_token_fails(capsys: pytest.CaptureFixture[str]) -> None:
+    rc = cli_mod.main(["setup", "--non-interactive"])  # no token in env or config
+    assert rc == 2
+    assert "HIKERAPI_TOKEN" in capsys.readouterr().err

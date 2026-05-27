@@ -1,6 +1,6 @@
 """Named colour themes for insto.
 
-Five themes are baked at build time and selected at runtime via `/theme
+Six themes are baked at build time and selected at runtime via `/theme
 <name>` or `[theme] = "<name>"` in `~/.insto/config.toml`. Themes only
 control colour: they pin the same set of `rich.Theme` keys so every
 renderer (`render_profile`, `_tips_table`, `BottomToolbar`, popup style,
@@ -15,11 +15,11 @@ Adding a theme:
 3. Register in `THEMES`.
 4. Mention in `docs/cli-reference.md` under `/theme`.
 
-The `instagram` theme uses the 2022+ Instagram brand gradient
-(yellow → orange → pink → magenta → violet). `claude` mirrors Claude
-Code's burnt-orange palette. `default` is a neutral cyan/orange that
-reads well on both dark and light terminals. `mono` switches everything
-off for accessibility and screen recordings. `matrix` is the joke.
+`aiograpi` (default) is the instagrapi/aiograpi violet→blue gradient.
+`instagram` uses the 2022+ Instagram brand gradient (yellow → orange →
+pink → magenta → violet). `claude` mirrors Claude Code's burnt-orange
+palette. `hacker` is matrix phosphor green-on-black, `amber` is an 80s
+amber CRT, and `cyberpunk` is a cyan→magenta→green neon mix.
 """
 
 from __future__ import annotations
@@ -105,6 +105,30 @@ _PALETTES: dict[str, _Palette] = {
         muted="grey54",
         field="bold #A45EE5",
         value="white",
+    ),
+    "hacker": _Palette(
+        # Matrix phosphor green-on-black — the classic "hacker" terminal look.
+        accent="#00FF41",
+        gradient=("#003B00", "#008F11", "#00C82C", "#00FF41", "#5CFF8F"),
+        muted="#2E7D32",
+        field="bold #00FF41",
+        value="#C8FFD4",
+    ),
+    "amber": _Palette(
+        # Amber CRT phosphor — 80s monochrome terminal warmth.
+        accent="#FFB000",
+        gradient=("#5A2E00", "#A85D00", "#FF9E00", "#FFB000", "#FFD27F"),
+        muted="#8A5A00",
+        field="bold #FFB000",
+        value="#FFE8C2",
+    ),
+    "cyberpunk": _Palette(
+        # Neon cyberpunk: cyan → blue → violet → magenta → green.
+        accent="#00FFD1",
+        gradient=("#00FFD1", "#2BD9FF", "#6A5CFF", "#FF2EC4", "#39FF14"),
+        muted="#4A6E7E",
+        field="bold #FF2EC4",
+        value="#E6FBFF",
     ),
 }
 

@@ -2,6 +2,23 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.8](https://github.com/subzeroid/insto/compare/v0.7.7...v0.7.8) (2026-05-27)
+
+
+### Added
+
+* select startup target and show it in the welcome banner ([#20](https://github.com/subzeroid/insto/issues/20)) ([8090084](https://github.com/subzeroid/insto/commit/80900844e4f4b4da93122c1c36d0f5448b955a4e))
+
+
+### Fixed
+
+* align /help columns and stop eating optional-arg brackets ([#21](https://github.com/subzeroid/insto/issues/21)) ([300dd68](https://github.com/subzeroid/insto/commit/300dd6877532fcbc077d4456662bc747c1308427))
+
+
+### Documentation
+
+* sync watch daemon documentation ([#18](https://github.com/subzeroid/insto/issues/18)) ([23041b6](https://github.com/subzeroid/insto/commit/23041b669b2537b91a0f5963b0b335262e5d1f73))
+
 ## [0.7.7](https://github.com/subzeroid/insto/compare/v0.7.6...v0.7.7) (2026-05-15)
 
 

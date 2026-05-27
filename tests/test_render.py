@@ -279,3 +279,11 @@ def test_welcome_shows_active_target_narrow(_facade: OsintFacade) -> None:
 def test_welcome_no_target_line_when_unset(_facade: OsintFacade) -> None:
     out = _capture(render_welcome(_facade, width=120, target=None), width=120)
     assert "target ·" not in out
+
+
+def test_welcome_shows_shortcuts(_facade: OsintFacade) -> None:
+    out = _capture(render_welcome(_facade, width=120), width=120)
+    assert "Shortcuts" in out
+    assert "Ctrl+L" in out
+    assert "redraw" in out
+    assert "Ctrl+T" in out

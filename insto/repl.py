@@ -298,6 +298,7 @@ class Repl:
         self.facade = facade
         self.config = config
         self.console = console or Console(theme=get_theme(config.theme))
+        self._applied_theme = config.theme
         self.session = Session()
         self.email = email
         self._log = logging.getLogger("insto.repl")
@@ -318,6 +319,22 @@ class Repl:
         )
 
     # ------------------------------------------------------------------ ui
+
+    def _sync_theme(self) -> None:
+        """Apply a `/theme` switch to the live session — no restart needed.
+
+        `/theme` only mutates `config.theme` (it stays in the command layer).
+        After each command the REPL checks for a change and, if the palette
+        switched, swaps the console theme, rebuilds the slash-popup style, and
+        repaints the banner so the new colours show immediately.
+        """
+        if self.config.theme == self._applied_theme:
+            return
+        self._applied_theme = self.config.theme
+        self.console.push_theme(get_theme(self.config.theme))
+        self.prompt_session.style = _build_prompt_style(self.config.theme)
+        self.console.clear()
+        self.redraw_banner()
 
     def redraw_banner(self) -> None:
         """Re-render the welcome banner at the current console width."""
@@ -444,6 +461,9 @@ class Repl:
                 self.console.print("bye", style="muted")
                 return
             await self._execute(stripped)
+            # A `/theme` switch only mutated config; apply it to the live
+            # session (console palette, popup style, banner) here.
+            self._sync_theme()
 
 
 # ---------------------------------------------------------------------------

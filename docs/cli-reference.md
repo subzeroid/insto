@@ -175,7 +175,8 @@ Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They i
 | `/health` | Backend ping + last error + schema-drift counter. |
 | `/config` | Effective config + per-key source (flag / env / toml / default). |
 | `/purge {history,snapshots,cache} [--user @u]` | Wipe one of the local stores. Always confirms unless `--yes`. |
-| `/theme [name]` | Show the active theme + catalog, or switch. Applies live (banner + prompt repaint, no restart) and persists in `~/.insto/config.toml`. |
+| `/theme` | Open the interactive picker — `↑`/`↓` live-preview each theme on the banner, `Enter` applies, `Esc`/`q` cancels. |
+| `/theme <name>` | Switch directly to a theme. Applies live (banner + prompt repaint, no restart) and persists in `~/.insto/config.toml`. |
 | `/help` | List every registered command, grouped by category. |
 | `/exit`, `/quit` | Leave the REPL (also Ctrl+D). |
 

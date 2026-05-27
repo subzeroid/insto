@@ -8,13 +8,30 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write # dispatch release.yml when a release is cut
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     steps:
-      - uses: googleapis/release-please-action@v4
+      - id: release
+        uses: googleapis/release-please-action@v4
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # release-please creates the tag with GITHUB_TOKEN, and GitHub does NOT
+      # fire `push: tags` workflows for GITHUB_TOKEN-created tags (recursion
+      # guard) — so release.yml never ran and PyPI fell behind the GitHub
+      # releases. workflow_dispatch is the documented exception to that guard,
+      # so dispatch release.yml explicitly against the new tag to build +
+      # publish to PyPI + attach the artifacts. TAG comes from release-please
+      # (a trusted vX.Y.Z output), passed via env and quoted per workflow
+      # injection-safety guidance.
+      - name: Publish the new release to PyPI
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run release.yml --ref "$TAG"

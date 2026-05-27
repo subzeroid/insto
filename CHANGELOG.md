@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.10](https://github.com/subzeroid/insto/compare/v0.7.9...v0.7.10) (2026-05-27)
+
+
+### Added
+
+* add hacker, amber, and cyberpunk colour themes ([#25](https://github.com/subzeroid/insto/issues/25)) ([1350fd2](https://github.com/subzeroid/insto/commit/1350fd2cc11de89f05b49bc814ba19e84122c07c))
+
 ## [0.7.9](https://github.com/subzeroid/insto/compare/v0.7.8...v0.7.9) (2026-05-27)
 
 

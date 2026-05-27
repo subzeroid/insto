@@ -393,3 +393,16 @@ def test_repl_unknown_command_renders_error(
     asyncio.run(runner())
     out = _console.export_text(styles=False)
     assert "unknown command" in out
+
+
+def test_theme_arg_completions_have_per_theme_meta() -> None:
+    # `/theme <Tab>` shows each theme with its OWN description (not one generic
+    # argparse-help line repeated for every choice).
+    completer = _completer()
+    doc = Document(text="/theme ", cursor_position=len("/theme "))
+    comps = list(completer.get_completions(doc, complete_event=None))  # type: ignore[arg-type]
+    metas = {c.text: c.display_meta_text for c in comps}
+    assert "hacker" in metas
+    assert "green" in metas["hacker"].lower()
+    # descriptions differ across themes
+    assert len({m for m in metas.values() if m}) > 1

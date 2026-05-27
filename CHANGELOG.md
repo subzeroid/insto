@@ -2,6 +2,18 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.11](https://github.com/subzeroid/insto/compare/v0.7.10...v0.7.11) (2026-05-27)
+
+
+### Added
+
+* group /help output by command category ([#28](https://github.com/subzeroid/insto/issues/28)) ([218f3f8](https://github.com/subzeroid/insto/commit/218f3f8a65c8f731976acf704f1be40ad18dbef4))
+
+
+### Documentation
+
+* document /theme, startup target, and REPL shortcuts ([#30](https://github.com/subzeroid/insto/issues/30)) ([ae63cf6](https://github.com/subzeroid/insto/commit/ae63cf62e8fed45bdeb183d48de639c58f1f8834))
+
 ## [0.7.10](https://github.com/subzeroid/insto/compare/v0.7.9...v0.7.10) (2026-05-27)
 
 

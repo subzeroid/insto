@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.9](https://github.com/subzeroid/insto/compare/v0.7.8...v0.7.9) (2026-05-27)
+
+
+### Added
+
+* apply /theme live and show hotkeys in the welcome banner ([#22](https://github.com/subzeroid/insto/issues/22)) ([6819fc0](https://github.com/subzeroid/insto/commit/6819fc0525c1bc5c92075d63e48599568aa99be5))
+
 ## [0.7.8](https://github.com/subzeroid/insto/compare/v0.7.7...v0.7.8) (2026-05-27)
 
 

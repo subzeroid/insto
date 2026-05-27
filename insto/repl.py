@@ -45,7 +45,7 @@ from insto.commands import COMMANDS, CommandUsageError, Session, dispatch
 from insto.config import Config, cli_history_path, load_config
 from insto.exceptions import BackendError
 from insto.ui.banner import render_welcome
-from insto.ui.theme import get_palette, get_theme, list_themes
+from insto.ui.theme import get_palette, get_theme, list_themes, theme_description
 
 if TYPE_CHECKING:
     from prompt_toolkit.key_binding import KeyPressEvent
@@ -93,6 +93,11 @@ def _first_positional_choices(spec: Any) -> tuple[str, ...]:
             return ()
         return tuple(str(c) for c in choices)
     return ()
+
+
+def _theme_label(name: str) -> FormattedText:
+    """Theme name rendered in its own accent colour (for completion display)."""
+    return FormattedText([(f"fg:{get_palette(name).accent}", name)])
 
 
 class _SlashCommandCompleter(Completer):
@@ -165,12 +170,13 @@ class _SlashCommandCompleter(Completer):
 
         spec = COMMANDS.get(user_typed)
         if spec is not None:
+            is_theme = user_typed == "theme"
             for choice in _first_positional_choices(spec):
                 yield Completion(
                     text=f"{prefix} {choice}",
                     start_position=-len(prefix),
-                    display=choice,
-                    display_meta="",
+                    display=_theme_label(choice) if is_theme else choice,
+                    display_meta=theme_description(choice) if is_theme else "",
                 )
 
     def _argument_completions(self, text: str, stripped: str) -> Iterable[Completion]:
@@ -209,6 +215,7 @@ class _SlashCommandCompleter(Completer):
                 if not choices:
                     return
                 lower = current_word.lower()
+                is_theme = cmd_name == "theme"
                 for choice in choices:
                     s = str(choice)
                     if not s.lower().startswith(lower):
@@ -216,8 +223,12 @@ class _SlashCommandCompleter(Completer):
                     yield Completion(
                         text=s,
                         start_position=-len(current_word),
-                        display=s,
-                        display_meta=str(action.help or ""),
+                        # Themes render their name in their own accent colour
+                        # with a per-theme description, so the popup hints at
+                        # the look before you commit (full preview lives in the
+                        # bare-`/theme` picker).
+                        display=_theme_label(s) if is_theme else s,
+                        display_meta=theme_description(s) if is_theme else str(action.help or ""),
                     )
                 return
             pos_index += 1
@@ -415,7 +426,10 @@ class Repl:
 
         def footer() -> ANSI:
             name = themes[state["i"]]
-            return ANSI(f"\n  ↑/↓ preview · Enter apply · Esc cancel    theme: {name}")
+            return ANSI(
+                f"\n  ↑/↓ preview · Enter apply · Esc cancel    "
+                f"theme: {name} — {theme_description(name)}"
+            )
 
         kb = KeyBindings()
 

@@ -337,6 +337,28 @@ async def purge_cmd(ctx: CommandContext) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# /help groups commands by category. Categories are derived from the module a
+# command is registered in (zero per-command bookkeeping — the codebase already
+# groups commands by file). Several modules can share one display title; any
+# unmapped module falls through to "Other".
+_HELP_CATEGORIES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("Target", frozenset({"target"})),
+    ("Profile", frozenset({"profile"})),
+    ("Media & posts", frozenset({"media"})),
+    ("Content", frozenset({"content"})),
+    ("Interactions", frozenset({"interactions"})),
+    ("Network", frozenset({"network"})),
+    ("Discovery", frozenset({"discovery"})),
+    ("Places", frozenset({"places"})),
+    ("Saved & Direct", frozenset({"saved", "direct"})),
+    ("Watch & history", frozenset({"watch"})),
+    ("Bulk & reports", frozenset({"dossier", "batch"})),
+    ("Session & config", frozenset({"operational"})),
+)
+_MODULE_TITLE: dict[str, str] = {mod: title for title, mods in _HELP_CATEGORIES for mod in mods}
+_CATEGORY_ORDER: tuple[str, ...] = (*(title for title, _ in _HELP_CATEGORIES), "Other")
+
+
 @command("help", "List every registered command with its one-line description")
 async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
     from insto.commands._base import COMMANDS, command_signature
@@ -346,6 +368,7 @@ async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
             "name": name,
             "signature": command_signature(spec),
             "help": spec.help,
+            "category": _MODULE_TITLE.get(spec.fn.__module__.rsplit(".", 1)[-1], "Other"),
         }
         for name, spec in sorted(COMMANDS.items())
     ]
@@ -359,19 +382,33 @@ async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
             dest=resolve_export_dest(dest_arg),
         )
         return rows
-    # Render as a grid of literal `Text` cells: signatures contain optional-arg
-    # markers like `[target]` / `[count]`, which rich console markup would
-    # otherwise interpret as style tags (eating the brackets and skewing the
-    # `—` column). `Text(...)` is literal, and the grid measures true display
-    # width so the separator column stays aligned.
+    # One grid of literal `Text` cells, grouped under category headers.
+    # `Text(...)` is literal so optional-arg markers (`[target]`, `[count]`) are
+    # not eaten as rich markup, and a single grid keeps the `—` column aligned
+    # across every section. Header/spacer rows leave the description column empty.
+    from collections import defaultdict
+
     from rich.table import Table
     from rich.text import Text
+
+    by_cat: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in rows:
+        by_cat[row["category"]].append(row)
 
     table = Table.grid(padding=(0, 2))
     table.add_column(no_wrap=True)
     table.add_column()
-    for row in rows:
-        table.add_row(Text(row["signature"]), Text(f"— {row['help']}"))
+    first = True
+    for cat in _CATEGORY_ORDER:
+        cat_rows = by_cat.get(cat)
+        if not cat_rows:
+            continue
+        if not first:
+            table.add_row(Text(""), Text(""))  # blank line between sections
+        first = False
+        table.add_row(Text(cat, style="section"), Text(""))
+        for row in cat_rows:
+            table.add_row(Text(f"  {row['signature']}"), Text(f"— {row['help']}"))
     ctx.print(table)
     return rows
 

@@ -443,6 +443,20 @@ async def test_help_renders_optional_args_literally(
     assert "[count]" in text
 
 
+async def test_help_groups_commands_by_category(
+    facade: OsintFacade,
+    session: Session,
+    console: Console,
+) -> None:
+    await dispatch("/help", facade=facade, session=session, console=console)
+    text = console.export_text()
+    for header in ("Target", "Profile", "Network", "Session & config"):
+        assert header in text, f"missing category header: {header}"
+    # commands are still listed under the headers
+    assert "/followers" in text
+    assert "/info" in text
+
+
 async def test_help_separator_column_is_aligned(
     facade: OsintFacade,
     session: Session,

@@ -447,6 +447,37 @@ def _validate_username(name: str) -> str:
     return name
 
 
+def normalize_target(raw: str) -> str:
+    """Strip a leading '@'/whitespace and validate the username format.
+
+    Pure, no network. Shared by `/target` and REPL startup so the two agree on
+    what counts as a usable username. Raises `CommandUsageError` for an empty
+    or filesystem-unsafe username. Returns the normalised username (no '@').
+    """
+    username = raw.lstrip("@").strip()
+    if not username:
+        raise CommandUsageError("usage: /target <username>")
+    return _validate_username(username)
+
+
+async def resolve_and_select_target(facade: OsintFacade, session: Session, raw: str) -> str:
+    """Validate, pre-resolve the pk, and set the session target.
+
+    Used by the interactive `/target` command, where the pre-resolve makes a
+    typo fail fast instead of poisoning the next command. REPL startup does
+    NOT use this — it sets the target locally via `normalize_target` so a cold
+    backend cannot stall spin-up (see `repl._safe_set_startup_target`).
+
+    Raises `CommandUsageError` for an empty/invalid username, or whatever
+    `BackendError` `resolve_pk` raises for an unresolvable one. Returns the
+    normalised username (no '@').
+    """
+    username = normalize_target(raw)
+    await facade.resolve_pk(username)
+    session.set_target(username)
+    return username
+
+
 def add_target_arg(parser: argparse.ArgumentParser) -> None:
     """Attach an optional positional `target` to a command parser.
 

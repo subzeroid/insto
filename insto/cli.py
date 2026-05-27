@@ -727,7 +727,9 @@ def main(argv: list[str] | None = None) -> int:
         print("interactive REPL is unavailable", file=sys.stderr)
         return 1
     try:
-        run_repl(config=config)
+        # `args.target` is the positional username (`insto @user`); `setup` is
+        # already intercepted above, so anything here is a real target or None.
+        run_repl(config=config, target=args.target)
     except NotImplementedError:
         print("interactive REPL is not implemented in this build", file=sys.stderr)
         return 1

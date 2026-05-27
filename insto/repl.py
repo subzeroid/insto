@@ -457,6 +457,22 @@ async def _safe_prune(facade: OsintFacade) -> None:
         await facade.history.prune_async()
 
 
+def _safe_set_startup_target(repl: Repl, raw: str) -> None:
+    """Best-effort: select the CLI-supplied target before the REPL opens.
+
+    Validates and sets the target LOCALLY — no network resolve — so startup is
+    instant and never stalls on a slow or cold backend (the first command
+    resolves and caches the pk as usual). A malformed username is non-fatal:
+    warn on the REPL console and open with no target.
+    """
+    from insto.commands._base import normalize_target
+
+    try:
+        repl.session.set_target(normalize_target(raw))
+    except Exception as exc:  # best-effort: never block REPL startup
+        repl.console.print(f"startup target not set: {_format_error(exc)}", style="err")
+
+
 async def _safe_refresh_quota(facade: OsintFacade, *, timeout: float = 2.0) -> None:
     """Refresh backend quota; swallow all errors and bound by timeout.
 
@@ -515,8 +531,14 @@ def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], 
     return facade, cleanup
 
 
-def run_repl(config: Config | None = None, *, email: str | None = None) -> None:
-    """Synchronous entry point used by `cli.main` — runs `Repl.run` in asyncio."""
+def run_repl(
+    config: Config | None = None, *, email: str | None = None, target: str | None = None
+) -> None:
+    """Synchronous entry point used by `cli.main` — runs `Repl.run` in asyncio.
+
+    `target` is the optional CLI positional (`insto @user`): when set, it is
+    pre-selected as the active session target before the banner renders.
+    """
     facade, cleanup = _bootstrap(config)
     cfg = config if config is not None else facade.config
 
@@ -529,6 +551,11 @@ def run_repl(config: Config | None = None, *, email: str | None = None) -> None:
         await _safe_refresh_quota(facade)
 
         repl = Repl(facade=facade, config=cfg, email=email)
+        # Pre-select the CLI-supplied target so the first banner + prompt show
+        # it. Local-only (no network), best-effort: a bad target warns and
+        # opens the REPL with none set.
+        if target:
+            _safe_set_startup_target(repl, target)
         # Best-effort retention prune on session start so the store does
         # not grow unbounded. Failures are non-fatal and silenced.
         prune_task = asyncio.create_task(_safe_prune(facade))

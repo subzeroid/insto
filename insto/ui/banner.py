@@ -55,8 +55,8 @@ _TIPS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _banner_text(theme_name: str | None = None) -> RenderableType:
-    """Render the INSTO logotype + anagram tagline + active-theme footer.
+def _banner_text(theme_name: str | None = None, target: str | None = None) -> RenderableType:
+    """Render the INSTO logotype + anagram tagline + target/theme footer.
 
     Five figlet rows are coloured per-row from the active theme's gradient
     (`logo.0` … `logo.4`). On a flat-colour theme like `claude` every row
@@ -66,7 +66,10 @@ def _banner_text(theme_name: str | None = None) -> RenderableType:
 
     If `theme_name` is provided, a `theme · <name>` footer is appended in
     muted colour so the active palette is discoverable from the welcome
-    banner without running `/theme`.
+    banner without running `/theme`. When an active `target` is set it is
+    shown directly above the theme line (labels aligned on the dot) so the
+    selected OSINT subject is visible at a glance; when no target is set the
+    footer is unchanged.
     """
     rows = LOGO_BANNER.splitlines()
     while len(rows) < 5:  # defensive: never short-row past the gradient
@@ -79,7 +82,14 @@ def _banner_text(theme_name: str | None = None) -> RenderableType:
     parts.append(Text(""))
     parts.append(Text(LOGO_TAGLINE, style="value"))
     parts.append(Text(LOGO_SUBTAGLINE, style="muted"))
-    if theme_name:
+    if target:
+        # `target` and `theme` are both 6/5 chars — pad to 6 so the dots line
+        # up into a tidy two-row footer.
+        parts.append(Text(""))
+        parts.append(Text(f"{'target':<6} · @{target.lstrip('@')}", style="accent"))
+        if theme_name:
+            parts.append(Text(f"{'theme':<6} · {theme_name}", style="muted"))
+    elif theme_name:
         parts.append(Text(""))
         parts.append(Text(f"theme · {theme_name}", style="muted"))
     return Group(*parts)
@@ -162,19 +172,21 @@ def _right_column(facade: OsintFacade, email: str | None) -> RenderableType:
     return Group(*blocks)
 
 
-def _two_column(facade: OsintFacade, email: str | None) -> RenderableType:
+def _two_column(facade: OsintFacade, email: str | None, target: str | None) -> RenderableType:
     """Banner left, tips/status right; both inside one panel."""
     grid = Table.grid(padding=(0, 4), expand=True)
     grid.add_column(no_wrap=True)
     grid.add_column(ratio=1)
-    grid.add_row(_banner_text(facade.config.theme), _right_column(facade, email))
+    grid.add_row(_banner_text(facade.config.theme, target), _right_column(facade, email))
     return grid
 
 
-def _narrow_panel_body(facade: OsintFacade, email: str | None) -> RenderableType:
+def _narrow_panel_body(
+    facade: OsintFacade, email: str | None, target: str | None
+) -> RenderableType:
     """Banner-only body for medium terminals."""
     blocks: list[RenderableType] = [
-        Align.center(_banner_text(facade.config.theme)),
+        Align.center(_banner_text(facade.config.theme, target)),
         Text(""),
         _quota_line(facade),
     ]
@@ -216,7 +228,11 @@ def render_welcome(
     title = f"insto v{__version__}" if show_version else None
     if width < 60:
         return _tiny_line(facade, target)
-    body = _narrow_panel_body(facade, email) if width < 100 else _two_column(facade, email)
+    body = (
+        _narrow_panel_body(facade, email, target)
+        if width < 100
+        else _two_column(facade, email, target)
+    )
     return Panel(
         body,
         title=title,

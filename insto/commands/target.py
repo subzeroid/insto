@@ -13,8 +13,8 @@ import argparse
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
-    _validate_username,
     command,
+    resolve_and_select_target,
 )
 
 
@@ -35,15 +35,8 @@ async def target_cmd(ctx: CommandContext) -> str:
     raw = getattr(ctx.args, "target", None)
     if not raw:
         raise CommandUsageError("usage: /target <username>")
-    username = str(raw).lstrip("@").strip()
-    if not username:
-        raise CommandUsageError("usage: /target <username>")
-    username = _validate_username(username)
-    # Resolve once so a typo raises immediately instead of breaking the
-    # next command. The pk is cached on the facade for the rest of the session.
-    await ctx.facade.resolve_pk(username)
-    ctx.session.set_target(username)
-    return username
+    # Strip/validate/resolve/set is shared with REPL startup (`insto @user`).
+    return await resolve_and_select_target(ctx.facade, ctx.session, str(raw))
 
 
 @command("current", "Show the active session target")

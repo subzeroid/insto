@@ -360,9 +360,20 @@ async def help_cmd(ctx: CommandContext) -> list[dict[str, str]]:
             dest=resolve_export_dest(dest_arg),
         )
         return rows
-    width = max(len(r["signature"]) for r in rows) if rows else 8
+    # Render as a grid of literal `Text` cells: signatures contain optional-arg
+    # markers like `[target]` / `[count]`, which rich console markup would
+    # otherwise interpret as style tags (eating the brackets and skewing the
+    # `—` column). `Text(...)` is literal, and the grid measures true display
+    # width so the separator column stays aligned.
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table.grid(padding=(0, 2))
+    table.add_column(no_wrap=True)
+    table.add_column()
     for row in rows:
-        ctx.print(f"{row['signature']:<{width}}  — {row['help']}")
+        table.add_row(Text(row["signature"]), Text(f"— {row['help']}"))
+    ctx.print(table)
     return rows
 
 

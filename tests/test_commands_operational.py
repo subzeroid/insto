@@ -428,3 +428,30 @@ async def test_help_lists_registered_commands(
     assert names == set(COMMANDS)
     assert "help" in names
     assert "info" in names
+
+
+async def test_help_renders_optional_args_literally(
+    facade: OsintFacade,
+    session: Session,
+    console: Console,
+) -> None:
+    # Optional-arg signatures like `/info [target]` must print the brackets
+    # literally — rich must NOT interpret `[target]` as a markup tag and eat it.
+    await dispatch("/help", facade=facade, session=session, console=console)
+    text = console.export_text()
+    assert "[target]" in text
+    assert "[count]" in text
+
+
+async def test_help_separator_column_is_aligned(
+    facade: OsintFacade,
+    session: Session,
+    console: Console,
+) -> None:
+    # The `—` separator must sit at one constant column across every row.
+    # The signature never contains `—`, so the first `—` on a line is the
+    # separator (help text may contain its own later).
+    await dispatch("/help", facade=facade, session=session, console=console)
+    text = console.export_text()
+    cols = {line.index("—") for line in text.splitlines() if "—" in line}
+    assert len(cols) == 1, f"misaligned separators at columns {sorted(cols)}"

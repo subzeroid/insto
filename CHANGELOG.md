@@ -2,6 +2,14 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.12](https://github.com/subzeroid/insto/compare/v0.7.11...v0.7.12) (2026-05-27)
+
+
+### Added
+
+* interactive theme picker with live banner preview ([#32](https://github.com/subzeroid/insto/issues/32)) ([d2ef14f](https://github.com/subzeroid/insto/commit/d2ef14ff0961c80b0a6292ba16b8ba9010146f2f))
+* per-theme descriptions + accent colour in /theme completion ([#34](https://github.com/subzeroid/insto/issues/34)) ([9335457](https://github.com/subzeroid/insto/commit/9335457e7510e43e8db44f62420745df0114417b))
+
 ## [0.7.11](https://github.com/subzeroid/insto/compare/v0.7.10...v0.7.11) (2026-05-27)
 
 

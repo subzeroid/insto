@@ -26,6 +26,7 @@ Every command inherits these via the global parser. Flag conflicts (e.g. `--json
 
 ```sh
 insto                                  # REPL (default)
+insto @instagram                       # REPL with @instagram pre-selected as the target
 insto -c info instagram                # one-shot; inline target
 insto setup                            # interactive config wizard
 insto --print-completion {bash|zsh}    # emit completion script (needs insto[completion])
@@ -42,6 +43,11 @@ insto --help
 | `/target <user>` | Set the active session target (pre-resolves pk for fail-fast). |
 | `/current` | Print the active target. |
 | `/clear` | Drop the active target. |
+
+Launching `insto @user` pre-selects the target for the REPL session and shows it
+in the welcome banner + prompt (`insto @user>`). Startup validates the name
+locally (no network — so a cold backend never stalls spin-up); the pk resolves
+on first use. `/target` keeps its interactive pre-resolve.
 
 ### Profile
 
@@ -169,8 +175,24 @@ Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They i
 | `/health` | Backend ping + last error + schema-drift counter. |
 | `/config` | Effective config + per-key source (flag / env / toml / default). |
 | `/purge {history,snapshots,cache} [--user @u]` | Wipe one of the local stores. Always confirms unless `--yes`. |
-| `/help` | List every registered command with its one-line description. |
+| `/theme [name]` | Show the active theme + catalog, or switch. Applies live (banner + prompt repaint, no restart) and persists in `~/.insto/config.toml`. |
+| `/help` | List every registered command, grouped by category. |
 | `/exit`, `/quit` | Leave the REPL (also Ctrl+D). |
+
+Themes (`/theme <name>`): `aiograpi` (default), `amber` (80s amber CRT),
+`claude` (burnt orange), `cyberpunk` (neon), `hacker` (matrix phosphor green),
+`instagram` (brand gradient).
+
+### REPL shortcuts
+
+| Key | Action |
+|---|---|
+| `Ctrl+L` | Clear screen + redraw the welcome banner |
+| `Ctrl+T` | Print the active target |
+| `Ctrl+C` | Cancel the current input line (stay in the REPL) |
+| `Ctrl+D` | Exit on an empty line |
+
+These are also listed in the welcome banner's "Shortcuts" block.
 
 ### `/dossier`
 

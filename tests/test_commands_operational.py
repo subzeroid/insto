@@ -49,8 +49,8 @@ def config(tmp_path: Path) -> Config:
         cli_history_path=tmp_path / "cli_history",
     )
     cfg.sources = {
-        "hiker.token": "env",
-        "hiker.proxy": "default",
+        "hikerapi.token": "env",
+        "hikerapi.proxy": "default",
         "output_dir": "default",
         "db_path": "default",
         "cli_history_path": "default",
@@ -195,16 +195,16 @@ async def test_config_reports_each_key_with_origin(
     rows = await dispatch("/config", facade=facade, session=session, console=console)
     keys = {r["key"] for r in rows}
     assert {
-        "hiker.token",
-        "hiker.proxy",
+        "hikerapi.token",
+        "hikerapi.proxy",
         "output_dir",
         "db_path",
         "cli_history_path",
     } <= keys
     by_key = {r["key"]: r for r in rows}
-    assert by_key["hiker.token"]["origin"] == "env"
+    assert by_key["hikerapi.token"]["origin"] == "env"
     # token must be redacted, never displayed in full
-    assert "abcd1234" not in (by_key["hiker.token"]["value"] or "")
+    assert "abcd1234" not in (by_key["hikerapi.token"]["value"] or "")
     text = console.export_text()
     assert "abcd1234" not in text
 

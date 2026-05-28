@@ -46,9 +46,12 @@ from insto.commands import (  # noqa: F401  — importing registers all commands
     parse_command_line,
 )
 from insto.config import (
+    BACKEND_AIOGRAPI,
+    BACKEND_HIKERAPI,
     Config,
     config_dir,
     load_config,
+    normalize_backend,
     write_config,
 )
 from insto.exceptions import (
@@ -70,6 +73,7 @@ from insto.exceptions import (
 LOG_FILENAME = "insto.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
+HIKERAPI_TOKENS_URL = "https://hikerapi.com/tokens"
 SETUP_HINT = "no HIKERAPI_TOKEN configured. Run `insto setup` to create one."
 
 
@@ -212,7 +216,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--backend",
-        choices=("hiker", "aiograpi"),
+        type=normalize_backend,
+        choices=(BACKEND_HIKERAPI, BACKEND_AIOGRAPI),
         default=None,
         help="backend selector for this invocation (overrides $INSTO_BACKEND and config.toml)",
     )
@@ -276,15 +281,15 @@ def _build_backend(config: Config) -> Any:
     """Construct the backend the active config selects.
 
     Centralised so both the one-shot CLI and the REPL get the same
-    selection logic (hiker / aiograpi). aiograpi import-failures bubble
+    selection logic (hikerapi / aiograpi). aiograpi import-failures bubble
     up as `RuntimeError` from `make_backend`; the caller's existing
     `_format_error` handles them.
     """
     from insto.backends import make_backend
 
-    if config.backend == "aiograpi":
+    if config.backend == BACKEND_AIOGRAPI:
         return make_backend(
-            "aiograpi",
+            BACKEND_AIOGRAPI,
             username=config.aiograpi_username,
             password=config.aiograpi_password,
             totp_seed=config.aiograpi_totp_seed,
@@ -292,7 +297,7 @@ def _build_backend(config: Config) -> Any:
             proxy=config.hiker_proxy,
         )
     return make_backend(
-        "hiker",
+        BACKEND_HIKERAPI,
         token=config.hiker_token,
         proxy=config.hiker_proxy,
     )
@@ -330,15 +335,17 @@ def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
     """Setup driven entirely by env-vars + existing config — no prompts.
 
     Resolution order per field: env-var → existing config.toml → built-in
-    default. Errors on missing required fields (hiker.token when
-    backend=hiker, aiograpi credentials when backend=aiograpi) so a CI
+    default. Errors on missing required fields (hikerapi.token when
+    backend=hikerapi, aiograpi credentials when backend=aiograpi) so a CI
     run fails loudly instead of writing a half-broken config.
     """
     stream = out if out is not None else sys.stdout
     existing = _safe_load_config()
 
-    backend = os.environ.get("INSTO_BACKEND") or (existing.backend if existing else None) or "hiker"
-    if backend not in {"hiker", "aiograpi"}:
+    backend = normalize_backend(
+        os.environ.get("INSTO_BACKEND") or (existing.backend if existing else None)
+    )
+    if backend not in {BACKEND_HIKERAPI, BACKEND_AIOGRAPI}:
         print(f"--non-interactive: unknown backend {backend!r}", file=sys.stderr)
         return 2
 
@@ -367,14 +374,14 @@ def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
     )
 
     # Required-field guard: fail loudly so CI catches missing secrets.
-    if backend == "hiker" and not token:
+    if backend == BACKEND_HIKERAPI and not token:
         print(
-            "--non-interactive: backend=hiker but HIKERAPI_TOKEN is unset and "
-            "config.toml has no [hiker].token. Set the env var or run interactive setup.",
+            "--non-interactive: backend=hikerapi but HIKERAPI_TOKEN is unset and "
+            "config.toml has no [hikerapi].token. Set the env var or run interactive setup.",
             file=sys.stderr,
         )
         return 2
-    if backend == "aiograpi" and not (aio_user and aio_pass):
+    if backend == BACKEND_AIOGRAPI and not (aio_user and aio_pass):
         print(
             "--non-interactive: backend=aiograpi but AIOGRAPI_USERNAME / "
             "AIOGRAPI_PASSWORD are missing. Set both env vars or run interactive setup.",
@@ -389,7 +396,7 @@ def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
     if proxy:
         hiker["proxy"] = proxy
     if hiker:
-        payload["hiker"] = hiker
+        payload["hikerapi"] = hiker
     aio_section: dict[str, Any] = {}
     if aio_user:
         aio_section["username"] = aio_user
@@ -438,30 +445,34 @@ def _run_setup(
     print("insto setup — writes ~/.insto/config.toml (mode 0600)", file=stream)
     print("press Enter to keep the shown default; values are masked on display.", file=stream)
 
-    backend_default = (existing.backend if existing else None) or "hiker"
-    backend_input = prompt(f"backend (hiker | aiograpi) [{backend_default}]: ").strip().lower()
-    backend = backend_input or backend_default
-    if backend not in {"hiker", "aiograpi"}:
-        print(f"unknown backend {backend!r}; falling back to hiker", file=stream)
-        backend = "hiker"
+    backend_default = normalize_backend(existing.backend if existing else None)
+    backend_input = prompt(f"backend (hikerapi | aiograpi) [{backend_default}]: ").strip().lower()
+    backend = normalize_backend(backend_input or backend_default)
+    if backend not in {BACKEND_HIKERAPI, BACKEND_AIOGRAPI}:
+        print(f"unknown backend {backend!r}; falling back to hikerapi", file=stream)
+        backend = BACKEND_HIKERAPI
 
     token_default = existing.hiker_token if existing else None
-    if backend == "hiker":
+    if backend == BACKEND_HIKERAPI:
         if token_default:
             token_disp = f"***{token_default[-4:]}" if len(token_default) >= 4 else "***"
-            token_input = secret_prompt(f"hiker.token [{token_disp}] (input hidden): ").strip()
+            token_input = secret_prompt(
+                f"hikerapi.token [{token_disp}] (get one: {HIKERAPI_TOKENS_URL}) (input hidden): "
+            ).strip()
         else:
-            token_input = secret_prompt("hiker.token (input hidden): ").strip()
+            token_input = secret_prompt(
+                f"hikerapi.token (get one: {HIKERAPI_TOKENS_URL}) (input hidden): "
+            ).strip()
         token = token_input or token_default
     else:
-        # Keep an existing hiker.token alive even when switching to aiograpi —
+        # Keep an existing hikerapi.token alive even when switching to aiograpi —
         # an operator may want to flip back without re-entering the secret.
         token = token_default
 
     aio_user = existing.aiograpi_username if existing else None
     aio_pass = existing.aiograpi_password if existing else None
     aio_totp = existing.aiograpi_totp_seed if existing else None
-    if backend == "aiograpi":
+    if backend == BACKEND_AIOGRAPI:
         u_in = prompt(f"aiograpi.username [{aio_user or '(none)'}]: ").strip()
         if u_in:
             aio_user = u_in
@@ -513,7 +524,7 @@ def _run_setup(
     if proxy:
         hiker["proxy"] = proxy
     if hiker:
-        payload["hiker"] = hiker
+        payload["hikerapi"] = hiker
     aio_section: dict[str, Any] = {}
     if aio_user:
         aio_section["username"] = aio_user
@@ -529,9 +540,9 @@ def _run_setup(
 
     path = write_config(payload)
     print(f"wrote {path}", file=stream)
-    if backend == "hiker" and not token:
+    if backend == BACKEND_HIKERAPI and not token:
         print(SETUP_HINT, file=stream)
-    if backend == "aiograpi" and not (aio_user and aio_pass):
+    if backend == BACKEND_AIOGRAPI and not (aio_user and aio_pass):
         print(
             "aiograpi backend selected but credentials are incomplete; "
             "re-run `insto setup` to add username/password.",
@@ -590,10 +601,12 @@ async def _run_oneshot(
         # instead of letting a raw traceback escape from `asyncio.run`.
         print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
         return 1
-    if config.backend == "hiker" and not config.hiker_token:
+    if config.backend == BACKEND_HIKERAPI and not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         return 1
-    if config.backend == "aiograpi" and not (config.aiograpi_username and config.aiograpi_password):
+    if config.backend == BACKEND_AIOGRAPI and not (
+        config.aiograpi_username and config.aiograpi_password
+    ):
         print(
             "no aiograpi credentials configured. Run `insto setup` and pick the aiograpi backend.",
             file=sys.stderr,
@@ -715,8 +728,22 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     config = _safe_load_config(args.hiker_token, args.proxy, args.backend)
-    if config is None or not config.hiker_token:
+    missing_hikerapi_config = config is None or (
+        config.backend == BACKEND_HIKERAPI and not config.hiker_token
+    )
+    if missing_hikerapi_config:
         print(SETUP_HINT, file=sys.stderr)
+        if not args.interactive:
+            return 1
+    elif (
+        config is not None
+        and config.backend == BACKEND_AIOGRAPI
+        and not (config.aiograpi_username and config.aiograpi_password)
+    ):
+        print(
+            "no aiograpi credentials configured. Run `insto setup` and pick the aiograpi backend.",
+            file=sys.stderr,
+        )
         if not args.interactive:
             return 1
 

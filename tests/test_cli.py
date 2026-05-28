@@ -116,6 +116,25 @@ def test_parser_hiker_token_flag() -> None:
     assert args.hiker_token is None
 
 
+def test_parser_backend_prefers_hikerapi_and_keeps_legacy_hiker_alias() -> None:
+    args = build_parser().parse_args(["--backend", "hikerapi"])
+    assert args.backend == "hikerapi"
+
+    legacy = build_parser().parse_args(["--backend", "hiker"])
+    assert legacy.backend == "hikerapi"
+
+
+def test_parser_backend_help_only_shows_public_backend_names(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["--help"])
+
+    out = capsys.readouterr().out
+    assert "--backend {hikerapi,aiograpi}" in out
+    assert "--backend {hiker,aiograpi}" not in out
+
+
 def test_parsed_cmd_resolves_to_command_spec() -> None:
     """`-c <name> ...` must round-trip through the command parser to a CommandSpec."""
     from insto.commands._base import parse_command_line
@@ -263,6 +282,32 @@ def test_setup_keeps_existing_token_when_blank(monkeypatch: pytest.MonkeyPatch) 
     assert rc == 0
     cfg = load_config()
     assert cfg.hiker_token == "existing-token-9999"
+
+
+def test_setup_hiker_token_prompt_links_to_hikerapi_tokens() -> None:
+    prompts: list[str] = []
+    answers = iter(["", "tok-1234567890", "", "", ""])
+
+    def prompt(text: str) -> str:
+        prompts.append(text)
+        return next(answers)
+
+    rc = _run_setup(prompt=prompt)
+
+    assert rc == 0
+    assert "backend (hikerapi | aiograpi) [hikerapi]" in prompts[0]
+    token_prompt = next(text for text in prompts if text.startswith("hikerapi.token"))
+    assert "https://hikerapi.com/tokens" in token_prompt
+
+
+def test_setup_writes_hikerapi_backend_and_section() -> None:
+    rc = _run_setup(prompt=_scripted_prompt(["", "tok-1234567890", "", "", ""]))
+
+    assert rc == 0
+    contents = config_file_path().read_text()
+    assert 'backend = "hikerapi"' in contents
+    assert "[hikerapi]" in contents
+    assert "[hiker]" not in contents
 
 
 def test_setup_clear_proxy_with_dash() -> None:
@@ -429,6 +474,31 @@ def test_main_no_args_no_token_prints_hint_and_exits(
     err = capsys.readouterr().err
     assert SETUP_HINT in err
     assert rc == 1
+
+
+def test_main_aiograpi_backend_does_not_require_hikerapi_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import insto.repl as repl_mod
+
+    cfgmod.write_config(
+        {
+            "backend": "aiograpi",
+            "aiograpi": {"username": "instag", "password": "secret"},
+        }
+    )
+    captured: dict[str, Any] = {}
+
+    def fake_run_repl(config: Any = None, *, target: str | None = None) -> None:
+        captured["backend"] = config.backend
+        captured["target"] = target
+
+    monkeypatch.setattr(repl_mod, "run_repl", fake_run_repl)
+
+    rc = cli_mod.main([])
+
+    assert rc == 0
+    assert captured == {"backend": "aiograpi", "target": None}
 
 
 def test_main_setup_invokes_wizard(monkeypatch: pytest.MonkeyPatch) -> None:

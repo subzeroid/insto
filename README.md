@@ -42,7 +42,14 @@ uv tool install 'insto[aiograpi]'
 pipx install 'insto[aiograpi]'
 ```
 
-`insto setup` then offers a `hiker | aiograpi` choice and prompts for
+If `insto` is already installed through `pipx` and you later switch to
+`aiograpi`, add the optional dependency to the existing tool venv:
+
+```sh
+pipx inject insto aiograpi
+```
+
+`insto setup` then offers a `hikerapi | aiograpi` choice and prompts for
 the right credentials. See [`docs/backends.md`](docs/backends.md) for
 the trade-offs and the account-ban risk on aiograpi.
 
@@ -90,17 +97,17 @@ The token is read with `getpass` so it does not echo to the terminal; pass
 
 Token precedence is **flag > env (`HIKERAPI_TOKEN`) > config.toml**; the same
 precedence applies to the proxy (`--proxy`, `HIKERAPI_PROXY`,
-`[hiker].proxy`). `socks5h://` (Tor) and `http://` proxies are both
+`[hikerapi].proxy`). `socks5h://` (Tor) and `http://` proxies are both
 supported.
 
 ### Environment variables
 
 | Variable          | Purpose                                                             |
 |-------------------|---------------------------------------------------------------------|
-| `HIKERAPI_TOKEN`  | API token (overrides `[hiker].token` in config.toml)                |
-| `HIKERAPI_PROXY`  | Proxy URL (overrides `[hiker].proxy`)                               |
+| `HIKERAPI_TOKEN`  | API token (overrides `[hikerapi].token` in config.toml)             |
+| `HIKERAPI_PROXY`  | Proxy URL (overrides `[hikerapi].proxy`)                            |
 | `INSTO_HOME`      | Override the default `~/.insto/` config root                        |
-| `INSTO_BACKEND`   | `hiker` (default) / `aiograpi` / `fake` (e2e suite). Same as `--backend` and `[backend]` in `config.toml` |
+| `INSTO_BACKEND`   | `hikerapi` (default) / `aiograpi` / `fake` (e2e suite). Same as `--backend` and `[backend]` in `config.toml`; legacy `hiker` is still accepted |
 
 ## How insto compares to other Instagram OSINT tools
 
@@ -200,7 +207,7 @@ when the target list exceeds the confirmation threshold.
 | `--maltego [PATH or -]`         | Maltego entity-import CSV (alias for `--output-format maltego`) |
 | `--output-format {json,csv,maltego}` | Explicit format selector                            |
 | `--limit N` / `--no-download`   | Per-command paging cap and media opt-out                 |
-| `--backend {hiker,aiograpi}`    | Backend selector for this invocation (overrides `$INSTO_BACKEND` and `config.toml`) |
+| `--backend {hikerapi,aiograpi}` | Backend selector for this invocation (overrides `$INSTO_BACKEND` and `config.toml`) |
 | `--no-progress`                 | Suppress tqdm bars + spinner on long commands (`/fans`, `/wliked`, `/wcommented`, `/dossier`) |
 | `--yes / -y`                    | Skip confirmation prompts (required for `/batch -`)      |
 | `--verbose` / `--debug`         | Logging level for `~/.insto/logs/insto.log`              |

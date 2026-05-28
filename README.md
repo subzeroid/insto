@@ -14,9 +14,11 @@ Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q138
 
 Two surfaces over the same command grammar:
 
-- **REPL** — `insto` drops you into a prompt-toolkit session with tab-completion,
-  a bottom toolbar (active target, backend, quota), and live `/watch`
-  notifications. Visually similar to the Claude Code welcome screen.
+- **REPL** — `insto` (or `insto @user` to pre-select a target) drops you into a
+  prompt-toolkit session with tab-completion, a bottom toolbar (active target,
+  backend, quota), six switchable colour themes (`/theme` opens a live-preview
+  picker), and live `/watch` notifications. Visually similar to the Claude Code
+  welcome screen.
 - **One-shot** — `insto @user -c <command> [args]` runs a single slash-command
   and exits. Pipe-friendly: `--json -` writes to stdout, `--csv -` does the
   same for flat commands, `/batch -` reads targets from stdin.

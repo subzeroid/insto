@@ -13,10 +13,12 @@ insto -c info instagram              # one-shot lookup, no REPL
 
 Two surfaces over the same command grammar:
 
-- **REPL** — `insto` drops you into a prompt-toolkit session with a slash popup
-  for every command (Claude-Code style), a bottom toolbar showing active target
-  + backend + live HikerAPI balance, Ctrl+T / Ctrl+L keybindings, and live
-  `/watch` notifications via `patch_stdout`.
+- **REPL** — `insto` (or `insto @user` to pre-select a target) drops you into a
+  prompt-toolkit session with a slash popup for every command (Claude-Code
+  style), a bottom toolbar showing active target + backend + live HikerAPI
+  balance, Ctrl+T / Ctrl+L / Ctrl+C keybindings, six switchable colour themes
+  (`/theme` opens a live-preview picker), and live `/watch` notifications via
+  `patch_stdout`.
 - **One-shot** — `insto @user -c <command> [args]` runs a single slash-command
   and exits. Pipe-friendly: `--json -` writes JSON to stdout, `--csv -` does
   the same for flat-row commands, `/batch -` reads targets from stdin.

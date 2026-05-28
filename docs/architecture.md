@@ -5,7 +5,8 @@ Six layers, top to bottom. The rule that holds the design together: each layer t
 ```text
 UI:        REPL (prompt_toolkit) │ one-shot CLI (argparse)
 Dispatch:  parse → validate → run → render
-Commands:  commands/{target,profile,media,network,content,interactions,batch,watch,operational,dossier}.py
+Commands:  commands/{target,profile,media,network,content,interactions,discovery,
+                    direct,saved,places,batch,watch,operational,dossier}.py
 Service:   facade · history · analytics · exporter · watch
 Backends:  OSINTBackend ABC · HikerBackend · AiograpiBackend
 Models:    @dataclass(slots=True) DTOs — Profile, Post, Story, User, Comment, Quota, ...
@@ -15,7 +16,7 @@ Models:    @dataclass(slots=True) DTOs — Profile, Post, Story, User, Comment, 
 
 - **Async everywhere.** `httpx` (transitive via `hikerapi`), `asyncio` for fan-out, `asyncio.to_thread` for sqlite calls.
 - **Backend boundary is a hard wall.** Raw HikerAPI / aiograpi dicts never leave `backends/`. Mappers in `_hiker_map.py` and `_aiograpi_map.py` are the only converters.
-- **Lazy backend imports.** `import hikerapi` and `import aiograpi` happen only inside `make_backend(...)`. Import errors stay localized.
+- **Lazy backend imports.** `import hikerapi` and `import aiograpi` happen only inside `make_backend(...)`. Missing optional dependencies stay localized and surface with install hints.
 - **Retry / backoff lives in one place.** `backends/_retry.py` decorates SDK-method calls inside `HikerBackend`; commands never know retries exist.
 - **CDN streaming through a single helper.** `backends/_cdn.py` is the only code that pulls untrusted bytes off the network. Host allowlist, MIME sniff, byte budget, atomic write — every download passes through it.
 - **Pagination as `AsyncIterator[T]` + `limit: int | None`.** Every collection method is an async generator. Cursor management lives inside the backend; commands consume one item at a time and stop on `limit`.
@@ -85,8 +86,8 @@ Session limits: max 3 active watches, 5-minute floor on the interval, all watche
 
 ## Test strategy
 
-- 850+ unit + integration tests, no live API calls in CI.
+- 900+ unit + integration tests, no live API calls in CI.
 - Fixtures: one frozen HikerAPI dict per profile-access state (`public`, `private`, `deleted`, `empty`, `schema_drift`).
 - `tests/fakes.py:FakeBackend` implements `OSINTBackend` from fixtures with per-method error injection covering every entry of the error taxonomy.
 - 3 e2e flows under `tests/e2e/`: subprocess one-shot, prompt_toolkit pty REPL session, `/watch` tick with `patch_stdout` capture.
-- Strict mypy + ruff format + ruff lint as CI gates.
+- Strict mypy + ruff format + ruff lint as CI gates; pytest coverage must stay at or above the current CI floor.

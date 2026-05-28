@@ -41,7 +41,13 @@ pipx install 'insto[aiograpi]'
 pip install 'insto[aiograpi]'                # in a venv only — see PEP 668 below
 ```
 
-After install, `insto setup` will offer `backend (hiker | aiograpi)` and prompt for the credentials of the chosen backend. See [Backends](backends.md) for the trade-offs and the account-ban risk.
+If `insto` is already installed through `pipx` and you later switch to `aiograpi`, add the optional dependency to the existing tool venv:
+
+```sh
+pipx inject insto aiograpi
+```
+
+After install, `insto setup` will offer `backend (hikerapi | aiograpi)` and prompt for the credentials of the chosen backend. See [Backends](backends.md) for the trade-offs and the account-ban risk.
 
 ### What about `pip install insto`?
 
@@ -90,8 +96,8 @@ insto setup
 
 Interactive wizard. Writes `~/.insto/config.toml` (mode `0600`) with:
 
-- `hiker.token` — your [HikerAPI](https://hikerapi.com/p/6k1q1388) access key. New here? Sign up via <https://hikerapi.com/p/6k1q1388> for **100 free requests** (no card required) to try the CLI.
-- `hiker.proxy` (optional) — `http://`, `https://`, or `socks5h://` proxy URL.
+- `hikerapi.token` — your [HikerAPI](https://hikerapi.com/tokens) access key.
+- `hikerapi.proxy` (optional) — `http://`, `https://`, or `socks5h://` proxy URL.
 - `output_dir` — where downloads and exports land (resolved to absolute).
 - `db_path` — where the sqlite store lives (default `~/.insto/store.db`).
 
@@ -100,6 +106,6 @@ Token can also live in:
 - `--hiker-token <value>` — per-call flag (overrides everything else).
 - `HIKERAPI_TOKEN` env — overrides the toml file.
 
-Precedence: **flag > env > toml**. Same shape for `--proxy` / `HIKERAPI_PROXY` / `[hiker].proxy`.
+Precedence: **flag > env > toml**. Same shape for `--proxy` / `HIKERAPI_PROXY` / `[hikerapi].proxy`.
 
 `~/.insto/` is created mode `0700`; `store.db` and `config.toml` are `0600`. The setup wizard refuses to write a world-readable file.

@@ -220,7 +220,7 @@ async def theme_cmd(ctx: CommandContext) -> dict[str, Any]:
             hiker["token"] = cfg.hiker_token
         if cfg.hiker_proxy:
             hiker["proxy"] = cfg.hiker_proxy
-        payload["hiker"] = hiker
+        payload["hikerapi"] = hiker
     if cfg.sources.get("output_dir") != "default":
         payload["output_dir"] = str(cfg.output_dir)
     if cfg.sources.get("db_path") != "default":

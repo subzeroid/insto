@@ -35,6 +35,12 @@ ENV_THEME = "INSTO_THEME"
 ENV_AIOGRAPI_USERNAME = "AIOGRAPI_USERNAME"
 ENV_AIOGRAPI_PASSWORD = "AIOGRAPI_PASSWORD"
 ENV_AIOGRAPI_TOTP = "AIOGRAPI_TOTP_SEED"
+BACKEND_HIKERAPI = "hikerapi"
+LEGACY_BACKEND_HIKER = "hiker"
+BACKEND_AIOGRAPI = "aiograpi"
+BACKEND_FAKE = "fake"
+HIKERAPI_SECTION = "hikerapi"
+LEGACY_HIKER_SECTION = "hiker"
 
 Origin = Literal["flag", "env", "toml", "default"]
 
@@ -90,7 +96,7 @@ class Config:
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
     theme: str = DEFAULT_THEME_NAME
-    backend: str = "hiker"
+    backend: str = BACKEND_HIKERAPI
     aiograpi_username: str | None = None
     aiograpi_password: str | None = None
     aiograpi_totp_seed: str | None = None
@@ -138,6 +144,14 @@ def _pick(
     return default, "default"
 
 
+def normalize_backend(value: Any) -> str:
+    """Return the public backend name, accepting legacy config aliases."""
+    backend = str(value) if value else BACKEND_HIKERAPI
+    if backend == LEGACY_BACKEND_HIKER:
+        return BACKEND_HIKERAPI
+    return backend
+
+
 def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     """Build a Config with precedence: cli_overrides > env > toml > defaults.
 
@@ -146,17 +160,23 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     """
     cli = cli_overrides or {}
     toml_data = _read_toml(config_file_path())
-    raw_hiker = toml_data.get("hiker")
-    hiker_toml: dict[str, Any] = raw_hiker if isinstance(raw_hiker, dict) else {}
+    raw_hikerapi = toml_data.get(HIKERAPI_SECTION)
+    raw_legacy_hiker = toml_data.get(LEGACY_HIKER_SECTION)
+    if isinstance(raw_hikerapi, dict):
+        hiker_toml: dict[str, Any] = raw_hikerapi
+    elif isinstance(raw_legacy_hiker, dict):
+        hiker_toml = raw_legacy_hiker
+    else:
+        hiker_toml = {}
     raw_aio = toml_data.get("aiograpi")
     aio_toml: dict[str, Any] = raw_aio if isinstance(raw_aio, dict) else {}
 
     sources: dict[str, Origin] = {}
 
-    token, sources["hiker.token"] = _pick(
+    token, sources["hikerapi.token"] = _pick(
         cli, "hiker_token", ENV_TOKEN, hiker_toml.get("token"), None
     )
-    proxy, sources["hiker.proxy"] = _pick(
+    proxy, sources["hikerapi.proxy"] = _pick(
         cli, "hiker_proxy", ENV_PROXY, hiker_toml.get("proxy"), None
     )
     out_value, sources["output_dir"] = _pick(
@@ -169,7 +189,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         cli, "theme", ENV_THEME, toml_data.get("theme"), DEFAULT_THEME_NAME
     )
     backend_value, sources["backend"] = _pick(
-        cli, "backend", "INSTO_BACKEND", toml_data.get("backend"), "hiker"
+        cli, "backend", "INSTO_BACKEND", toml_data.get("backend"), BACKEND_HIKERAPI
     )
     aio_user, sources["aiograpi.username"] = _pick(
         cli, "aiograpi_username", ENV_AIOGRAPI_USERNAME, aio_toml.get("username"), None
@@ -210,7 +230,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         db_path=Path(db_value),
         cli_history_path=cli_history_path(),
         theme=str(theme_value) if theme_value else DEFAULT_THEME_NAME,
-        backend=str(backend_value) if backend_value else "hiker",
+        backend=normalize_backend(backend_value),
         aiograpi_username=aio_user,
         aiograpi_password=aio_pass,
         aiograpi_totp_seed=aio_totp,
@@ -223,7 +243,7 @@ def write_config(values: dict[str, Any]) -> Path:
     """Write `values` to ~/.insto/config.toml as 0600. Refuse world-readable result.
 
     `values` mirrors what `load_config` reads, e.g.
-    `{"hiker": {"token": "...", "proxy": "..."}, "output_dir": "./out"}`.
+    `{"hikerapi": {"token": "...", "proxy": "..."}, "output_dir": "./out"}`.
     """
     ensure_config_dir()
     path = config_file_path()
@@ -260,10 +280,10 @@ def _redact(value: str) -> str:
 
 def effective_config_report(config: Config) -> list[dict[str, Any]]:
     """Return rows of `{key, value, origin}` for the `/config` command."""
-    redacted_keys = {"hiker.token", "aiograpi.password", "aiograpi.totp_seed"}
+    redacted_keys = {"hikerapi.token", "aiograpi.password", "aiograpi.totp_seed"}
     snapshot: dict[str, Any] = {
-        "hiker.token": config.hiker_token,
-        "hiker.proxy": config.hiker_proxy,
+        "hikerapi.token": config.hiker_token,
+        "hikerapi.proxy": config.hiker_proxy,
         "output_dir": str(config.output_dir),
         "db_path": str(config.db_path),
         "cli_history_path": str(config.cli_history_path),
@@ -281,7 +301,7 @@ def effective_config_report(config: Config) -> list[dict[str, Any]]:
             display = None
         elif key in redacted_keys:
             display = _redact(str(value))
-        elif key == "hiker.proxy":
+        elif key == "hikerapi.proxy":
             # Proxy URLs may carry `user:pass@host:port` userinfo. Mask the
             # credentials but keep the host/port visible so the operator can
             # still verify which proxy is configured.

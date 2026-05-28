@@ -17,7 +17,7 @@ Every command inherits these via the global parser. Flag conflicts (e.g. `--json
 | `--yes` | Skip interactive confirmations (`/batch` over 25 targets, `/purge`). |
 | `--proxy URL` | Per-call proxy. Schemes: `http://`, `https://`, `socks5h://` (Tor). |
 | `--hiker-token TOKEN` | Per-call HikerAPI token override. |
-| `--backend {hiker,aiograpi}` | Per-invocation backend selector (overrides `$INSTO_BACKEND` and `config.toml`). |
+| `--backend {hikerapi,aiograpi}` | Per-invocation backend selector (overrides `$INSTO_BACKEND` and `config.toml`). |
 | `--no-progress` | Suppress tqdm bars + `⢿ <cmd>...` spinner on long-running commands. |
 | `--non-interactive` | `insto setup` only — read every value from env vars without prompts. CI/automation. |
 | `--verbose` / `--debug` | Bump log level (writes to `~/.insto/logs/insto.log`, rotated). |

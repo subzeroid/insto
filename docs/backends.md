@@ -4,7 +4,7 @@
 
 The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementations ship:
 
-| | **hiker** (default install) | **aiograpi** (`insto[aiograpi]`) |
+| | **hikerapi** (default install) | **aiograpi** (`insto[aiograpi]`) |
 |---|---|---|
 | Authentication | API token | Username + password (+ 2FA) |
 | Cost | Pay-per-call | Free |
@@ -17,14 +17,14 @@ The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementation
 
 ## Pick a backend
 
-Default is **hiker**. Switch to aiograpi when you need data behind Instagram's login wall — private profiles you follow or posts on accounts that 403 from logged-out HTTP. For OSINT on public profiles, hiker is the right choice nine times out of ten and carries no account-ban risk.
+Default is **hikerapi**. Switch to aiograpi when you need data behind Instagram's login wall — private profiles you follow or posts on accounts that 403 from logged-out HTTP. For OSINT on public profiles, HikerAPI is the right choice nine times out of ten and carries no account-ban risk.
 
 You can flip backends mid-session at any time by editing `~/.insto/config.toml` (or running `insto setup` again):
 
 ```toml
 backend = "aiograpi"
 
-[hiker]
+[hikerapi]
 token = "hk_live_..."          # kept around in case you flip back
 
 [aiograpi]
@@ -39,13 +39,13 @@ Precedence is **flag > env > toml > default** for every key:
 | Key | Flag | Env |
 |---|---|---|
 | `backend` | _(no flag yet)_ | `INSTO_BACKEND` |
-| `hiker.token` | `--hiker-token` | `HIKERAPI_TOKEN` |
-| `hiker.proxy` | `--proxy` | `HIKERAPI_PROXY` |
+| `hikerapi.token` | `--hiker-token` | `HIKERAPI_TOKEN` |
+| `hikerapi.proxy` | `--proxy` | `HIKERAPI_PROXY` |
 | `aiograpi.username` | _(no flag)_ | `AIOGRAPI_USERNAME` |
 | `aiograpi.password` | _(no flag)_ | `AIOGRAPI_PASSWORD` |
 | `aiograpi.totp_seed` | _(no flag)_ | `AIOGRAPI_TOTP_SEED` |
 
-## hiker — HikerAPI
+## hikerapi — HikerAPI
 
 Authenticates with a [HikerAPI](https://hikerapi.com/p/6k1q1388) token. Pay-per-call, no Instagram login, no account-ban risk.
 
@@ -61,7 +61,7 @@ What the backend handles:
 - **Retries** — `with_retry` decorator. `RateLimited` (with `retry_after`) and `Transient` retry with exponential backoff + jitter; `AuthInvalid`, `QuotaExhausted`, `SchemaDrift`, `Banned` propagate immediately.
 - **Schema drift** — every mapper raises `SchemaDrift(endpoint, missing_field)` instead of `KeyError` when HikerAPI's documented fields move. Counter shown in `/health`.
 - **Cursor safety** — every `iter_*` method has a 1000-page hard cap so a server-side cursor loop cannot DOS the operator.
-- **Proxy** — `--proxy` / `HIKERAPI_PROXY` / `[hiker].proxy` plumbed through `httpx`. `socks5h://` (Tor) supported.
+- **Proxy** — `--proxy` / `HIKERAPI_PROXY` / `[hikerapi].proxy` plumbed through `httpx`. `socks5h://` (Tor) supported.
 
 ### HikerAPI 403
 
@@ -116,7 +116,7 @@ Don't have the seed? Either re-enable 2FA in Instagram's settings to capture it,
 
 `Profile.access` is one of:
 
-| State | hiker | aiograpi |
+| State | hikerapi | aiograpi |
 |---|---|---|
 | `public` | ✓ | ✓ |
 | `private` | ✓ | ✓ |
@@ -124,4 +124,4 @@ Don't have the seed? Either re-enable 2FA in Instagram's settings to capture it,
 | `blocked` | n/a | ✓ (only via aiograpi error response) |
 | `deleted` | ✓ | ✓ |
 
-Commands that strictly need a logged-in account carry a `requires=("followed",)` annotation. They run cleanly on aiograpi; on hiker they exit with a typed message.
+Commands that strictly need a logged-in account carry a `requires=("followed",)` annotation. They run cleanly on aiograpi; on hikerapi they exit with a typed message.

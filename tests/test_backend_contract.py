@@ -12,6 +12,7 @@ These tests pin behaviour every backend implementation must satisfy:
 
 from __future__ import annotations
 
+import builtins
 import importlib
 import sys
 
@@ -259,3 +260,30 @@ def test_make_backend_unknown_name_raises_value_error() -> None:
 
     with pytest.raises(ValueError, match="unknown backend"):
         make_backend("does-not-exist")
+
+
+def test_make_backend_accepts_hikerapi_alias() -> None:
+    from insto.backends import make_backend
+    from insto.backends.hiker import HikerBackend
+
+    backend = make_backend("hikerapi", token="test")
+
+    assert isinstance(backend, HikerBackend)
+
+
+def test_make_backend_aiograpi_missing_dependency_has_install_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    def fake_import(name: str, *args: object, **kwargs: object) -> object:
+        if name == "aiograpi" or name.startswith("aiograpi."):
+            raise ModuleNotFoundError("No module named 'aiograpi'")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    from insto.backends import make_backend
+
+    with pytest.raises(RuntimeError, match="pipx inject insto aiograpi"):
+        make_backend("aiograpi", username="instag", password="secret")

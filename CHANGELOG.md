@@ -7,7 +7,7 @@ All notable changes to insto. Format follows [Keep a Changelog](https://keepacha
 
 ### Fixed
 
-* clarify backend setup names ([#37](https://github.com/subzeroid/insto/issues/37)) ([0ed435a](https://github.com/subzeroid/insto/commit/0ed435ad9ff81daccc706f10845dee58ca7193d1))
+* clarify hikerapi setup prompts and aiograpi install hints ([#37](https://github.com/subzeroid/insto/issues/37)) ([0ed435a](https://github.com/subzeroid/insto/commit/0ed435ad9ff81daccc706f10845dee58ca7193d1))
 
 
 ### Documentation

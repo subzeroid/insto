@@ -71,7 +71,7 @@ Inline target: `/info instagram`. Active target used otherwise.
 | `/posts [N]` | Last N feed posts (default 12). |
 | `/reels [N]` | Last N reels — pulled from feed and filtered (default 10). |
 | `/tagged [N]` | Posts where the target is tagged (default 10). |
-| `/reposts [N]` | Posts the target reposted via IG's repost surface (HikerAPI only). |
+| `/reposts [N]` | Posts the target reposted via IG's repost surface (hikerapi only). |
 | `/audio <track_id> [N]` | Clips that use a given audio asset id. |
 | `/postinfo <ref>` | Resolve a media URL / shortcode / pk → full `Post` DTO. No active target needed. |
 

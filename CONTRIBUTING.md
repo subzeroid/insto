@@ -7,17 +7,20 @@ Thanks for considering a contribution. This document covers the dev workflow.
 ```bash
 git clone git@github.com:subzeroid/insto.git
 cd insto
-uv sync --extra dev
+uv sync --extra aiograpi
 ```
 
 Python 3.11+ required (we use `dataclass(slots=True)`, `X | Y` unions, `datetime.fromisoformat` with `Z`).
+
+This matches CI: dev dependencies are installed by default, and the
+`aiograpi` extra exercises the optional logged-in backend module.
 
 ## Running tests
 
 ```bash
 uv run pytest                                    # all tests
 uv run pytest -k hiker                           # subset
-uv run pytest --cov=insto --cov-report=term-missing
+uv run pytest --cov=insto --cov-report=term-missing --cov-fail-under=75
 ```
 
 The suite is fully offline — no real HikerAPI or Instagram calls. There's also a structured live smoke against the real HikerAPI:
@@ -28,13 +31,13 @@ HIKERAPI_TOKEN_TEST=<token> uv run python tests/live/smoke.py
 
 Nine REQ checks (resolve / profile / posts / followers / tagged / hashtag / search / quota / 404) plus one OPT check (`/similar`, per-target flaky). Skips with exit 0 if `HIKERAPI_TOKEN_TEST` is unset, so it's safe to wire into release-prep gates. Costs ~10 requests, single-digit cents. **Run before each release tag** — caught a real `iter_hashtag_posts` bug that mocks couldn't.
 
-Coverage targets: keep pure-logic modules at 100% (`models`, `_redact`, `exceptions`, mappers). Everything else: 90%+ on touched code.
+Coverage targets: keep pure-logic modules at 100% (`models`, `_redact`, `exceptions`, mappers). CI currently gates the whole package at 75%; touched code should not lower coverage without a clear reason.
 
 ## Lint + types
 
 ```bash
-uv run ruff check insto tests
-uv run ruff format --check insto tests
+uv run ruff check
+uv run ruff format --check
 uv run mypy insto
 ```
 
@@ -67,7 +70,7 @@ insto/
 ├── ui/                     # banner, theme, render helpers
 ├── backends/               # OSINTBackend ABC, HikerBackend, AiograpiBackend, mappers
 ├── service/                # facade, history, analytics, exporter, watch
-└── commands/               # one file per group (target/profile/media/...)
+└── commands/               # one file per group (target/profile/media/direct/saved/...)
 tests/
 ├── fakes.py                # FakeBackend with per-method error injection
 ├── fixtures/hiker/         # frozen HikerAPI dict responses per access state

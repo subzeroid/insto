@@ -41,10 +41,11 @@ pipx install 'insto[aiograpi]'
 pip install 'insto[aiograpi]'                # in a venv only — see PEP 668 below
 ```
 
-If `insto` is already installed through `pipx` and you later switch to `aiograpi`, add the optional dependency to the existing tool venv:
+If `insto` is already installed and you later switch to `aiograpi`, update the existing tool environment instead of running the bare installer again:
 
 ```sh
-pipx inject insto aiograpi
+pipx inject insto aiograpi                         # existing pipx install
+uv tool install --force 'insto[aiograpi]'          # existing uv tool install
 ```
 
 After install, `insto setup` will offer `backend (hikerapi | aiograpi)` and prompt for the credentials of the chosen backend. See [Backends](backends.md) for the trade-offs and the account-ban risk.
@@ -82,7 +83,7 @@ insto --print-completion bash | sudo tee /etc/bash_completion.d/insto
 ```sh
 git clone git@github.com:subzeroid/insto.git
 cd insto
-uv sync --extra dev
+uv sync --extra aiograpi
 uv run insto --help
 ```
 
@@ -96,8 +97,10 @@ insto setup
 
 Interactive wizard. Writes `~/.insto/config.toml` (mode `0600`) with:
 
+- `backend` — `hikerapi` by default, or `aiograpi` for logged-in access.
 - `hikerapi.token` — your [HikerAPI](https://hikerapi.com/tokens) access key.
 - `hikerapi.proxy` (optional) — `http://`, `https://`, or `socks5h://` proxy URL.
+- `aiograpi.username`, `aiograpi.password`, `aiograpi.totp_seed` — only when you pick `aiograpi`.
 - `output_dir` — where downloads and exports land (resolved to absolute).
 - `db_path` — where the sqlite store lives (default `~/.insto/store.db`).
 
@@ -106,6 +109,6 @@ Token can also live in:
 - `--hiker-token <value>` — per-call flag (overrides everything else).
 - `HIKERAPI_TOKEN` env — overrides the toml file.
 
-Precedence: **flag > env > toml**. Same shape for `--proxy` / `HIKERAPI_PROXY` / `[hikerapi].proxy`.
+Precedence: **flag > env > toml**. Same shape for `--proxy` / `HIKERAPI_PROXY` / `[hikerapi].proxy`. Backend selection follows **flag > env > toml > default** via `--backend`, `INSTO_BACKEND`, and `backend = "..."`.
 
 `~/.insto/` is created mode `0700`; `store.db` and `config.toml` are `0600`. The setup wizard refuses to write a world-readable file.

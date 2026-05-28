@@ -1,13 +1,13 @@
 # insto
 
-Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend and [aiograpi](https://github.com/subzeroid/aiograpi) lib.
+Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q1388) backend and optional [aiograpi](https://github.com/subzeroid/aiograpi) logged-in backend.
 
 ![demo](docs/demo.gif)
 
 ## Design choices
 
 - **HikerAPI is the default backend, not a side mode.** Quota balance is read on REPL startup and surfaced in the bottom toolbar; `with_retry` honours `RateLimited.retry_after`; every mapper raises typed `SchemaDrift(endpoint, missing_field)` when HikerAPI's documented fields move. Logged-in `aiograpi` is one extra (`pipx install 'insto[aiograpi]'`) when you actually need data behind the login wall — but kept off the default path so your account isn't in scope.
-- **Async, typed, tested.** Python ≥ 3.11, strict mypy, ~93% coverage, ruff-clean. Backends, facade, commands all `async def`.
+- **Async, typed, tested.** Python >= 3.11, strict mypy, ruff-clean, and 900+ offline tests. Backends, facade, commands all `async def`.
 - **Two surfaces, one grammar.** A prompt-toolkit REPL with slash-popup completion and live `/watch` notifications, *and* a Unix-friendly one-shot mode (`insto @user -c info`). `--json -` and `--csv -` write to stdout; `/batch -` reads targets from stdin.
 - **Snapshot / watch / diff.** Persisted in `~/.insto/store.db`. Poll a target on an interval; diff against the last snapshot.
 - **Maltego CSV export** out of the box (`--maltego` on any flat-row command, plus full `/dossier`).
@@ -42,11 +42,12 @@ uv tool install 'insto[aiograpi]'
 pipx install 'insto[aiograpi]'
 ```
 
-If `insto` is already installed through `pipx` and you later switch to
-`aiograpi`, add the optional dependency to the existing tool venv:
+If `insto` is already installed and you later switch to `aiograpi`, update the
+existing tool environment instead of running the bare installer again:
 
 ```sh
-pipx inject insto aiograpi
+pipx inject insto aiograpi                         # existing pipx install
+uv tool install --force 'insto[aiograpi]'          # existing uv tool install
 ```
 
 `insto setup` then offers a `hikerapi | aiograpi` choice and prompts for
@@ -84,9 +85,10 @@ insto setup
 ```
 
 Interactive wizard. Writes `~/.insto/config.toml` (mode `0600`) with your
-HikerAPI token, output directory, sqlite store path, and optional proxy.
-The token is read with `getpass` so it does not echo to the terminal; pass
-`-` for the proxy to clear a previously-saved value.
+backend choice, HikerAPI token or aiograpi credentials, output directory,
+sqlite store path, and optional proxy. The HikerAPI token prompt links to
+<https://hikerapi.com/tokens>. Secrets are read with `getpass` so they do not
+echo to the terminal; pass `-` for the proxy to clear a previously-saved value.
 
 > 💸 **HikerAPI gives you 100 free requests** to try things out — no card,
 > no email-verification dance, just sign up and a token is waiting:
@@ -124,7 +126,7 @@ supported.
 | Maltego CSV export | ✅ | ❌ | ❌ | ❌ |
 | Interactive REPL | ✅ prompt-toolkit, slash-popup | ✅ basic shell | ❌ one-shot | ❌ one-shot |
 | One-shot / scriptable | ✅ stdin/stdout pipes | ⚠️ shell only | ✅ | ✅ |
-| Type-safe / strict mypy | ✅ ~93% coverage | ❌ | ❌ | ❌ |
+| Type-safe / strict mypy | ✅ strict mypy + coverage gate | ❌ | ❌ | ❌ |
 
 **When to pick insto** — Instagram-specific OSINT where you want HikerAPI on the default path (no IG session is ever in scope), deep network/geo analytics, snapshots over time, and Maltego-ready export. Modern stack — asyncio, strict mypy, prompt-toolkit REPL with slash-popup completion.
 
@@ -151,7 +153,7 @@ $ insto
                                 @nasa
  i n s t o  ⇋  o s i n t        @instagram
  instagram tool · open-source intel
-                                hiker · 14.7M requests left · $4,417 · 15 rps cap
+                                hikerapi · 14.7M requests left · $4,417 · 15 rps cap
 
 insto @→ /
 ```

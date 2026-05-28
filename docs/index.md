@@ -6,7 +6,7 @@ Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q138
 
 ```sh
 uv tool install insto
-insto setup                          # paste your HikerAPI token
+insto setup                          # choose hikerapi token or aiograpi login
 insto                                # REPL with welcome screen
 insto -c info instagram              # one-shot lookup, no REPL
 ```
@@ -81,4 +81,6 @@ See [Backends](backends.md) for the full breakdown.
 - [Installation](installation.md) — `uv tool install insto`, dev sources, shell completion.
 - [Basic usage](basic-usage.md) — REPL walkthrough, one-shot patterns, pipelines.
 - [CLI reference](cli-reference.md) — every command with flags and examples.
+- [Backends](backends.md) — hikerapi vs aiograpi setup, trade-offs, risk.
 - [Architecture](architecture.md) — how the layers fit together.
+- [Troubleshooting](troubleshooting.md) — install, token, backend, and runtime fixes.

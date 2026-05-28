@@ -13,7 +13,7 @@ The contract lives in `insto/backends/_base.py:OSINTBackend`. Two implementation
 | Sees private accounts you follow | No | Yes |
 | Sees DMs / saved feed | No | Read-only Direct threads/messages and saved collections/media exposed; personal feed intentionally not exposed |
 | Quota visibility | Yes (`/sys/balance`) | No |
-| Install footprint | base | `pip install 'insto[aiograpi]'` |
+| Install footprint | base | `uv tool install 'insto[aiograpi]'` / `pipx install 'insto[aiograpi]'` |
 
 ## Pick a backend
 
@@ -38,7 +38,7 @@ Precedence is **flag > env > toml > default** for every key:
 
 | Key | Flag | Env |
 |---|---|---|
-| `backend` | _(no flag yet)_ | `INSTO_BACKEND` |
+| `backend` | `--backend` | `INSTO_BACKEND` |
 | `hikerapi.token` | `--hiker-token` | `HIKERAPI_TOKEN` |
 | `hikerapi.proxy` | `--proxy` | `HIKERAPI_PROXY` |
 | `aiograpi.username` | _(no flag)_ | `AIOGRAPI_USERNAME` |
@@ -82,11 +82,19 @@ pipx install 'insto[aiograpi]'
 pip install 'insto[aiograpi]'           # in a venv only — see installation.md
 ```
 
+For an existing install, inject or reinstall the tool environment:
+
+```sh
+pipx inject insto aiograpi
+uv tool install --force 'insto[aiograpi]'
+```
+
 Then run `insto setup`, pick `aiograpi`, paste your Instagram username + password, and (optionally) the TOTP seed for 2FA.
 
 What works on aiograpi (>= 0.9.6):
 
-- Every command — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/direct`, `/direct-thread`, `/collections`, `/saved`, `/dossier`.
+- Most target-scoped commands — `/info`, `/posts`, `/reels`, `/stories`, `/highlights`, `/followers`, `/followings`, `/mutuals`, `/comments`, `/captions`, `/likes`, `/wcommented`, `/hashtags`, `/mentions`, `/locations`, `/tagged`, `/similar`, `/direct`, `/direct-thread`, `/collections`, `/saved`, `/dossier`.
+- `/reposts` is hikerapi-only today; Instagram's repost surface is not exposed through aiograpi.
 - Reads private profiles you follow.
 - Login is **lazy** — the constructor stores credentials, the actual `client.login()` fires on the first network call. The session is then dumped to `~/.insto/aiograpi.session.json` (mode `0600`); subsequent runs reuse it without re-authenticating.
 

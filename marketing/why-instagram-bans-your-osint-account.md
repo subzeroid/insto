@@ -102,7 +102,7 @@ Concretely, what changed because of those layers:
 
 **Async everywhere.** Backends, facade, commands. Python 3.11+. sqlite
 via stdlib `sqlite3` wrapped in `asyncio.to_thread`. Strict mypy,
-ruff-clean, ~93% coverage. CI gates on all of it.
+ruff-clean, 900+ offline tests. CI gates on all of it.
 
 **Typed errors, one retry policy.** `with_retry` is the only place
 that handles `RateLimited.retry_after` sleeps and `Transient` retries.
@@ -178,11 +178,11 @@ insto @nasa -c info                       # one-shot
 insto                                     # drops into the REPL
 ```
 
-The default `hiker` backend needs a HikerAPI token. The free tier
-(100 requests after registration) covers basic exploration; paid
-tiers scale from there. The `aiograpi` backend is opt-in via the
-extra and uses your own IG account — recommended only on a
-dedicated burner.
+The default `hikerapi` backend needs a HikerAPI token from
+<https://hikerapi.com/tokens>. The free tier (100 requests after
+registration) covers basic exploration; paid tiers scale from there.
+The `aiograpi` backend is opt-in via the `insto[aiograpi]` extra and
+uses your own IG account — recommended only on a dedicated burner.
 
 ## Honest trade-offs
 
@@ -194,7 +194,7 @@ dedicated burner.
   `OSINTBackend` ABC is designed so a new provider drops in as a
   ~300-line module, but the dependency is real today.
 - **Younger project.** Osintgram has 12k stars and five years of bug
-  reports against real targets. `insto` has ~93% test coverage and
+  reports against real targets. `insto` has 900+ offline tests and
   strict typing, but the long tail of "Instagram returned this weird
   shape on Tuesday" is shorter. File issues — they're how the schema
   drift counter pays for itself.

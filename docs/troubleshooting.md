@@ -2,7 +2,7 @@
 
 ## "no HIKERAPI_TOKEN configured"
 
-You ran `insto` without setting up a token. Either:
+You are using the default `hikerapi` backend without setting up a token. Either:
 
 ```sh
 insto setup                            # interactive wizard, writes ~/.insto/config.toml
@@ -13,6 +13,28 @@ insto -c info instagram --hiker-token=hk_live_...
 ```
 
 Precedence is **flag > env > toml**.
+
+If you meant to use aiograpi instead, install the optional dependency and run
+setup again:
+
+```sh
+pipx inject insto aiograpi                         # existing pipx install
+uv tool install --force 'insto[aiograpi]'          # existing uv tool install
+insto setup                                        # choose aiograpi
+```
+
+## "aiograpi backend requested but the `aiograpi` package is not installed"
+
+`aiograpi` is optional. Choosing it in `insto setup` writes credentials, but it
+does not mutate the already-installed tool environment. Add the extra:
+
+```sh
+pipx inject insto aiograpi                         # existing pipx install
+pipx install 'insto[aiograpi]'                     # fresh pipx install
+uv tool install --force 'insto[aiograpi]'          # uv tool install / reinstall
+```
+
+Then run `insto setup`, pick `aiograpi`, and launch `insto` again.
 
 ## "balance: pending" in the welcome banner
 
@@ -31,7 +53,7 @@ What to do:
 
 1. `/health` shows the schema-drift counter for this session.
 2. Open an issue with the command you ran and the failing field name.
-3. Workarounds typically land in a `0.1.x` patch.
+3. Workarounds typically land in the next patch release.
 
 ## "filesystem does not support xattr; tagging skipped"
 

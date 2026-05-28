@@ -44,7 +44,7 @@ Two surfaces over the same command grammar:
 
 ## Pick a backend
 
-| | **hiker** (default) | **aiograpi** (`insto[aiograpi]`) |
+| | **hikerapi** (default) | **aiograpi** (`insto[aiograpi]`) |
 |---|---|---|
 | Auth | API token | Instagram login + 2FA |
 | Cost | Pay-per-call, [100 free requests](https://hikerapi.com/p/6k1q1388) at signup (no card) | Free |

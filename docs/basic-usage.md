@@ -5,10 +5,11 @@ Two surfaces, same command grammar. Anything you can do in the REPL you can do a
 ## REPL
 
 ```sh
-insto
+insto                      # REPL
+insto @instagram           # REPL with @instagram pre-selected as the target
 ```
 
-You land in a prompt with a welcome panel (INSTO logotype + tips + recent activity + live HikerAPI balance) and a bottom toolbar showing the current target, backend, and remaining requests.
+You land in a prompt with a welcome panel (INSTO logotype + tips + shortcuts + recent activity + live HikerAPI balance) and a bottom toolbar showing the current target, backend, and remaining requests. Launching with `insto @user` pre-selects the target (shown in the banner + the `insto @user>` prompt); the pk resolves on first use.
 
 ```text
 insto @→ /
@@ -30,7 +31,9 @@ Any single-target command also accepts an inline username — does NOT mutate th
 /info nasa                 # one-off lookup, target stays at @instagram
 ```
 
-`Ctrl+T` flashes the active target. `Ctrl+L` redraws the welcome banner. Up-arrow walks history; `Ctrl+R` is incremental search.
+`Ctrl+T` flashes the active target. `Ctrl+L` redraws the welcome banner. `Ctrl+C` cancels the current line. Up-arrow walks history; `Ctrl+R` is incremental search. These shortcuts are also listed in the welcome banner.
+
+`/help` lists every command grouped by category. `/theme` (with no name) opens an interactive picker — `↑`/`↓` live-preview each theme on the banner, Enter applies; `/theme <name>` switches directly. Themes: `aiograpi` (default), `amber`, `claude`, `cyberpunk`, `hacker`, `instagram`.
 
 `/exit`, `/quit`, or `Ctrl+D` to leave.
 

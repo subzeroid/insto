@@ -3,13 +3,18 @@ docs/plans/
 docs/internal/
 .context/
 .claude/
+.github/plans/
+.ralphex/
 CLAUDE.md
+TODOS.md
+marketing/
 
 # Python
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+dist/
 
 # Tooling caches
 .pytest_cache/

@@ -45,7 +45,16 @@ from insto.exceptions import (
 @pytest.fixture(autouse=True)
 def _isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
     monkeypatch.setenv(cfgmod.CONFIG_HOME_ENV, str(tmp_path / ".insto"))
-    for var in (cfgmod.ENV_TOKEN, cfgmod.ENV_PROXY, cfgmod.ENV_OUTPUT_DIR, cfgmod.ENV_DB_PATH):
+    for var in (
+        "INSTO_BACKEND",
+        cfgmod.ENV_TOKEN,
+        cfgmod.ENV_PROXY,
+        cfgmod.ENV_OUTPUT_DIR,
+        cfgmod.ENV_DB_PATH,
+        cfgmod.ENV_AIOGRAPI_USERNAME,
+        cfgmod.ENV_AIOGRAPI_PASSWORD,
+        cfgmod.ENV_AIOGRAPI_TOTP,
+    ):
         monkeypatch.delenv(var, raising=False)
     yield tmp_path
     # Detach our log handlers to not bleed across tests.
@@ -298,6 +307,34 @@ def test_setup_hiker_token_prompt_links_to_hikerapi_tokens() -> None:
     assert "backend (hikerapi | aiograpi) [hikerapi]" in prompts[0]
     token_prompt = next(text for text in prompts if text.startswith("hikerapi.token"))
     assert "https://hikerapi.com/tokens" in token_prompt
+
+
+def test_setup_aiograpi_warns_when_optional_dependency_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_mod, "_is_aiograpi_installed", lambda: False)
+
+    rc = _run_setup(
+        prompt=_scripted_prompt(
+            [
+                "aiograpi",
+                "instag",
+                "secret",
+                "",
+                "",
+                "",
+                "",
+            ]
+        )
+    )
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "aiograpi backend requested" in out
+    assert "pipx inject insto aiograpi" in out
+    assert "insto[aiograpi]" in out
+    assert load_config().backend == "aiograpi"
 
 
 def test_setup_writes_hikerapi_backend_and_section() -> None:
@@ -610,3 +647,20 @@ def test_setup_non_interactive_missing_token_fails(capsys: pytest.CaptureFixture
     rc = cli_mod.main(["setup", "--non-interactive"])  # no token in env or config
     assert rc == 2
     assert "HIKERAPI_TOKEN" in capsys.readouterr().err
+
+
+def test_setup_non_interactive_aiograpi_warns_when_optional_dependency_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_mod, "_is_aiograpi_installed", lambda: False)
+    monkeypatch.setenv("INSTO_BACKEND", "aiograpi")
+    monkeypatch.setenv("AIOGRAPI_USERNAME", "instag")
+    monkeypatch.setenv("AIOGRAPI_PASSWORD", "secret")
+
+    rc = cli_mod.main(["setup", "--non-interactive"])
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "pipx inject insto aiograpi" in out
+    assert load_config().backend == "aiograpi"

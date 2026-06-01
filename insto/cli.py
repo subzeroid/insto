@@ -27,6 +27,7 @@ import argparse
 import asyncio
 import contextlib
 import getpass
+import importlib.util
 import logging
 import os
 import shlex
@@ -38,6 +39,7 @@ from typing import IO, Any
 
 from insto import __version__
 from insto._redact import redact_secrets
+from insto.backends import AIOGRAPI_INSTALL_HINT
 from insto.commands import (  # noqa: F401  — importing registers all commands
     COMMANDS,
     CommandUsageError,
@@ -75,6 +77,11 @@ LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 3
 HIKERAPI_TOKENS_URL = "https://hikerapi.com/tokens"
 SETUP_HINT = "no HIKERAPI_TOKEN configured. Run `insto setup` to create one."
+
+
+def _is_aiograpi_installed() -> bool:
+    """Return whether the optional aiograpi backend dependency is importable."""
+    return importlib.util.find_spec("aiograpi") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +355,8 @@ def _run_setup_non_interactive(*, out: IO[str] | None = None) -> int:
     if backend not in {BACKEND_HIKERAPI, BACKEND_AIOGRAPI}:
         print(f"--non-interactive: unknown backend {backend!r}", file=sys.stderr)
         return 2
+    if backend == BACKEND_AIOGRAPI and not _is_aiograpi_installed():
+        print(AIOGRAPI_INSTALL_HINT, file=stream)
 
     token = os.environ.get("HIKERAPI_TOKEN") or (existing.hiker_token if existing else None)
     proxy = os.environ.get("HIKERAPI_PROXY") or (existing.hiker_proxy if existing else None)
@@ -451,6 +460,8 @@ def _run_setup(
     if backend not in {BACKEND_HIKERAPI, BACKEND_AIOGRAPI}:
         print(f"unknown backend {backend!r}; falling back to hikerapi", file=stream)
         backend = BACKEND_HIKERAPI
+    if backend == BACKEND_AIOGRAPI and not _is_aiograpi_installed():
+        print(AIOGRAPI_INSTALL_HINT, file=stream)
 
     token_default = existing.hiker_token if existing else None
     if backend == BACKEND_HIKERAPI:

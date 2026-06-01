@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.15](https://github.com/subzeroid/insto/compare/v0.7.14...v0.7.15) (2026-06-01)
+
+
+### Fixed
+
+* warn when aiograpi setup lacks dependency ([#43](https://github.com/subzeroid/insto/issues/43)) ([cd391fc](https://github.com/subzeroid/insto/commit/cd391fcae8de9a9bdb557814b4af404571a1a80b))
+
 ## [0.7.14](https://github.com/subzeroid/insto/compare/v0.7.13...v0.7.14) (2026-05-31)
 
 

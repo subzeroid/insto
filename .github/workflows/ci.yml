@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
@@ -43,3 +44,31 @@ jobs:
         # logic lives in mappers + analytics + commands which have 80+%).
         # See issue tracker before raising back to 80.
         run: uv run pytest --cov=insto --cov-fail-under=75
+
+  live-test:
+    # Live aiograpi end-to-end through the real CLI entrypoint, driven by
+    # pooled accounts. Canonical-repo only: PRs from forks never receive the
+    # TEST_ACCOUNTS_URL secret. The script self-skips (exit 0) when the secret
+    # is absent, so this job is green even before the secret is configured.
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.repository == 'subzeroid/insto'
+    env:
+      TEST_ACCOUNTS_URL: ${{ secrets.TEST_ACCOUNTS_URL }}
+      IG_PROXY: ${{ secrets.IG_PROXY }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --extra aiograpi
+
+      - name: aiograpi /info end-to-end
+        # Spawns `insto @instagram -c info --json -` against a pooled account
+        # (full login incl. TOTP) and asserts the JSON profile. Skips clean
+        # if TEST_ACCOUNTS_URL is unset.
+        run: uv run python tests/live/aiograpi_info_e2e.py

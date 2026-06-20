@@ -2,6 +2,14 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.17](https://github.com/subzeroid/insto/compare/v0.7.16...v0.7.17) (2026-06-20)
+
+
+### Documentation
+
+* **roadmap:** record live /info e2e + CI live-test job ([#51](https://github.com/subzeroid/insto/issues/51)) ([890f199](https://github.com/subzeroid/insto/commit/890f1990d3c6536f8dc73ccf84dc1db1da3c305d))
+* **test:** clarify e2e proxy default reasoning ([#49](https://github.com/subzeroid/insto/issues/49)) ([9f2c12b](https://github.com/subzeroid/insto/commit/9f2c12b0517abb27ccd31b44ace1a1c5e8d59dee))
+
 ## [0.7.16](https://github.com/subzeroid/insto/compare/v0.7.15...v0.7.16) (2026-06-20)
 
 

@@ -162,7 +162,7 @@ async def _fetch_accounts(accounts_url: str, *, count: int) -> list[dict[str, An
     url = _build_accounts_url(accounts_url, count=count)
     register_secret(accounts_url)
     register_secret(url)
-    async with httpx.AsyncClient(timeout=20, verify=False) as client:
+    async with httpx.AsyncClient(timeout=20) as client:
         response = await client.get(url, headers={"User-Agent": "insto-live-e2e/1"})
     response.raise_for_status()
     payload = response.json()

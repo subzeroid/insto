@@ -103,7 +103,7 @@ def _build_subprocess_env(
 
     ``HIKERAPI_PROXY`` is the proxy the CLI feeds to *every* backend
     (``cli._build_backend`` passes ``config.hiker_proxy`` to aiograpi too).
-    An explicit ``IG_PROXY`` wins over the account's own proxy.
+    Only an explicit ``IG_PROXY`` is honoured.
     """
     env = dict(base_env)
     env["INSTO_HOME"] = tmp_home
@@ -111,9 +111,10 @@ def _build_subprocess_env(
     env["AIOGRAPI_USERNAME"] = str(account.get("username") or "")
     env["AIOGRAPI_PASSWORD"] = str(account.get("password") or "")
     env["AIOGRAPI_TOTP_SEED"] = _account_totp(account)
-    # Pooled account proxies are unreliable (frequently 302 on CONNECT, which
-    # surfaces as AuthRequiredProxyError). Only honour an explicit IG_PROXY,
-    # matching the saved-feed audit's default behaviour.
+    # Default to no proxy: the seeded session (client_settings) carries the
+    # account's device trust, so the login does not need one. Honour an
+    # explicit IG_PROXY when the caller supplies it, matching the saved-feed
+    # audit's default behaviour.
     proxy = base_env.get("IG_PROXY")
     if proxy:
         env["HIKERAPI_PROXY"] = str(proxy)

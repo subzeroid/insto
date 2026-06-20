@@ -89,7 +89,7 @@ def test_build_subprocess_env_wires_aiograpi_creds() -> None:
 
 
 def test_build_subprocess_env_ignores_account_proxy_without_ig_proxy() -> None:
-    # Pooled account proxies are unreliable (often 302 on CONNECT); only an
+    # Default is no proxy (the seeded session carries device trust); only an
     # explicit IG_PROXY is honoured, matching the saved-feed audit default.
     account = {
         "username": "u",

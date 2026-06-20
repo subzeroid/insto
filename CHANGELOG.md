@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.16](https://github.com/subzeroid/insto/compare/v0.7.15...v0.7.16) (2026-06-20)
+
+
+### Fixed
+
+* **aiograpi:** generate 6-digit TOTP code instead of submitting raw seed ([#46](https://github.com/subzeroid/insto/issues/46)) ([6914012](https://github.com/subzeroid/insto/commit/6914012e2def20bf1d42ccb5c82aa5c5bb001807)), closes [#45](https://github.com/subzeroid/insto/issues/45)
+
 ## [0.7.15](https://github.com/subzeroid/insto/compare/v0.7.14...v0.7.15) (2026-06-01)
 
 

@@ -11,8 +11,9 @@ Instagram. The first command that needs the network triggers
 
   1. tries to load a persisted session from `session_path` (default
      `~/.insto/aiograpi.session.json`, mode 0600);
-  2. falls back to `client.login(username, password, totp_seed=...)`
-     and dumps the fresh session for next launch.
+  2. falls back to `client.login(username, password, verification_code=...)`
+     — where `verification_code` is a 6-digit TOTP code generated from the
+     configured `totp_seed` — and dumps the fresh session for next launch.
 
 aiograpi raises a wide spectrum of exceptions. `_translate` collapses
 them into the insto taxonomy in `insto/exceptions.py` so the command
@@ -207,10 +208,17 @@ class AiograpiBackend(OSINTBackend):
             except Exception as exc:
                 log.info("aiograpi: stale session, logging in fresh: %s", exc)
         try:
+            # `login` expects a *current* 6-digit TOTP code, not the static
+            # base32 seed. Derive it on the fly via aiograpi's helper;
+            # submitting the raw seed is rejected as an invalid security code
+            # (issue #45). `totp_generate_code` is a synchronous staticmethod.
+            verification_code = (
+                self._client.totp_generate_code(self._totp_seed) if self._totp_seed else ""
+            )
             await self._client.login(
                 self._username,
                 self._password,
-                verification_code=self._totp_seed or "",
+                verification_code=verification_code,
             )
         except Exception as exc:  # pragma: no cover — network/credential dependent
             self._last_error = exc

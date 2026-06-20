@@ -65,6 +65,40 @@ Next:
 
 Priority: P2
 
+### Live `/info` e2e in CI
+
+End-to-end coverage of the aiograpi backend through insto's real entrypoint,
+exercised automatically in CI.
+
+Why: the saved-feed and private-GraphQL audits drive `AiograpiBackend`
+directly and run only by hand. Nothing proved the full
+`cli → config → backend → command` chain (including a real login with TOTP)
+against a live account, and no live test ran in CI.
+
+Status, 2026-06-20:
+
+- Added `tests/live/aiograpi_info_e2e.py`: spawns
+  `insto @instagram -c info --json -` for a pooled `TEST_ACCOUNTS_URL`
+  account, performs a full aiograpi login (incl. TOTP), and asserts the JSON
+  profile (`username == instagram`, `pk == 25025320`). It reuses each
+  account's `client_settings` as a seeded session and honours an explicit
+  `IG_PROXY` only.
+- Added offline unit coverage in `tests/test_aiograpi_info_e2e.py` for the
+  pure helpers (skip-clean path, TOTP extraction, env wiring, session seeding).
+- Wired a `live-test` job into `.github/workflows/ci.yml`: runs on
+  push / `workflow_dispatch` to `subzeroid/insto` only (forks/PRs never receive
+  the secret), gated on the `TEST_ACCOUNTS_URL` repository secret. The script
+  self-skips (exit 0) when the secret is absent.
+
+Next:
+
+- Extend the e2e to a self-profile resolve (the logged-in account's own
+  username) if a regression there is ever suspected.
+- The two `aiograpi_*_audit.py` scripts stay manual; revisit folding their
+  surfaces into CI only if they prove stable enough not to flake.
+
+Priority: shipped
+
 ## Existing deferred work
 
 ### Persistent watch daemon

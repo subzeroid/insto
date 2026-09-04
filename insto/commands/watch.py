@@ -112,8 +112,7 @@ async def watch_cmd(ctx: CommandContext) -> dict[str, Any]:
         row.status == "active" for row in await ctx.facade.history.list_watches_async()
     )
     ctx.print(
-        f"watching @{username} every {interval}s "
-        f"({active_count}/{ctx.facade.watches.max_watches})"
+        f"watching @{username} every {interval}s ({active_count}/{ctx.facade.watches.max_watches})"
     )
     if ctx.facade.watch_role == "oneshot":
         ctx.print("registration saved; run `insto watch-daemon` to execute persisted watches")

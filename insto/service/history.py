@@ -533,9 +533,7 @@ class HistoryStore:
 
     def list_watches(self) -> list[WatchSpec]:
         with self._lock:
-            rows = self._conn.execute(
-                _WATCH_SELECT + " ORDER BY user ASC"
-            ).fetchall()
+            rows = self._conn.execute(_WATCH_SELECT + " ORDER BY user ASC").fetchall()
         return [_row_to_watchspec(r) for r in rows]
 
     async def list_watches_async(self) -> list[WatchSpec]:

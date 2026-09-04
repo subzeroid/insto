@@ -281,9 +281,7 @@ def test_failed_schema_v2_migration_rolls_back_all_changes(
         HistoryStore(db)
 
     with sqlite3.connect(db) as raw:
-        version = raw.execute(
-            "SELECT value FROM _meta WHERE key = 'schema_version'"
-        ).fetchone()
+        version = raw.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
         columns = {row[1] for row in raw.execute("PRAGMA table_info(watches)")}
         assert version == ("1",)
         assert "scratch" not in columns

@@ -59,6 +59,7 @@ def in_process_env(
     insto_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[dict[str, str]]:
     """Apply `insto_env` to the current process via monkeypatch."""
+    monkeypatch.delenv("INSTO_WATCH_WEBHOOK_URL", raising=False)
     for key, value in insto_env.items():
         monkeypatch.setenv(key, value)
     yield insto_env

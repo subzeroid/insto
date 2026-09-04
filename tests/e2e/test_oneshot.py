@@ -9,9 +9,12 @@ test offline.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 PYTHON = sys.executable
 
@@ -25,6 +28,21 @@ def _run_insto(args: list[str], env: dict[str, str]) -> subprocess.CompletedProc
         check=False,
         timeout=30,
     )
+
+
+def test_in_process_env_removes_inherited_watch_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
+    monkeypatch.setenv(
+        "INSTO_WATCH_WEBHOOK_URL",
+        "https://hooks.example.test/inherited-secret",
+    )
+
+    env = request.getfixturevalue("in_process_env")
+
+    assert "INSTO_WATCH_WEBHOOK_URL" not in env
+    assert "INSTO_WATCH_WEBHOOK_URL" not in os.environ
 
 
 def test_oneshot_info_renders_profile_to_stdout(insto_env: dict[str, str]) -> None:

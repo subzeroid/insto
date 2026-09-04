@@ -94,13 +94,9 @@ def test_load_config_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_watch_webhook_url_ignores_toml_and_cli_overrides() -> None:
-    write_config(
-        {"watch": {"webhook_url": "https://toml.example.test/secret-hook"}}
-    )
+    write_config({"watch": {"webhook_url": "https://toml.example.test/secret-hook"}})
 
-    cfg = load_config(
-        {"watch_webhook_url": "https://cli.example.test/secret-hook"}
-    )
+    cfg = load_config({"watch_webhook_url": "https://cli.example.test/secret-hook"})
 
     assert cfg.watch_webhook_url is None
     assert cfg.sources["watch.webhook_url"] == "default"

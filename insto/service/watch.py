@@ -154,12 +154,13 @@ class WatchManager:
             entry.task = asyncio.create_task(self._loop(entry), name=f"insto-watch:{spec.user}")
         return entry.to_spec()
 
-    async def remove(self, user: str) -> bool:
+    async def remove(self, user: str, *, release_when_empty: bool = True) -> bool:
         entry = self._entries.pop(user, None)
         if entry is None:
             return False
         await self._cancel_entry(entry)
-        self._release_if_empty()
+        if release_when_empty:
+            self._release_if_empty()
         return True
 
     def list(self) -> list[WatchSpec]:

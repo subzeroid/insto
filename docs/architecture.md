@@ -7,7 +7,7 @@ UI:        REPL (prompt_toolkit) │ one-shot CLI │ foreground watch daemon
 Dispatch:  parse → validate → run → render
 Commands:  commands/{target,profile,media,network,content,interactions,discovery,
                     direct,saved,places,batch,watch,operational,dossier}.py
-Service:   runtime · facade · history · analytics · exporter · watch_daemon · watch · watch_lock
+Service:   runtime · facade · history · analytics · exporter · watch_daemon · watch · watch_lock · watch_webhook
 Backends:  OSINTBackend ABC · HikerBackend · AiograpiBackend
 Models:    @dataclass(slots=True) DTOs — Profile, Post, Story, User, Comment, Quota, ...
 ```
@@ -121,6 +121,39 @@ clients, sqlite, and the POSIX advisory lock are released.
 Limits remain three active watches and a 300-second floor: at the ceiling this
 is 36 ticks/hour and an estimated 72-108 backend calls/hour. The lock/signal
 implementation is POSIX-only.
+
+### Webhook delivery
+
+The runtime creates a webhook notifier only for persistent REPL and daemon
+roles. One-shot mode does not validate or allocate it. Delivery is downstream
+of the existing persistence and terminal-output boundaries:
+
+```text
+WatchManager -> diff_and_snapshot -> SQLite snapshot
+                                |
+                                +-> terminal output
+                                `-> build event -> bounded webhook retry -> warning only
+```
+
+Event conversion permits delivery only for non-empty current `changes`;
+historical `previous_usernames` is context and cannot trigger it. The immutable
+version-1 payload contains only `schema_version`, `event`, `event_id`,
+`username`, `observed_at`, `changes`, and `previous_usernames`. One event id is
+reused for every attempt.
+
+The notifier's pooled HTTP client has redirects disabled and `trust_env=False`.
+It treats `2xx` as success; transport errors, timeouts, `408`, `429`, and `5xx`
+get three total attempts separated by 0.25 and 1 second. Other `4xx` and all
+`3xx` responses fail after one attempt. A hard five-second timeout bounds each
+attempt, and streamed response bodies are closed without being read or logged.
+The endpoint is environment-only, secret-redacted, never persisted, and limited
+to HTTPS except for localhost and loopback HTTP.
+
+Delivery is observational: its final failure emits a sanitized warning without
+changing successful watch state. This is best-effort rather than transactional
+delivery. Receivers deduplicate possible retries with `event_id`; a crash after
+the snapshot commit and before delivery can lose an event because there is no
+outbox.
 
 ## Test strategy
 

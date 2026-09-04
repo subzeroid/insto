@@ -730,6 +730,39 @@ def _row_to_watchspec(row: sqlite3.Row) -> WatchSpec:
     )
 
 
+def read_watches_readonly(path: Path) -> list[WatchSpec] | None:
+    """Inspect an existing store without creating, migrating or chmodding it.
+
+    None means no store exists. Unsupported or unreadable stores are errors,
+    not healthy empty registries. Version and rows use one read transaction.
+    """
+    try:
+        try:
+            path.stat()
+        except FileNotFoundError:
+            return None
+        uri = path.expanduser().absolute().as_uri() + "?mode=ro"
+        with contextlib.closing(sqlite3.connect(uri, uri=True, timeout=1.0)) as connection:
+            connection.row_factory = sqlite3.Row
+            connection.execute("PRAGMA query_only=ON")
+            connection.execute("BEGIN")
+            version = connection.execute(
+                "SELECT value FROM _meta WHERE key = 'schema_version'"
+            ).fetchone()
+            if version is None or version[0] != str(_SCHEMA_VERSION):
+                raise BackendError("unsupported watch store schema; open insto to migrate it")
+            rows = connection.execute(_WATCH_SELECT + " ORDER BY user ASC").fetchall()
+            return [_row_to_watchspec(row) for row in rows]
+    except (sqlite3.Error, OSError, ValueError, TypeError) as exc:
+        raise BackendError(
+            "cannot read watch store; check database availability and schema"
+        ) from exc
+
+
+async def read_watches_readonly_async(path: Path) -> list[WatchSpec] | None:
+    return await asyncio.to_thread(read_watches_readonly, path)
+
+
 def _profile_to_fields(profile: Profile) -> dict[str, Any]:
     """Public accessor mirroring the diff field set, useful for tests."""
     full = dataclasses.asdict(profile)

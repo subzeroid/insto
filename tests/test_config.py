@@ -184,6 +184,27 @@ def test_load_config_reads_toml() -> None:
     assert cfg.sources["db_path"] == "toml"
 
 
+def test_load_config_accepts_pre_read_toml_without_touching_disk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cfgmod,
+        "_read_toml",
+        lambda _path: pytest.fail("pre-read TOML must bypass filesystem loading"),
+    )
+
+    cfg = load_config(
+        toml_data={
+            "backend": "aiograpi",
+            "aiograpi": {"username": "service-user", "password": "service-password"},
+        }
+    )
+
+    assert cfg.backend == "aiograpi"
+    assert cfg.aiograpi_username == "service-user"
+    assert cfg.aiograpi_password == "service-password"
+
+
 def test_load_config_accepts_legacy_hiker_backend_and_section() -> None:
     write_config({"backend": "hiker", "hiker": {"token": "legacy-token"}})
 

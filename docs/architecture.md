@@ -1,5 +1,28 @@
 # Architecture
 
+The macOS user-service adapter in `service/watch_service.py` owns only
+LaunchAgent installation, inspection, and removal. It never implements polling
+or constructs a provider backend. A private manifest pins the installed
+interpreter/backend/data paths. `watch_service_runner.py` validates explicit
+credential files, clears ambient application/network settings, and invokes
+the same foreground daemon with a private rotating output sink.
+
+```text
+watch-service install -> owned manifest/plist -> launchd
+                                                |
+                                      private service runner
+                                                |
+                             existing daemon -> executor lock -> watches
+
+watch-service status -> launchctl observations + read-only SQLite query
+```
+
+Service status does not instantiate `HistoryStore` (its constructor migrates
+and initializes files). The dedicated read-only query reuses watch-row decoding
+without writes. `launchctl print` fields are best-effort diagnostics and never
+authorize process signaling, removal, or health claims. Mutations are serialized
+by a separate management lock; uninstall never removes the executor lock inode.
+
 Six layers, top to bottom. The rule that holds the design together: each layer talks DTOs to the layer below, never raw API dicts.
 
 ```text

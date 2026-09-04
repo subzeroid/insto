@@ -102,6 +102,100 @@ A failed cleanup is retried at the next pass without stopping monitoring.
 Startup, watch results, and warnings are flushed immediately, including when
 stdout is redirected to a file or captured by a service manager.
 
+### macOS user service
+
+To keep monitoring after closing the terminal, install the package in a durable
+environment and configure credentials with `insto setup`. Then:
+
+```sh
+insto @nasa -c watch 600
+insto watch-service install
+insto watch-service status
+insto watch-service status --json
+```
+
+`install` creates one user LaunchAgent per canonical `INSTO_HOME`, loads it in
+the current GUI login session, and enables loading at later logins. It does not
+use `sudo`. A nonzero daemon exit is restarted by macOS with launchd's normal
+throttling. A graceful zero-status exit stays stopped; use uninstall followed
+by install to load it again. A REPL already owning the same database can delay
+the service's first successful start; exit that executor and let the service
+retry. The same database lock prevents overlapping executions.
+
+The service stops at logout and cannot poll during sleep or shutdown. Running
+it on a laptop is not an always-on availability guarantee. A GUI login domain
+must exist to install it; a remote/headless session may not provide one.
+
+#### Service credentials and webhook
+
+Install uses the protected `config.toml`; it does **not** copy the current
+terminal's tokens, proxy variables, or other environment settings. If your
+interactive configuration is environment-only, first persist provider settings
+with `insto setup`, or explicitly supply an existing private service env file:
+
+```toml
+[env]
+INSTO_WATCH_WEBHOOK_URL = "https://receiver.example/hook/REPLACE_ME"
+```
+
+Create that file privately with your editor, keep it outside the repository,
+and restrict it to your user before installation:
+
+```sh
+chmod 600 /absolute/path/service-env.toml
+insto watch-service install --env-file /absolute/path/service-env.toml
+```
+
+Allowed keys in `[env]` are `HIKERAPI_TOKEN`, `HIKERAPI_PROXY`,
+`AIOGRAPI_USERNAME`, `AIOGRAPI_PASSWORD`, `AIOGRAPI_TOTP_SEED`, and
+`INSTO_WATCH_WEBHOOK_URL`. Values must be strings without NUL characters.
+An empty provider value falls back to `config.toml`; an empty webhook value
+disables notifications. No other sections, keys, shell commands, interpolation,
+or arbitrary environment variables are accepted. Inputs are limited to 64 KiB
+and must be regular, user-owned files with no group/other permissions; symlinks
+are refused. Checks repeat on every service start.
+
+This is an explicit service-only injection of the existing environment
+setting. The installer stores only the file path, never its secret contents
+in the plist, manifest, SQLite, or command arguments. It neither creates nor
+removes your env file. Ambient proxy/CA settings are cleared in the service;
+only the explicit provider proxy is used. Webhook proxy behavior is unchanged.
+
+#### Status and recovery
+
+`status` needs no provider credentials and makes no provider calls. It reports
+installation and launchd registration separately from best-effort process
+diagnostics, plus persisted active/paused watches and last successful ticks.
+An installed or registered service is not necessarily healthy. Unknown macOS
+diagnostic formats produce unknown process fields; a missing or unreadable
+store is reported distinctly. Historical errors are shown only as present or
+absent, not printed, because they could contain old credentials.
+
+`--json` returns a `schema_version: 1` status object; successful inspection is
+not a health-check assertion. Status never initializes or migrates a database.
+
+Service logs are private and rotated under
+`$INSTO_HOME/services/watch/logs/insto.log` (default home: `~/.insto`), with a
+5 MiB file limit and three backups. Look there for startup/configuration
+failures and watch warnings. Unsafe log destinations are refused.
+
+The interpreter, backend, database/output/session paths, and env-file reference
+are fixed at installation. Credential values are read anew on restart.
+An identical install does not interrupt a loaded service. After moving the
+Python environment or changing pinned paths/backend, explicitly reinstall:
+
+```sh
+insto watch-service uninstall
+insto watch-service install --env-file /absolute/path/service-env.toml
+```
+
+If bootstrap fails, owned artifacts remain available for a safe retry or
+uninstall. If unload cannot be confirmed, files are retained with an error;
+do not manually remove a live service's files. Foreign or altered artifacts
+are refused rather than silently overwritten. Uninstall preserves SQLite,
+watches, snapshots, credentials, env files, logs, and stable lock files.
+Linux and Windows service managers are not supported in this slice.
+
 ### Watch webhook notifications
 
 Set `INSTO_WATCH_WEBHOOK_URL` in the environment of the REPL or watch daemon to

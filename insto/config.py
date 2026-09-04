@@ -154,14 +154,18 @@ def normalize_backend(value: Any) -> str:
     return backend
 
 
-def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
+def load_config(
+    cli_overrides: dict[str, Any] | None = None,
+    *,
+    toml_data: dict[str, Any] | None = None,
+) -> Config:
     """Build a Config with precedence: cli_overrides > env > toml > defaults.
 
     Recognised `cli_overrides` keys:
         hiker_token, hiker_proxy, output_dir, db_path
     """
     cli = cli_overrides or {}
-    toml_data = _read_toml(config_file_path())
+    toml_data = _read_toml(config_file_path()) if toml_data is None else toml_data
     raw_hikerapi = toml_data.get(HIKERAPI_SECTION)
     raw_legacy_hiker = toml_data.get(LEGACY_HIKER_SECTION)
     if isinstance(raw_hikerapi, dict):

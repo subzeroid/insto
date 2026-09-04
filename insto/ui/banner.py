@@ -116,7 +116,7 @@ def _tips_table() -> Table:
 
 def _shortcuts_table() -> Table:
     """Compact two-up grid of REPL hotkeys (key, desc, key, desc)."""
-    table = Table.grid(padding=(0, 2))
+    table = Table.grid(padding=(0, 1))
     for _ in range(4):
         table.add_column(no_wrap=True)
     pairs = list(_SHORTCUTS)

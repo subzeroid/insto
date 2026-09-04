@@ -19,6 +19,7 @@ from insto.models import (
     Snapshot,
     Story,
     User,
+    WatchRegistration,
     WatchSpec,
 )
 
@@ -35,6 +36,7 @@ ALL_MODELS = [
     HighlightItem,
     Quota,
     WatchSpec,
+    WatchRegistration,
     Snapshot,
 ]
 
@@ -49,8 +51,12 @@ def test_is_slotted_dataclass(cls: type) -> None:
 def test_no_dict_attribute(cls: type) -> None:
     """Slotted dataclasses must not allow arbitrary attribute assignment."""
     sample = _make_sample(cls)
-    with pytest.raises(AttributeError):
+    # Frozen+slotted dataclasses raise TypeError on some supported Python
+    # versions; mutable slotted DTOs raise AttributeError. Both prove that no
+    # dynamic attribute was installed.
+    with pytest.raises((AttributeError, TypeError)):
         sample.nonexistent_field = "x"  # type: ignore[attr-defined]
+    assert not hasattr(sample, "__dict__")
 
 
 def test_profile_construction_minimal() -> None:
@@ -105,7 +111,7 @@ def test_quota_factory_unknown() -> None:
 
 
 def test_watchspec_defaults_to_active() -> None:
-    w = WatchSpec(user="alice", interval_seconds=600)
+    w = WatchSpec(user="alice", registration_id="reg-1", interval_seconds=600)
     assert w.status == "active"
     assert w.last_ok is None
     assert w.last_error is None
@@ -300,7 +306,9 @@ def _make_sample(cls: type) -> object:
     if cls is Quota:
         return Quota(remaining=None)
     if cls is WatchSpec:
-        return WatchSpec(user="a", interval_seconds=600)
+        return WatchSpec(user="a", registration_id="reg-1", interval_seconds=600)
+    if cls is WatchRegistration:
+        return WatchRegistration(kind="full", spec=None)
     if cls is Snapshot:
         return Snapshot(target_pk="1", captured_at=0)
     raise AssertionError(f"no sample factory for {cls!r}")

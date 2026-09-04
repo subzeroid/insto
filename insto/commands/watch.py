@@ -1,30 +1,23 @@
 """Watch / diff / history commands: `/watch`, `/unwatch`, `/watching`, `/diff`, `/history`.
 
-`/watch <user> [interval]` registers a per-session task on the facade's
-`WatchManager` that periodically takes a fresh snapshot of `<user>` and
-prints any field-level diff against the previous one. The interval has a
-five-minute floor; the manager itself caps simultaneous watches at three.
-Watches are session-only — they do not survive REPL exit.
+`/watch <user> [interval]` persists a registration in SQLite. A foreground
+daemon or REPL executor reconciles that source of truth into local tasks.
 
 `/diff <user>` is the one-shot equivalent of a watch tick: take a fresh
 profile, diff against the most recent stored snapshot, then store the new
 snapshot. `/history` reads the last N rows from the sqlite `cli_history`
 table (the same table that powers the welcome screen's recent targets).
 
-The watch tick uses `prompt_toolkit.patch_stdout` so that a notification
-printed mid-tick does not corrupt the user's in-progress prompt line. When
-the patch_stdout context manager is unavailable (one-shot CLI / unit
-tests), notifications fall through to the supplied console directly.
+Watcher output is formatted by the scheduler service and routed through the
+owning runtime, so registration creates no detached command closure.
 """
 
 from __future__ import annotations
 
 import argparse
-import contextlib
-import dataclasses
-from collections.abc import Iterator
 from typing import Any
 
+from insto._redact import redact_secrets
 from insto.commands._base import (
     CommandContext,
     CommandUsageError,
@@ -33,7 +26,8 @@ from insto.commands._base import (
     resolve_export_dest,
     with_target,
 )
-from insto.service.watch import WatchError
+from insto.models import WatchSpec
+from insto.service.watch import format_watch_diff
 
 MIN_WATCH_INTERVAL_SECONDS = 300
 DEFAULT_WATCH_INTERVAL_SECONDS = 300
@@ -63,69 +57,16 @@ def _add_watch_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-@contextlib.contextmanager
-def _patched_stdout() -> Iterator[None]:
-    """Best-effort `prompt_toolkit.patch_stdout`; no-op outside a REPL."""
-    try:
-        from prompt_toolkit.patch_stdout import patch_stdout
-    except Exception:  # pragma: no cover - prompt_toolkit always installed in v0.1
-        yield
-        return
-    try:
-        with patch_stdout(raw=True):
-            yield
-    except Exception:
-        # patch_stdout requires a running prompt application; outside of one
-        # it raises. Fall through silently — the caller's print still works.
-        yield
-
-
-def _format_diff(username: str, diff: dict[str, Any]) -> str:
-    """Compact one-paragraph rendering of `history.diff(...)` output."""
-    if diff.get("first_seen"):
-        return f"@{username}: first snapshot — no prior state to diff against"
-    changes = diff.get("changes") or {}
-    prior = diff.get("previous_usernames") or []
-    if not changes and not prior:
-        return f"@{username}: no changes"
-    parts: list[str] = []
-    for field_name in sorted(changes):
-        delta = changes[field_name]
-        old = delta.get("old")
-        new = delta.get("new")
-        parts.append(f"{field_name}: {old!r} -> {new!r}")
-    if prior:
-        parts.append(f"aliases: {', '.join(prior)}")
-    return f"@{username} changed — " + "; ".join(parts)
-
-
-def _build_tick(
-    ctx: CommandContext,
-    username: str,
-    *,
-    notify: bool = True,
-) -> Any:
-    """Construct the per-tick coroutine factory for `_user_`.
-
-    The closure captures the facade (not the context) so it survives the
-    end of the originating command. `notify=False` is used by tests when
-    they only care about state mutation.
-    """
-    facade = ctx.facade
-    console = ctx.console
-
-    async def tick() -> None:
-        # Single profile fetch per tick — diff first, then persist the fresh
-        # snapshot so the next tick compares against the freshest one and we
-        # never report the same change twice.
-        diff = await facade.diff_and_snapshot(username)
-        if not notify or console is None:
-            return
-        message = _format_diff(username, diff)
-        with _patched_stdout():
-            console.print(message)
-
-    return tick
+def watch_public_dict(spec: WatchSpec) -> dict[str, object]:
+    """Return the stable public watch payload without its concurrency token."""
+    return {
+        "user": spec.user,
+        "interval_seconds": spec.interval_seconds,
+        "last_ok": spec.last_ok,
+        "last_error": redact_secrets(spec.last_error) if spec.last_error else None,
+        "consecutive_errors": spec.consecutive_errors,
+        "status": spec.status,
+    }
 
 
 @command(
@@ -135,35 +76,56 @@ def _build_tick(
 )
 async def watch_cmd(ctx: CommandContext) -> dict[str, Any]:
     raw = getattr(ctx.args, "target", None)
-    if raw:
+    raw_interval = getattr(ctx.args, "interval", None)
+    interval_only = (
+        raw is not None
+        and raw_interval is None
+        and ctx.session.target is not None
+        and str(raw).isdigit()
+    )
+    if interval_only:
+        assert raw is not None
+        username = ctx.session.target or ""
+        interval = int(raw)
+    elif raw:
         username = str(raw).lstrip("@").strip()
+        interval = int(raw_interval) if raw_interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
     elif ctx.session.target:
         username = ctx.session.target
+        interval = int(raw_interval) if raw_interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
     else:
         raise CommandUsageError("no target set — pass a username or run /target <user> first")
     if not username:
         raise CommandUsageError("usage: /watch <username> [interval-seconds]")
-    username = _validate_username(username)
+    username = _validate_username(username).lower()
 
-    interval = (
-        int(ctx.args.interval) if ctx.args.interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
-    )
     if interval < MIN_WATCH_INTERVAL_SECONDS:
         raise CommandUsageError(
             f"interval must be at least {MIN_WATCH_INTERVAL_SECONDS} seconds (got {interval})"
         )
 
-    tick = _build_tick(ctx, username)
-    try:
-        spec = ctx.facade.watches.add(username, interval, tick=tick)
-    except WatchError as exc:
-        raise CommandUsageError(str(exc)) from exc
+    result = await ctx.facade.history.register_watch_async(username, interval)
+    if result.kind == "already_active":
+        raise CommandUsageError(f"already watching @{username}")
+    if result.kind == "full":
+        raise CommandUsageError(
+            f"too many active watches (max {ctx.facade.watches.max_watches}); "
+            "drop one with /unwatch first"
+        )
+    assert result.spec is not None
+    spec = result.spec
+    if ctx.facade.watch_daemon is not None:
+        ctx.facade.watch_daemon.request_reconcile()
 
-    payload = dataclasses.asdict(spec)
-    ctx.print(
-        f"watching @{username} every {interval}s "
-        f"({len(ctx.facade.watches)}/{ctx.facade.watches.max_watches})"
+    payload = watch_public_dict(spec)
+    active_count = sum(
+        row.status == "active" for row in await ctx.facade.history.list_watches_async()
     )
+    ctx.print(
+        f"watching @{username} every {interval}s ({active_count}/{ctx.facade.watches.max_watches})"
+    )
+    if ctx.facade.watch_role == "oneshot":
+        ctx.print("registration saved; run `insto watch-daemon` to execute persisted watches")
     return payload
 
 
@@ -181,7 +143,7 @@ def _add_unwatch_args(parser: argparse.ArgumentParser) -> None:
 
 @command(
     "unwatch",
-    "Cancel a running /watch task",
+    "Delete a persisted watch registration",
     add_args=_add_unwatch_args,
 )
 async def unwatch_cmd(ctx: CommandContext) -> bool:
@@ -191,11 +153,13 @@ async def unwatch_cmd(ctx: CommandContext) -> bool:
     username = str(raw).lstrip("@").strip()
     if not username:
         raise CommandUsageError("usage: /unwatch <username>")
-    username = _validate_username(username)
-    removed = await ctx.facade.watches.remove(username)
+    username = _validate_username(username).lower()
+    removed = await ctx.facade.history.delete_watch_async(username)
     if not removed:
         ctx.print(f"@{username} is not being watched")
         return False
+    if ctx.facade.watch_daemon is not None:
+        ctx.facade.watch_daemon.request_reconcile()
     ctx.print(f"unwatched @{username}")
     return True
 
@@ -205,10 +169,10 @@ async def unwatch_cmd(ctx: CommandContext) -> bool:
 # ---------------------------------------------------------------------------
 
 
-@command("watching", "List active watches for this session")
+@command("watching", "List persisted watches and their state")
 async def watching_cmd(ctx: CommandContext) -> list[dict[str, Any]]:
-    specs = ctx.facade.watches.list()
-    rows = [dataclasses.asdict(s) for s in specs]
+    specs = await ctx.facade.history.list_watches_async()
+    rows = [watch_public_dict(spec) for spec in specs]
     fmt = ctx.output_format()
     if fmt == "json":
         dest_arg = ctx.args.json if ctx.args.json is not None else ""
@@ -226,7 +190,7 @@ async def watching_cmd(ctx: CommandContext) -> list[dict[str, Any]]:
         last_ok = spec.last_ok if spec.last_ok is not None else "—"
         suffix = ""
         if spec.last_error:
-            suffix = f"  err={spec.last_error}"
+            suffix = f"  err={redact_secrets(spec.last_error)}"
         ctx.print(
             f"@{spec.user}  every {spec.interval_seconds}s  "
             f"status={spec.status}  last_ok={last_ok}{suffix}"
@@ -272,7 +236,7 @@ async def diff_cmd(ctx: CommandContext, username: str) -> dict[str, Any]:
             dest=resolve_export_dest(dest_arg),
         )
         return diff
-    ctx.print(_format_diff(username, diff))
+    ctx.print(format_watch_diff(username, diff))
     return diff
 
 

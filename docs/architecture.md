@@ -3,11 +3,11 @@
 Six layers, top to bottom. The rule that holds the design together: each layer talks DTOs to the layer below, never raw API dicts.
 
 ```text
-UI:        REPL (prompt_toolkit) │ one-shot CLI (argparse)
+UI:        REPL (prompt_toolkit) │ one-shot CLI │ foreground watch daemon
 Dispatch:  parse → validate → run → render
 Commands:  commands/{target,profile,media,network,content,interactions,discovery,
                     direct,saved,places,batch,watch,operational,dossier}.py
-Service:   facade · history · analytics · exporter · watch
+Service:   runtime · facade · history · analytics · exporter · watch_daemon · watch · watch_lock
 Backends:  OSINTBackend ABC · HikerBackend · AiograpiBackend
 Models:    @dataclass(slots=True) DTOs — Profile, Post, Story, User, Comment, Quota, ...
 ```
@@ -49,7 +49,8 @@ All persistent state lives in one DB at `~/.insto/store.db` (mode `0600`):
 ```text
 _meta             schema_version
 cli_history       cmd, target, ts            (90-day retention, indexed on ts)
-watches           user, interval_seconds, last_ok, last_error, status
+watches           user, registration_id, interval_seconds, last_ok, last_error,
+                  consecutive_errors, status
 snapshots         target_pk, captured_at, profile_fields_json, last_post_pks_json,
                   avatar_url_hash, banner_url_hash    (30-day retention, max 100/target)
 ```
@@ -80,14 +81,52 @@ JSON exports are versioned: every file has `{"_schema": "insto.v1", "command": .
 
 ## Watch
 
-Session-only today; daemon mode is tracked as deferred work. `/watch <user> <interval>` registers an `asyncio.Task` on the same loop that runs `PromptSession.prompt_async()`. Each tick runs through a tracked child task with a single retry; two consecutive failures mark the watch `paused`. Notifications go through `prompt_toolkit.patch_stdout` so the user's in-progress input line is not corrupted.
+SQLite is the source of truth; the local scheduler is disposable execution
+state. `/watch` and `/unwatch` transactionally mutate the registry. A
+`WatchDaemon` reconciles it every two seconds into a `WatchManager`, which owns
+one task per active target and the only `WatchProcessLock` for that database.
 
-Session limits: max 3 active watches, 5-minute floor on the interval, all watches cancelled cleanly on REPL exit.
+```text
+/watch, /unwatch, /watching
+          |
+          v
+ SQLite registry <---------------------------+
+          |                                   |
+          | reconcile                         | conditional state update
+          v                                   | (user + registration_id)
+ WatchDaemon -> WatchManager -> diff_and_snapshot
+                     |
+                     +-- <db>.watch.lock (one executor)
+```
+
+One-shot mode only controls persisted rows. REPL mode attempts ownership lazily
+and remains control-only when another executor owns the lock. `insto
+watch-daemon` acquires before recovery and keeps ownership even with zero rows.
+All three entrypoints use `service/runtime.py`, which constructs and closes the
+history store, backend, CDN client, facade, manager, and coordinator in one
+order-controlled lifecycle.
+
+`registration_id` is an opaque generation token: a stale in-flight tick cannot
+update a row that was deleted and re-added. It is never exposed in terminal or
+JSON output. New rows without a prior success wait one interval; recovered due
+rows start at offsets 0/2/4 seconds. Subsequent polling is fixed-delay, so one
+target never overlaps itself.
+
+A tick retries once. Two consecutive failed ticks persist `paused`, including
+across restarts; `Banned` and `AuthInvalid` pause immediately. Success clears the
+error and counter. Coordinator/storage failures are fatal to the executor and
+drain all tasks. SIGINT/SIGTERM shutdown drains reconcile and tick tasks before
+clients, sqlite, and the POSIX advisory lock are released.
+
+Limits remain three active watches and a 300-second floor: at the ceiling this
+is 36 ticks/hour and an estimated 72-108 backend calls/hour. The lock/signal
+implementation is POSIX-only.
 
 ## Test strategy
 
 - 900+ unit + integration tests, no live API calls in CI.
 - Fixtures: one frozen HikerAPI dict per profile-access state (`public`, `private`, `deleted`, `empty`, `schema_drift`).
 - `tests/fakes.py:FakeBackend` implements `OSINTBackend` from fixtures with per-method error injection covering every entry of the error taxonomy.
-- 3 e2e flows under `tests/e2e/`: subprocess one-shot, prompt_toolkit pty REPL session, `/watch` tick with `patch_stdout` capture.
+- E2E flows cover subprocess one-shot, prompt_toolkit REPL, a local watch tick,
+  and daemon persistence/lock/SIGTERM/restart behavior with an offline backend.
 - Strict mypy + ruff format + ruff lint as CI gates; pytest coverage must stay at or above the current CI floor.

@@ -1,11 +1,9 @@
 """E2E #3: `/watch` actually ticks and surfaces notifications.
 
-We monkey-patch `MIN_WATCH_INTERVAL_SECONDS` down to 0 so a watch can run
-on a 0-second interval (a tight asyncio loop), launch the REPL with a
-piped input, and confirm at least one tick reaches the recording console
-through `patch_stdout`. The first tick always has no prior snapshot, so we
-look for the `first snapshot` message — that proves the loop ran the diff
-path end-to-end.
+We register through a piped REPL, wait for the shared coordinator to schedule
+the persisted row, then invoke that real manager entry once without waiting
+five minutes. The first tick has no prior snapshot, so `first snapshot` proves
+the backend, diff, persistence, callback, and output path all ran end-to-end.
 """
 
 from __future__ import annotations
@@ -20,7 +18,6 @@ from prompt_toolkit.output import DummyOutput
 from rich.console import Console
 
 from insto import repl as repl_mod
-from insto.commands import watch as watch_mod
 from insto.config import load_config
 from insto.repl import Repl
 from insto.ui.theme import INSTO_THEME
@@ -40,17 +37,17 @@ def _make_console() -> Console:
 def test_watch_tick_emits_first_snapshot_notification(
     in_process_env: dict[str, str],
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`/watch alice 0` fires at least one tick whose message reaches the console."""
-    monkeypatch.setattr(watch_mod, "MIN_WATCH_INTERVAL_SECONDS", 0)
+    """A persisted `/watch alice 300` tick reaches the REPL console."""
 
     console = _make_console()
     history_path = tmp_path / "cli_history"
 
     async def runner() -> None:
         config = load_config()
-        facade, cleanup = repl_mod._bootstrap(config)
+        facade, cleanup = await repl_mod._bootstrap(
+            config, watch_output=lambda message: console.print(message)
+        )
         try:
             with (
                 create_pipe_input() as pipe,
@@ -62,10 +59,14 @@ def test_watch_tick_emits_first_snapshot_notification(
                     console=console,
                     history_path=history_path,
                 )
-                pipe.send_text("/target alice\n/watch alice 0\n")
+                pipe.send_text("/target alice\n/watch alice 300\n")
                 task = asyncio.create_task(repl.run())
-                # Two yields' worth of ticks is plenty with interval=0.
-                await asyncio.sleep(0.3)
+                for _ in range(100):
+                    if "alice" in facade.watches:
+                        break
+                    await asyncio.sleep(0.01)
+                assert "alice" in facade.watches
+                await facade.watches.tick_once("alice")
                 pipe.send_text("/quit\n")
                 await task
         finally:

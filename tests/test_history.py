@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from insto.exceptions import BackendError
-from insto.models import Profile, WatchSpec
+from insto.models import Profile
 from insto.service.history import (
     CLI_HISTORY_RETENTION_DAYS,
     SNAPSHOT_MAX_PER_TARGET,
@@ -18,6 +18,27 @@ from insto.service.history import (
     HistoryStore,
     hash_url,
 )
+
+
+def _create_schema_v1(db: Path, *, user: str = "alice") -> None:
+    with sqlite3.connect(db) as raw:
+        raw.executescript(
+            """
+            CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO _meta(key, value) VALUES('schema_version', '1');
+            CREATE TABLE watches (
+                user TEXT PRIMARY KEY,
+                interval_seconds INTEGER NOT NULL,
+                last_ok INTEGER,
+                last_error TEXT,
+                status TEXT NOT NULL DEFAULT 'active'
+            );
+            """
+        )
+        raw.execute(
+            "INSERT INTO watches VALUES(?, 600, 123, 'old error', 'paused')",
+            (user,),
+        )
 
 
 def _make_profile(
@@ -58,13 +79,16 @@ def test_creates_db_and_schema(tmp_path: Path) -> None:
     s = HistoryStore(db)
     try:
         assert db.exists()
-        assert s.schema_version() == 1
+        assert s.schema_version() == 2
         # All three tables present.
         with sqlite3.connect(str(db)) as raw:
             tables = {
                 row[0] for row in raw.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         assert {"cli_history", "watches", "snapshots", "_meta"} <= tables
+        with sqlite3.connect(str(db)) as raw:
+            columns = {row[1] for row in raw.execute("PRAGMA table_info(watches)")}
+        assert {"registration_id", "consecutive_errors"} <= columns
     finally:
         s.close()
 
@@ -213,35 +237,159 @@ def test_snapshot_from_profile_hashes_urls(store: HistoryStore) -> None:
     assert snap.banner_url_hash == hash_url("https://x/b.jpg")
 
 
-def test_watches_crud(store: HistoryStore) -> None:
-    spec = WatchSpec(user="@alice", interval_seconds=600)
-    store.add_watch(spec)
+def test_migrates_schema_v1_atomically_and_preserves_watch(tmp_path: Path) -> None:
+    db = tmp_path / "v1.db"
+    _create_schema_v1(db, user="@Alice")
 
-    got = store.get_watch("@alice")
-    assert got is not None
-    assert got.interval_seconds == 600
-    assert got.status == "active"
+    migrated = HistoryStore(db)
+    try:
+        assert migrated.schema_version() == 2
+        watch = migrated.get_watch("alice")
+        assert watch is not None
+        assert watch.user == "alice"
+        assert watch.registration_id
+        assert watch.interval_seconds == 600
+        assert watch.last_ok == 123
+        assert watch.last_error == "old error"
+        assert watch.consecutive_errors == 0
+        assert watch.status == "paused"
+    finally:
+        migrated.close()
 
-    store.update_watch_state("@alice", last_ok=1234, status="paused")
-    got = store.get_watch("@alice")
-    assert got is not None
-    assert got.last_ok == 1234
-    assert got.status == "paused"
-
-    store.add_watch(WatchSpec(user="@bob", interval_seconds=900))
-    assert {w.user for w in store.list_watches()} == {"@alice", "@bob"}
-
-    assert store.delete_watch("@alice") is True
-    assert store.delete_watch("@alice") is False
-    assert {w.user for w in store.list_watches()} == {"@bob"}
+    reopened = HistoryStore(db)
+    try:
+        assert reopened.schema_version() == 2
+        assert len(reopened.list_watches()) == 1
+    finally:
+        reopened.close()
 
 
-def test_add_watch_upserts(store: HistoryStore) -> None:
-    store.add_watch(WatchSpec(user="@alice", interval_seconds=600))
-    store.add_watch(WatchSpec(user="@alice", interval_seconds=900))
-    got = store.get_watch("@alice")
-    assert got is not None
-    assert got.interval_seconds == 900
+def test_schema_v1_migration_deduplicates_canonical_usernames(tmp_path: Path) -> None:
+    db = tmp_path / "duplicate-v1.db"
+    _create_schema_v1(db, user="@Alice")
+    with sqlite3.connect(db) as raw:
+        raw.execute("INSERT INTO watches VALUES('alice', 900, 456, NULL, 'active')")
+
+    migrated = HistoryStore(db)
+    try:
+        assert migrated.schema_version() == 2
+        watches = migrated.list_watches()
+        assert len(watches) == 1
+        assert watches[0].user == "alice"
+        assert watches[0].status == "active"
+        assert watches[0].interval_seconds == 900
+        assert watches[0].last_ok == 456
+    finally:
+        migrated.close()
+
+
+def test_failed_schema_v2_migration_rolls_back_all_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import insto.service.history as history_module
+
+    db = tmp_path / "broken-v1.db"
+    _create_schema_v1(db)
+    monkeypatch.setattr(
+        history_module,
+        "_MIGRATIONS",
+        {2: ("ALTER TABLE watches ADD COLUMN scratch TEXT", "INVALID SQL")},
+    )
+
+    with pytest.raises(sqlite3.OperationalError):
+        HistoryStore(db)
+
+    with sqlite3.connect(db) as raw:
+        version = raw.execute("SELECT value FROM _meta WHERE key = 'schema_version'").fetchone()
+        columns = {row[1] for row in raw.execute("PRAGMA table_info(watches)")}
+        assert version == ("1",)
+        assert "scratch" not in columns
+
+
+def test_register_watch_enforces_canonical_duplicate_and_global_limit(tmp_path: Path) -> None:
+    db = tmp_path / "shared.db"
+    first = HistoryStore(db)
+    second = HistoryStore(db)
+    try:
+        for user in ("Alice", "bob", "carol"):
+            assert first.register_watch(user, 300).kind == "created"
+        assert second.register_watch("@ALICE", 600).kind == "already_active"
+        assert second.register_watch("dave", 300).kind == "full"
+        assert [watch.user for watch in second.list_watches()] == ["alice", "bob", "carol"]
+    finally:
+        second.close()
+        first.close()
+
+
+def test_reactivate_uses_new_id_and_stale_state_update_is_ignored(store: HistoryStore) -> None:
+    created = store.register_watch("@Alice", 300)
+    assert created.spec is not None
+    old = created.spec
+    assert store.update_watch_state(
+        old,
+        last_ok=1234,
+        last_error="temporary",
+        consecutive_errors=2,
+        status="paused",
+    )
+
+    reactivated = store.register_watch("ALICE", 900)
+    assert reactivated.kind == "reactivated"
+    assert reactivated.spec is not None
+    new = reactivated.spec
+    assert new.registration_id != old.registration_id
+    assert new.last_ok == 1234
+    assert new.last_error is None
+    assert new.consecutive_errors == 0
+    assert new.status == "active"
+
+    assert store.update_watch_state(old, last_error="stale") is False
+    assert store.update_watch_state(new, last_error="fresh") is True
+    assert store.update_watch_state(new, last_ok=5678, last_error=None) is True
+    current = store.get_watch("@alice")
+    assert current is not None
+    assert current.last_ok == 5678
+    assert current.last_error is None
+
+
+def test_reactivation_respects_global_active_limit(store: HistoryStore) -> None:
+    alice = store.register_watch("alice", 300).spec
+    assert alice is not None
+    assert store.update_watch_state(alice, status="paused")
+    for user in ("bob", "carol", "dave"):
+        assert store.register_watch(user, 300).kind == "created"
+
+    result = store.register_watch("alice", 600)
+
+    assert result.kind == "full"
+    assert result.spec is None
+    current = store.get_watch("alice")
+    assert current is not None
+    assert current.status == "paused"
+    assert len([watch for watch in store.list_watches() if watch.status == "active"]) == 3
+
+
+def test_watch_registry_validates_inputs_and_deletes_canonically(store: HistoryStore) -> None:
+    with pytest.raises(ValueError, match="username"):
+        store.register_watch("../alice", 300)
+    with pytest.raises(ValueError, match="at least 300"):
+        store.register_watch("alice", 299)
+
+    result = store.register_watch("Alice", 300)
+    assert result.spec is not None
+    assert store.delete_watch("@ALICE") is True
+    assert store.delete_watch("alice") is False
+
+
+async def test_watch_registry_async_wrappers(store: HistoryStore) -> None:
+    result = await store.register_watch_async("Alice", 300)
+    assert result.spec is not None
+    spec = result.spec
+    assert await store.get_watch_async("@ALICE") == spec
+    assert await store.list_watches_async() == [spec]
+    assert await store.update_watch_state_async(spec, consecutive_errors=1) is True
+    assert (await store.get_watch_async("alice")).consecutive_errors == 1  # type: ignore[union-attr]
+    assert await store.delete_watch_async("ALICE") is True
 
 
 def test_prune_drops_old_history(store: HistoryStore) -> None:
@@ -412,6 +560,6 @@ def test_migration_idempotent_across_processes(tmp_path: Path) -> None:
         s1.close()
     s2 = HistoryStore(db)
     try:
-        assert s2.schema_version() == v1 == 1
+        assert s2.schema_version() == v1 == 2
     finally:
         s2.close()

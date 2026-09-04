@@ -108,8 +108,9 @@ lock: either the REPL or `insto watch-daemon`. A one-shot command never validate
 or uses the endpoint, including `insto @user -c watch`.
 
 After a watch tick persists its new snapshot and writes its terminal result,
-insto sends one version-1 event only when the current diff has a non-empty
-`changes` object. A first snapshot or unchanged tick sends nothing.
+insto sends one HTTP POST with `Content-Type: application/json` and a version-1
+event only when the current diff has a non-empty `changes` object. A first
+snapshot or unchanged tick sends nothing.
 `previous_usernames` supplies historical context for an otherwise real change;
 it cannot trigger an event by itself.
 

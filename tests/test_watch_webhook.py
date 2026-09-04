@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta, timezone
@@ -821,6 +822,49 @@ async def test_caller_cancellation_does_not_cancel_real_client_close() -> None:
 
     assert transport.close_completed is True
     assert transport.close_calls == 1
+
+
+async def test_cancelled_close_waiter_consumes_late_transport_failure() -> None:
+    class LateFailingTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.close_started = asyncio.Event()
+            self.allow_failure = asyncio.Event()
+
+        async def handle_async_request(self, _request: httpx.Request) -> httpx.Response:
+            raise AssertionError("this transport is only a client-close probe")
+
+        async def aclose(self) -> None:
+            self.close_started.set()
+            await self.allow_failure.wait()
+            raise RuntimeError("raw late transport close details")
+
+    loop = asyncio.get_running_loop()
+    unhandled: list[dict[str, Any]] = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    try:
+        transport = LateFailingTransport()
+        client = httpx.AsyncClient(transport=transport)
+        notifier = WebhookNotifier(ENDPOINT, client=client)
+        waiter = asyncio.create_task(notifier.aclose())
+        await transport.close_started.wait()
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+
+        transport.allow_failure.set()
+        retained = notifier._client_close_task
+        assert retained is not None
+        while not retained.done():
+            await asyncio.sleep(0)
+
+        del retained, waiter, notifier, client
+        gc.collect()
+        await asyncio.sleep(0)
+
+        assert unhandled == []
+    finally:
+        loop.set_exception_handler(previous_handler)
 
 
 async def test_concurrent_notifier_close_calls_share_real_client_close() -> None:

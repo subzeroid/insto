@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import sqlite3
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -437,7 +438,10 @@ async def test_watch_output_failure_does_not_turn_successful_tick_into_error(
         assert len(notifier.payloads) == 1
 
 
-async def test_changed_tick_sends_one_versioned_event(tmp_path: Path) -> None:
+async def test_changed_tick_sends_one_versioned_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = _config(tmp_path, webhook_url="https://receiver.example/endpoint-secret")
     _seed_watch(
         config,
@@ -451,6 +455,23 @@ async def test_changed_tick_sends_one_versioned_event(tmp_path: Path) -> None:
         access="public",
     )
     notifier = RecordingNotifier()
+    event_id = UUID("12345678-1234-5678-1234-567812345678")
+    observed_at = datetime(2026, 9, 4, 18, 30, 45, 123456, tzinfo=UTC)
+    uuid_calls = 0
+    clock_calls = 0
+
+    def next_event_id() -> UUID:
+        nonlocal uuid_calls
+        uuid_calls += 1
+        return event_id
+
+    def utc_now() -> datetime:
+        nonlocal clock_calls
+        clock_calls += 1
+        return observed_at
+
+    monkeypatch.setattr(runtime_service, "uuid4", next_event_id)
+    monkeypatch.setattr(runtime_service, "_utc_now", utc_now)
 
     async with open_runtime(
         config,
@@ -468,8 +489,10 @@ async def test_changed_tick_sends_one_versioned_event(tmp_path: Path) -> None:
         assert event["event"] == "watch.changed"
         assert event["username"] == "alice"
         assert event["changes"]["biography"] == {"old": "old", "new": "new"}
-        UUID(event["event_id"])
-        assert event["observed_at"].endswith("Z")
+        assert event["event_id"] == str(event_id)
+        assert event["observed_at"] == "2026-09-04T18:30:45.123456Z"
+        assert uuid_calls == 1
+        assert clock_calls == 1
 
 
 @pytest.mark.parametrize("case", ["first_seen", "unchanged", "alias_history_only"])
@@ -656,6 +679,53 @@ async def test_unexpected_delivery_failure_warns_generically_and_preserves_succe
     captured = "\n".join(output)
     assert endpoint_sentinel not in captured
     assert response_body_sentinel not in captured
+
+
+async def test_output_failures_cannot_block_delivery_warning_or_successful_state(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    endpoint_sentinel = "endpoint-secret-9851"
+    response_body_sentinel = "response-body-secret-9852"
+    config = _config(
+        tmp_path,
+        webhook_url=f"https://receiver.example/{endpoint_sentinel}",
+    )
+    _seed_watch(
+        config,
+        profile=Profile(pk="1", username="alice", biography="old", access="public"),
+    )
+    backend = ClosingBackend([])
+    backend.profiles["1"] = Profile(pk="1", username="alice", biography="new", access="public")
+    notifier = RecordingNotifier(
+        send_error=RuntimeError(f"{endpoint_sentinel}: {response_body_sentinel}")
+    )
+    output_attempts: list[str] = []
+
+    def broken_output(message: str) -> None:
+        output_attempts.append(message)
+        raise RuntimeError(f"output unavailable: {response_body_sentinel}")
+
+    async with open_runtime(
+        config,
+        role="daemon",
+        backend_factory=lambda _: backend,
+        cdn_client_factory=lambda _: ClosingClient([]),
+        watch_output=broken_output,
+        webhook_notifier_factory=lambda _: notifier,
+    ) as runtime:
+        state = await runtime.manager.tick_once("alice")
+
+        _assert_successful_state(state)
+
+    assert len(output_attempts) == 2
+    assert output_attempts[0].startswith("@alice changed")
+    assert output_attempts[1] == "@alice: watch webhook warning: unexpected delivery error"
+    assert notifier.close_calls == 1
+    captured = capsys.readouterr()
+    all_surfaces = "\n".join([*output_attempts, captured.out, captured.err])
+    assert endpoint_sentinel not in all_surfaces
+    assert response_body_sentinel not in all_surfaces
 
 
 async def test_event_conversion_failure_warns_generically_and_preserves_success(

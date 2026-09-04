@@ -46,6 +46,10 @@ class WatchWebhookNotifier(Protocol):
 WebhookNotifierFactory = Callable[[str], WatchWebhookNotifier]
 
 
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
 @dataclass(slots=True)
 class Runtime:
     config: Config
@@ -210,7 +214,7 @@ async def _deliver_watch_event(
             user,
             diff,
             event_id=str(uuid4()),
-            observed_at=datetime.now(UTC),
+            observed_at=_utc_now(),
         )
         if event is not None:
             await notifier.send(event)

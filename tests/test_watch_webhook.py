@@ -126,6 +126,8 @@ def test_validate_webhook_url_accepts_secure_and_local_endpoints(endpoint: str) 
         ("ftp://receiver.example/secret/path?token=shh", "scheme"),
         ("http://receiver.example/secret/path?token=shh", "HTTPS"),
         ("http://192.0.2.1/secret/path?token=shh", "HTTPS"),
+        ("https://receiver.example:-1/secret/path?token=shh", "port"),
+        ("https://receiver.example:0/secret/path?token=shh", "port"),
         ("https://receiver.example:65536/secret/path?token=shh", "port"),
     ],
 )

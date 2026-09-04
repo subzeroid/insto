@@ -74,6 +74,41 @@ def test_load_config_defaults_when_no_inputs() -> None:
     assert cfg.sources["watch.webhook_url"] == "default"
 
 
+def test_config_preserves_legacy_positional_field_order() -> None:
+    values = (
+        "token",
+        "proxy",
+        Path("output"),
+        Path("store.db"),
+        Path("history"),
+        "theme",
+        "backend",
+        "username",
+        "password",
+        "totp-seed",
+        Path("session.json"),
+        {"theme": "flag"},
+    )
+
+    cfg = Config(*values)
+
+    assert (
+        cfg.hiker_token,
+        cfg.hiker_proxy,
+        cfg.output_dir,
+        cfg.db_path,
+        cfg.cli_history_path,
+        cfg.theme,
+        cfg.backend,
+        cfg.aiograpi_username,
+        cfg.aiograpi_password,
+        cfg.aiograpi_totp_seed,
+        cfg.aiograpi_session_path,
+        cfg.sources,
+    ) == values
+    assert cfg.watch_webhook_url is None
+
+
 def test_load_config_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(cfgmod.ENV_TOKEN, "tok-from-env")
     monkeypatch.setenv(cfgmod.ENV_PROXY, "socks5h://127.0.0.1:9050")

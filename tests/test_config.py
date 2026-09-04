@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from insto import config as cfgmod
+from insto._redact import clear_registered_secrets, redact_secrets
 from insto.config import (
     Config,
     config_dir,
@@ -25,7 +26,13 @@ from insto.exceptions import BackendError
 def _isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     """Point $INSTO_HOME at tmp_path and clear known env vars per test."""
     monkeypatch.setenv(cfgmod.CONFIG_HOME_ENV, str(tmp_path / ".insto"))
-    for var in (cfgmod.ENV_TOKEN, cfgmod.ENV_PROXY, cfgmod.ENV_OUTPUT_DIR, cfgmod.ENV_DB_PATH):
+    for var in (
+        cfgmod.ENV_TOKEN,
+        cfgmod.ENV_PROXY,
+        cfgmod.ENV_OUTPUT_DIR,
+        cfgmod.ENV_DB_PATH,
+        "INSTO_WATCH_WEBHOOK_URL",
+    ):
         monkeypatch.delenv(var, raising=False)
     return tmp_path
 
@@ -60,22 +67,102 @@ def test_load_config_defaults_when_no_inputs() -> None:
     assert cfg.output_dir == Path("./output")
     assert cfg.db_path == config_dir() / "store.db"
     assert cfg.cli_history_path == config_dir() / "cli_history"
+    assert cfg.watch_webhook_url is None
     assert cfg.backend == "hikerapi"
     assert cfg.sources["hikerapi.token"] == "default"
     assert cfg.sources["output_dir"] == "default"
+    assert cfg.sources["watch.webhook_url"] == "default"
+
+
+def test_config_preserves_legacy_positional_field_order() -> None:
+    values = (
+        "token",
+        "proxy",
+        Path("output"),
+        Path("store.db"),
+        Path("history"),
+        "theme",
+        "backend",
+        "username",
+        "password",
+        "totp-seed",
+        Path("session.json"),
+        {"theme": "flag"},
+    )
+
+    cfg = Config(*values)
+
+    assert (
+        cfg.hiker_token,
+        cfg.hiker_proxy,
+        cfg.output_dir,
+        cfg.db_path,
+        cfg.cli_history_path,
+        cfg.theme,
+        cfg.backend,
+        cfg.aiograpi_username,
+        cfg.aiograpi_password,
+        cfg.aiograpi_totp_seed,
+        cfg.aiograpi_session_path,
+        cfg.sources,
+    ) == values
+    assert cfg.watch_webhook_url is None
 
 
 def test_load_config_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(cfgmod.ENV_TOKEN, "tok-from-env")
     monkeypatch.setenv(cfgmod.ENV_PROXY, "socks5h://127.0.0.1:9050")
     monkeypatch.setenv(cfgmod.ENV_OUTPUT_DIR, "/tmp/insto-out")
+    monkeypatch.setenv(
+        cfgmod.ENV_WATCH_WEBHOOK_URL,
+        "https://hooks.example.test/watch-secret-path",
+    )
     cfg = load_config()
     assert cfg.hiker_token == "tok-from-env"
     assert cfg.hiker_proxy == "socks5h://127.0.0.1:9050"
     assert cfg.output_dir == Path("/tmp/insto-out")
+    assert cfg.watch_webhook_url == "https://hooks.example.test/watch-secret-path"
     assert cfg.sources["hikerapi.token"] == "env"
     assert cfg.sources["hikerapi.proxy"] == "env"
     assert cfg.sources["output_dir"] == "env"
+    assert cfg.sources["watch.webhook_url"] == "env"
+
+
+def test_watch_webhook_url_ignores_toml_and_cli_overrides() -> None:
+    write_config({"watch": {"webhook_url": "https://toml.example.test/secret-hook"}})
+
+    cfg = load_config({"watch_webhook_url": "https://cli.example.test/secret-hook"})
+
+    assert cfg.watch_webhook_url is None
+    assert cfg.sources["watch.webhook_url"] == "default"
+
+
+def test_watch_webhook_url_empty_env_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(cfgmod.ENV_WATCH_WEBHOOK_URL, "")
+
+    cfg = load_config()
+
+    assert cfg.watch_webhook_url is None
+    assert cfg.sources["watch.webhook_url"] == "default"
+
+
+def test_watch_webhook_url_is_registered_as_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_url = "https://hooks.example.test/watch-secret-path"
+    monkeypatch.setenv(cfgmod.ENV_WATCH_WEBHOOK_URL, webhook_url)
+    clear_registered_secrets()
+    try:
+        load_config()
+
+        redacted = redact_secrets(f"delivery failed for {webhook_url}")
+
+        assert webhook_url not in redacted
+        assert "***" in redacted
+    finally:
+        clear_registered_secrets()
 
 
 def test_load_config_reads_toml() -> None:
@@ -226,6 +313,27 @@ def test_effective_config_report_defaults_when_unset() -> None:
     assert rows["hikerapi.proxy"]["value"] is None
     assert rows["output_dir"]["value"] == "output"
     assert rows["output_dir"]["origin"] == "default"
+    assert rows["watch.webhook_url"] == {
+        "key": "watch.webhook_url",
+        "value": "disabled",
+        "origin": "default",
+    }
+
+
+def test_effective_config_report_never_exposes_watch_webhook_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    webhook_url = "https://hooks.example.test/watch-secret-path"
+    monkeypatch.setenv(cfgmod.ENV_WATCH_WEBHOOK_URL, webhook_url)
+
+    rows = {row["key"]: row for row in effective_config_report(load_config())}
+
+    assert rows["watch.webhook_url"] == {
+        "key": "watch.webhook_url",
+        "value": "configured",
+        "origin": "env",
+    }
+    assert webhook_url not in repr(rows)
 
 
 def test_config_dataclass_has_slots() -> None:

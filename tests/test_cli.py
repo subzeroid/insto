@@ -139,9 +139,7 @@ def test_parser_hiker_token_flag() -> None:
 
 def test_parser_rejects_watch_webhook_url_flag() -> None:
     with pytest.raises(SystemExit):
-        build_parser().parse_args(
-            ["--watch-webhook-url", "https://hooks.example.test/secret-hook"]
-        )
+        build_parser().parse_args(["--watch-webhook-url", "https://hooks.example.test/secret-hook"])
 
 
 def test_parser_backend_prefers_hikerapi_and_keeps_legacy_hiker_alias() -> None:

@@ -70,7 +70,10 @@ def redact_secrets(text: str) -> str:
     """
     if not text:
         return text
-    redacted = text
+    # Scrub bearer credentials before literal replacements. A registered
+    # secret can be a substring of a bearer token; replacing that substring
+    # first would leave a partial token for this regex and concatenate masks.
+    redacted = _BEARER_RE.sub(r"\1***", text)
     env_token = os.environ.get("HIKERAPI_TOKEN")
     if env_token and len(env_token) >= 4:
         redacted = redacted.replace(env_token, "***")
@@ -81,7 +84,6 @@ def redact_secrets(text: str) -> str:
             redacted = redacted.replace(secret, "***")
     redacted = _PROXY_USERINFO_RE.sub(r"\1***:***@", redacted)
     redacted = _QS_SECRET_RE.sub(r"\1***", redacted)
-    redacted = _BEARER_RE.sub(r"\1***", redacted)
     return redacted
 
 

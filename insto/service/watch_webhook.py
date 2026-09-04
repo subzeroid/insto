@@ -90,8 +90,13 @@ class WebhookNotifier:
                 self._close_client(),
                 name="insto-webhook-client-close",
             )
+            close_task.add_done_callback(self._client_close_done)
             self._client_close_task = close_task
         await asyncio.shield(close_task)
+
+    def _client_close_done(self, task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            task.exception()
 
     async def _close_client(self) -> None:
         await self._drain_response_closes()

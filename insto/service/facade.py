@@ -28,7 +28,7 @@ import re
 import sqlite3
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 import httpx
 
@@ -62,6 +62,11 @@ from insto.service.history import HistoryStore
 from insto.service.watch import WatchManager
 from insto.service.watch_lock import WatchProcessLock
 
+if TYPE_CHECKING:
+    from insto.service.watch_daemon import WatchDaemon
+
+WatchRuntimeRole = Literal["oneshot", "repl", "daemon"]
+
 
 class OsintFacade:
     """Stateful facade composing backend + service helpers for one session."""
@@ -79,6 +84,7 @@ class OsintFacade:
         config: Config,
         cdn_client: httpx.AsyncClient | None = None,
         watches: WatchManager | None = None,
+        watch_role: WatchRuntimeRole = "repl",
     ) -> None:
         self.backend = backend
         self.history = history
@@ -88,6 +94,8 @@ class OsintFacade:
         self.watches = watches or WatchManager(
             WatchProcessLock(history.path), release_when_empty=True
         )
+        self.watch_role = watch_role
+        self.watch_daemon: WatchDaemon | None = None
         self._command_byte_budget: int = self.DEFAULT_COMMAND_BYTE_BUDGET
         self._command_bytes_used: int = 0
         self._budget_lock = asyncio.Lock()
@@ -637,6 +645,8 @@ class OsintFacade:
 
     async def aclose(self) -> None:
         """Release backend / cdn / watch resources (history is owned by the caller)."""
+        if self.watch_daemon is not None:
+            await self.watch_daemon.stop()
         await self.watches.cancel_all()
         if self._cdn_client is not None:
             await self._cdn_client.aclose()

@@ -624,82 +624,38 @@ async def _run_oneshot(
         )
         return 1
 
-    # Reuse a single httpx client for every CDN download in the run so we do
-    # not pay TCP/TLS handshake cost on each media URL. Closed by facade.aclose().
-    # Route CDN downloads through the same proxy as backend API calls — an
-    # operator who configured `hiker_proxy` for OSINT identity protection
-    # expects media fetches (which hit `*.cdninstagram.com` / `*.fbcdn.net`)
-    # to be proxied just like the API surface.
-    import httpx as _httpx
-
-    from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
-    from insto.service.facade import OsintFacade
-    from insto.service.history import HistoryStore
-
-    # Construct backend / history / cdn-client / facade through `_format_error`
-    # so an OSError from the sqlite open (disk full, EACCES, read-only FS) or
-    # a constructor failure does not escape `asyncio.run` as a raw traceback —
-    # which would bypass `redact_secrets` and could leak path/secret info.
-    # Open sqlite first — it is the only step likely to fail with a real
-    # I/O error (permissions / disk / schema migration). Constructing the
-    # backend and cdn clients afterwards means a HistoryStore failure does
-    # not leak network sockets, and a later failure can be cleaned up with
-    # the async aclose() calls below since we are already in an event loop.
-    history: HistoryStore | None = None
-    backend: Any = None
-    cdn_client: Any = None
-    try:
-        history = HistoryStore(config.db_path)
-        backend = _build_backend(config)
-        cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
-        if config.hiker_proxy:
-            cdn_kwargs["proxy"] = config.hiker_proxy
-        cdn_client = _httpx.AsyncClient(**cdn_kwargs)
-        facade = OsintFacade(backend=backend, history=history, config=config, cdn_client=cdn_client)
-    except Exception as exc:
-        log.exception("one-shot bootstrap failed")
-        print(_format_error(exc), file=sys.stderr)
-        if cdn_client is not None:
-            with contextlib.suppress(Exception):
-                await cdn_client.aclose()
-        if backend is not None:
-            with contextlib.suppress(Exception):
-                await backend.aclose()
-        if history is not None:
-            with contextlib.suppress(Exception):
-                history.close()
-        return 1
-    assert history is not None  # for mypy: set above on the success path
+    from insto.service.runtime import open_runtime
 
     session = Session(target=target.lstrip("@") if target else None)
     head = cmd_argv[0].lstrip("/").lower() if cmd_argv else ""
     dispatch_ok = False
     try:
-        from rich.console import Console
+        async with open_runtime(
+            config,
+            role="oneshot",
+            backend_factory=_build_backend,
+        ) as runtime:
+            from rich.console import Console
 
-        from insto.ui.theme import get_theme
+            from insto.ui.theme import get_theme
 
-        console = Console(theme=get_theme(config.theme))
-        await dispatch(line, facade=facade, session=session, console=console)
-        dispatch_ok = True
-        return 0
-    except (BackendError, CommandUsageError) as exc:
-        log.exception("one-shot failed")
+            console = Console(theme=get_theme(config.theme))
+            try:
+                await dispatch(line, facade=runtime.facade, session=session, console=console)
+                dispatch_ok = True
+                return 0
+            except (BackendError, CommandUsageError) as exc:
+                log.exception("one-shot failed")
+                print(_format_error(exc), file=sys.stderr)
+                return 1
+            finally:
+                if head and dispatch_ok:
+                    with contextlib.suppress(Exception):
+                        await runtime.facade.record_command(head, session.target)
+    except Exception as exc:
+        log.exception("one-shot bootstrap failed")
         print(_format_error(exc), file=sys.stderr)
         return 1
-    finally:
-        # Only record successful dispatches in cli_history — typo'd / failed
-        # invocations would otherwise pollute /history and the welcome screen's
-        # "recent activity" with garbage rows.
-        if head and dispatch_ok:
-            with contextlib.suppress(Exception):
-                await facade.record_command(head, session.target)
-        # Close backend (cancels any pending tasks that may still touch
-        # history) before tearing down the sqlite store.
-        with contextlib.suppress(Exception):
-            await facade.aclose()
-        with contextlib.suppress(Exception):
-            history.close()
 
 
 # ---------------------------------------------------------------------------

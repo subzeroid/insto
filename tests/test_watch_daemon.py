@@ -211,9 +211,13 @@ async def test_due_tick_persists_success_and_stale_callback_stops(history: Histo
         now=lambda: 1_000,
     )
     await daemon.start()
-    await asyncio.sleep(0.02)
-    assert calls == ["alice"]
     persisted = history.get_watch("alice")
+    for _ in range(50):
+        if calls == ["alice"] and persisted is not None and persisted.last_ok == 1_000:
+            break
+        await asyncio.sleep(0.01)
+        persisted = history.get_watch("alice")
+    assert calls == ["alice"]
     assert persisted is not None and persisted.last_ok == 1_000
 
     assert history.delete_watch("alice")

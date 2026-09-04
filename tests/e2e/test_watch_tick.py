@@ -50,7 +50,9 @@ def test_watch_tick_emits_first_snapshot_notification(
 
     async def runner() -> None:
         config = load_config()
-        facade, cleanup = repl_mod._bootstrap(config)
+        facade, cleanup = await repl_mod._bootstrap(
+            config, watch_output=lambda message: console.print(message)
+        )
         try:
             with (
                 create_pipe_input() as pipe,

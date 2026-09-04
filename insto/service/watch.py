@@ -28,6 +28,23 @@ TickFn = Callable[[], Awaitable[Any]]
 StateChangedFn = Callable[[WatchSpec], Awaitable[bool]]
 
 
+def format_watch_diff(username: str, diff: dict[str, Any]) -> str:
+    """Render one compact watcher result for terminal/log output."""
+    if diff.get("first_seen"):
+        return f"@{username}: first snapshot — no prior state to diff against"
+    changes = diff.get("changes") or {}
+    prior = diff.get("previous_usernames") or []
+    if not changes and not prior:
+        return f"@{username}: no changes"
+    parts: list[str] = []
+    for field_name in sorted(changes):
+        delta = changes[field_name]
+        parts.append(f"{field_name}: {delta.get('old')!r} -> {delta.get('new')!r}")
+    if prior:
+        parts.append(f"aliases: {', '.join(prior)}")
+    return f"@{username} changed — " + "; ".join(parts)
+
+
 class WatchError(Exception):
     """Raised when a local watch cannot be scheduled safely."""
 
@@ -285,4 +302,4 @@ def _now_ts() -> int:
     return int(time.time())
 
 
-__all__ = ["StateChangedFn", "TickFn", "WatchError", "WatchManager"]
+__all__ = ["StateChangedFn", "TickFn", "WatchError", "WatchManager", "format_watch_diff"]

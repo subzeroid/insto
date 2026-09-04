@@ -60,6 +60,7 @@ from insto.service.exporter import (
 )
 from insto.service.history import HistoryStore
 from insto.service.watch import WatchManager
+from insto.service.watch_lock import WatchProcessLock
 
 
 class OsintFacade:
@@ -77,13 +78,16 @@ class OsintFacade:
         history: HistoryStore,
         config: Config,
         cdn_client: httpx.AsyncClient | None = None,
+        watches: WatchManager | None = None,
     ) -> None:
         self.backend = backend
         self.history = history
         self.config = config
         self._cdn_client = cdn_client
         self._pk_cache: dict[str, str] = {}
-        self.watches = WatchManager()
+        self.watches = watches or WatchManager(
+            WatchProcessLock(history.path), release_when_empty=True
+        )
         self._command_byte_budget: int = self.DEFAULT_COMMAND_BYTE_BUDGET
         self._command_bytes_used: int = 0
         self._budget_lock = asyncio.Lock()

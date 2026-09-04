@@ -95,6 +95,58 @@ rate-limit/account (aiograpi) risk. At the minimum interval, three watches mean
 targets are staggered by two seconds, and each target uses fixed-delay polling,
 so slow calls never overlap or create catch-up bursts.
 
+### Watch webhook notifications
+
+Set `INSTO_WATCH_WEBHOOK_URL` in the environment of the REPL or watch daemon to
+send a JSON notification when a watched account changes. The setting is
+environment-only: it is not accepted in `config.toml`, as a CLI argument, or in
+the sqlite store. Empty and unset values disable delivery. `/config` shows the
+setting as only `configured` or `disabled` and never prints the URL.
+
+Webhooks are active only in a persistent process that owns the watch executor
+lock: either the REPL or `insto watch-daemon`. A one-shot command never validates
+or uses the endpoint, including `insto @user -c watch`.
+
+After a watch tick persists its new snapshot and writes its terminal result,
+insto sends one version-1 event only when the current diff has a non-empty
+`changes` object. A first snapshot or unchanged tick sends nothing.
+`previous_usernames` supplies historical context for an otherwise real change;
+it cannot trigger an event by itself.
+
+```json
+{
+  "schema_version": 1,
+  "event": "watch.changed",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "target",
+  "observed_at": "2026-09-04T04:30:00Z",
+  "changes": {
+    "biography": {"old": "before", "new": "after"}
+  },
+  "previous_usernames": ["old_target"]
+}
+```
+
+`observed_at` is UTC. A `2xx` response succeeds. Transport errors, timeouts,
+`408`, `429`, and `5xx` responses get at most three total attempts, with 0.25
+seconds and then 1 second between them; every attempt has a hard five-second
+deadline. Redirects are not followed, and `3xx` or any other `4xx` response is
+not retried. Delivery uses a direct `trust_env=False` route, so ambient proxy
+and CA environment variables do not affect it. Response bodies are closed
+without being read and are never logged.
+
+Delivery failures produce only a redacted warning. They do not count as failed
+watch ticks, increment the watch error streak, or pause an otherwise healthy
+watch. Delivery is best-effort: an ambiguous network result can create a
+duplicate, so receivers should deduplicate on `event_id`. A process crash after
+snapshot persistence but before delivery can lose the event; there is no
+persistent outbox.
+
+Treat the endpoint as a secret and use a receiver you trust because account
+diffs can contain sensitive data. Use HTTPS except for local testing: plain HTTP
+is accepted only for `localhost` and loopback IP addresses. The endpoint is
+redacted from output and logs and is never persisted.
+
 The foreground daemon, signals, and single-executor advisory lock are POSIX-only
 in this release. Use a shell, service manager, or terminal multiplexer if the
 process should be restarted automatically after a machine reboot.

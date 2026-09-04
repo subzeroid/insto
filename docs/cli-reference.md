@@ -29,6 +29,7 @@ insto                                  # REPL (default)
 insto @instagram                       # REPL with @instagram pre-selected as the target
 insto -c info instagram                # one-shot; inline target
 insto setup                            # interactive config wizard
+insto watch-daemon                     # foreground executor for persisted watches
 insto --print-completion {bash|zsh}    # emit completion script (needs insto[completion])
 insto --version
 insto --help
@@ -161,11 +162,31 @@ Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They i
 
 | Command | Purpose |
 |---|---|
-| `/watch <user> [interval]` | Add a session-scoped watch (≥ 5 min interval, max 3 active). |
-| `/unwatch <user>` | Stop watching. |
-| `/watching` | List active watches with their state (`active` / `paused`). |
+| `/watch <user> [interval]` | Persist or explicitly reactivate a watch (≥ 5 min interval, max 3 active). With no user, uses the active target. |
+| `/unwatch <user>` | Delete a persisted watch and stop its local task. |
+| `/watching` | List persisted watches with state, last success, redacted error, and consecutive-error count. |
 | `/diff <user>` | Diff current profile vs the most recent stored snapshot. |
 | `/history [N]` | Last N rows of `cli_history`. |
+
+One-shot registration exits after writing the row; it never becomes an executor:
+
+```sh
+insto @nasa -c watch
+insto watch-daemon
+```
+
+The REPL and daemon use the same sqlite registry and a per-database POSIX lock,
+so exactly one process executes watches while every process can add, remove, or
+list them. The owner reconciles external changes within about two seconds.
+Daemon startup reports recovered watches and estimated load. `Ctrl+C` and
+`SIGTERM` drain in-flight tasks before resources and the lock are released.
+
+Each failed tick gets one immediate retry. Two consecutive failed ticks persist
+`paused`; `AuthInvalid` and `Banned` pause immediately. Re-run `/watch` to
+reactivate with a fresh registration identity. The minimum-interval maximum is
+36 ticks/hour, estimated at 72-108 backend calls/hour across three targets.
+HikerAPI polling consumes quota and may incur cost; aiograpi polling increases
+rate-limit and logged-in-account risk.
 
 ### Operational
 

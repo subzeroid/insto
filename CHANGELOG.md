@@ -2,6 +2,14 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## Unreleased
+
+### Added
+
+- Persistent SQLite-backed watch registrations with restart recovery, safe
+  single-executor ownership, REPL handoff, and the foreground `insto
+  watch-daemon` command. Closes #15 after merge.
+
 ## [0.7.17](https://github.com/subzeroid/insto/compare/v0.7.16...v0.7.17) (2026-06-20)
 
 

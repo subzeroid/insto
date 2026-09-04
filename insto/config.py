@@ -31,6 +31,7 @@ ENV_TOKEN = "HIKERAPI_TOKEN"
 ENV_PROXY = "HIKERAPI_PROXY"
 ENV_OUTPUT_DIR = "INSTO_OUTPUT_DIR"
 ENV_DB_PATH = "INSTO_DB_PATH"
+ENV_WATCH_WEBHOOK_URL = "INSTO_WATCH_WEBHOOK_URL"
 ENV_THEME = "INSTO_THEME"
 ENV_AIOGRAPI_USERNAME = "AIOGRAPI_USERNAME"
 ENV_AIOGRAPI_PASSWORD = "AIOGRAPI_PASSWORD"
@@ -95,6 +96,7 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
+    watch_webhook_url: str | None = None
     theme: str = DEFAULT_THEME_NAME
     backend: str = BACKEND_HIKERAPI
     aiograpi_username: str | None = None
@@ -208,6 +210,8 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
     )
     sources["aiograpi.session_path"] = "toml" if aio_session_raw else "default"
     sources["cli_history_path"] = "default"
+    watch_webhook_url = os.environ.get(ENV_WATCH_WEBHOOK_URL) or None
+    sources["watch.webhook_url"] = "env" if watch_webhook_url else "default"
 
     # Register the resolved token / proxy with the redaction set so any error
     # message that happens to echo them (SDK exception strings, httpx logs,
@@ -222,6 +226,8 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         register_secret(aio_pass)
     if isinstance(aio_totp, str):
         register_secret(aio_totp)
+    if watch_webhook_url:
+        register_secret(watch_webhook_url)
 
     return Config(
         hiker_token=token,
@@ -229,6 +235,7 @@ def load_config(cli_overrides: dict[str, Any] | None = None) -> Config:
         output_dir=Path(out_value),
         db_path=Path(db_value),
         cli_history_path=cli_history_path(),
+        watch_webhook_url=watch_webhook_url,
         theme=str(theme_value) if theme_value else DEFAULT_THEME_NAME,
         backend=normalize_backend(backend_value),
         aiograpi_username=aio_user,
@@ -287,6 +294,7 @@ def effective_config_report(config: Config) -> list[dict[str, Any]]:
         "output_dir": str(config.output_dir),
         "db_path": str(config.db_path),
         "cli_history_path": str(config.cli_history_path),
+        "watch.webhook_url": "configured" if config.watch_webhook_url else "disabled",
         "theme": config.theme,
         "backend": config.backend,
         "aiograpi.username": config.aiograpi_username,

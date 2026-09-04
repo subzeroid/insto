@@ -128,7 +128,7 @@ Cover free acquire, second-descriptor contention, idempotent release, distinct s
 first = WatchProcessLock(db_path)
 second = WatchProcessLock(db_path.parent / "." / db_path.name)
 first.acquire()
-with pytest.raises(WatchLockBusy):
+with pytest.raises(WatchLockBusyError):
     second.acquire()
 first.release()
 second.acquire()
@@ -143,7 +143,7 @@ Expected: collection fails because `insto.service.watch_lock` does not exist.
 
 - [ ] **Step 3: Implement the focused lock helper**
 
-Expose only `WatchLockError`, its `WatchLockBusy` subtype, and `WatchProcessLock`. The helper constructor takes `db_path: Path`; read-only `path: Path` and `acquired: bool` properties expose diagnostics; `acquire() -> None` and `release() -> None` own the descriptor lifecycle.
+Expose only `WatchLockError`, its `WatchLockBusyError` subtype, and `WatchProcessLock`. The helper constructor takes `db_path: Path`; read-only `path: Path` and `acquired: bool` properties expose diagnostics; `acquire() -> None` and `release() -> None` own the descriptor lifecycle.
 
 Use this concrete contention mapping:
 
@@ -152,7 +152,7 @@ try:
     fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError as exc:
     os.close(fd)
-    raise WatchLockBusy(f"watch executor already active for {canonical_db}") from exc
+    raise WatchLockBusyError(f"watch executor already active for {canonical_db}") from exc
 ```
 
 Canonicalize the database with `expanduser().resolve(strict=False)` and derive `<canonical-db>.watch.lock`. Open with `O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW` when available and mode `0o600`; validate `fstat` regular-file/current-uid properties before `fcntl.flock(fd, LOCK_EX | LOCK_NB)`. Write the PID only after ownership succeeds. Release with `LOCK_UN` and close; never unlink.
@@ -434,7 +434,7 @@ Expected: failures because `main()` treats `watch-daemon` as a profile target.
 
 - [ ] **Step 3: Implement foreground daemon execution**
 
-Add `async _run_watch_daemon(config, log) -> int`. Within daemon-role runtime, install `loop.add_signal_handler` for SIGINT/SIGTERM to set one event, print database/recovered/load estimates plus backend-specific risk text, then await `coordinator.run(stop_event)`. Map `WatchLockBusy` and infrastructure errors through centralized redaction to non-zero; graceful signals return zero. Route exact bare `watch-daemon` before command and REPL branches.
+Add `async _run_watch_daemon(config, log) -> int`. Within daemon-role runtime, install `loop.add_signal_handler` for SIGINT/SIGTERM to set one event, print database/recovered/load estimates plus backend-specific risk text, then await `coordinator.run(stop_event)`. Map `WatchLockBusyError` and infrastructure errors through centralized redaction to non-zero; graceful signals return zero. Route exact bare `watch-daemon` before command and REPL branches.
 
 - [ ] **Step 4: Run CLI and POSIX process tests**
 

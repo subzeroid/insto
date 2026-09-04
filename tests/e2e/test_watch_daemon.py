@@ -323,9 +323,11 @@ def test_daemon_delivers_changed_watch_webhook_without_leaking_secrets(
         }
         assert payload["previous_usernames"] == []
 
+        assert process.poll() is None
+        assert _remains_true(lambda: len(receiver.requests()) == 1)
+        assert process.poll() is None
         stdout, stderr = _stop_daemon(process)
         assert process.returncode == 0, f"stdout={stdout!r}; stderr={stderr!r}"
-        assert _remains_true(lambda: len(receiver.requests()) == 1)
 
         artifacts = _daemon_artifacts(Path(insto_env["INSTO_HOME"]), stdout, stderr)
         for private_value in (endpoint_sentinel, receiver.url, response_sentinel):

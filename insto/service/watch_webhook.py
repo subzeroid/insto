@@ -2,14 +2,88 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import ipaddress
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
 from insto.exceptions import BackendError
+
+ATTEMPT_TIMEOUT_SECONDS = 5.0
+_RETRY_DELAYS = (0.25, 1.0)
+SleepFn = Callable[[float], Awaitable[None]]
+
+
+class WebhookDeliveryError(BackendError):
+    """A safe, endpoint-independent webhook delivery failure."""
+
+
+class WebhookNotifier:
+    """Deliver watch events through one reusable streaming HTTP client."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        client: httpx.AsyncClient | None = None,
+        sleep: SleepFn = asyncio.sleep,
+    ) -> None:
+        self._endpoint = endpoint
+        self._client = (
+            client
+            if client is not None
+            else httpx.AsyncClient(follow_redirects=False, trust_env=False)
+        )
+        self._sleep = sleep
+        self._closed = False
+
+    async def send(self, payload: dict[str, Any]) -> None:
+        """POST one event, retrying only controlled transient failures."""
+        delivery_payload = copy.deepcopy(payload)
+        failure = "transport error"
+        for attempt in range(3):
+            try:
+                request = self._client.build_request("POST", self._endpoint, json=delivery_payload)
+                async with asyncio.timeout(ATTEMPT_TIMEOUT_SECONDS):
+                    response = await self._client.send(
+                        request,
+                        stream=True,
+                        follow_redirects=False,
+                    )
+                    try:
+                        status = response.status_code
+                    finally:
+                        await response.aclose()
+            except httpx.TransportError:
+                failure = "transport error"
+            except TimeoutError:
+                failure = "timeout"
+            except Exception:
+                raise WebhookDeliveryError(
+                    "watch webhook delivery failed: unexpected error"
+                ) from None
+            else:
+                failure = f"HTTP {status}"
+                if 200 <= status < 300:
+                    return
+                if not (status in {408, 429} or 500 <= status < 600):
+                    raise WebhookDeliveryError(f"watch webhook delivery failed: {failure}")
+
+            if attempt < len(_RETRY_DELAYS):
+                await self._sleep(_RETRY_DELAYS[attempt])
+
+        raise WebhookDeliveryError(f"watch webhook delivery failed: {failure}")
+
+    async def aclose(self) -> None:
+        """Close the reusable client once."""
+        if self._closed:
+            return
+        self._closed = True
+        await self._client.aclose()
 
 
 def validate_webhook_url(value: str) -> str:
@@ -67,4 +141,9 @@ def build_watch_event(
     }
 
 
-__all__ = ["build_watch_event", "validate_webhook_url"]
+__all__ = [
+    "WebhookDeliveryError",
+    "WebhookNotifier",
+    "build_watch_event",
+    "validate_webhook_url",
+]

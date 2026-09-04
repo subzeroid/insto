@@ -9,7 +9,7 @@ Interactive Instagram OSINT CLI on the [HikerAPI](https://hikerapi.com/p/6k1q138
 - **HikerAPI is the default backend, not a side mode.** Quota balance is read on REPL startup and surfaced in the bottom toolbar; `with_retry` honours `RateLimited.retry_after`; every mapper raises typed `SchemaDrift(endpoint, missing_field)` when HikerAPI's documented fields move. Logged-in `aiograpi` is one extra (`pipx install 'insto[aiograpi]'`) when you actually need data behind the login wall — but kept off the default path so your account isn't in scope.
 - **Async, typed, tested.** Python >= 3.11, strict mypy, ruff-clean, and 900+ offline tests. Backends, facade, commands all `async def`.
 - **Two surfaces, one grammar.** A prompt-toolkit REPL with slash-popup completion and live `/watch` notifications, *and* a Unix-friendly one-shot mode (`insto @user -c info`). `--json -` and `--csv -` write to stdout; `/batch -` reads targets from stdin.
-- **Snapshot / watch / diff.** Persisted in `~/.insto/store.db`. Poll a target on an interval; diff against the last snapshot.
+- **Persistent snapshot / watch / diff.** Registrations and snapshots live in `~/.insto/store.db`; run them in the REPL or keep `insto watch-daemon` in the foreground across REPL exits and restarts.
 - **Maltego CSV export** out of the box (`--maltego` on any flat-row command, plus full `/dossier`).
 
 Two surfaces over the same command grammar:
@@ -190,7 +190,16 @@ insto @nasa -c fans --limit 10                             # top fans = ❤️ +
 insto @ferrari -c recommended --maltego                    # IG's "same category" recommendations
 cat targets.txt | insto -c batch - info --yes              # stdin pipe + non-interactive
 insto -c dossier instagram --maltego                       # full target package, Maltego CSVs per section
+insto @ferrari -c watch                                   # persist a 5-minute watch and exit
+insto watch-daemon                                        # execute persisted watches in foreground
 ```
+
+Only one REPL or daemon executes watches for a given sqlite store. Registrations
+remain available to every process through the store; `/watching` shows active or
+paused state, and `/watch` explicitly reactivates a paused target. The daemon
+prints its recovered-watch count, estimated backend load, and backend-specific
+quota/cost or account-risk reminder at startup. Stop it with `Ctrl+C` or
+`SIGTERM`; a later start resumes due watches without overlapping ticks.
 
 `-c <cmd>` consumes the rest of `argv` as the slash-command's arguments,
 so `-c batch targets.txt info` runs `batch targets.txt info` (one `-c`
@@ -244,7 +253,7 @@ echo 'fpath+=~/.insto && autoload -Uz compinit && compinit' >> ~/.zshrc
 | **Discovery** | `resolve` | expand `instagram.com/share/...` short-links to canonical URLs (aiograpi only) |
 | **Direct** | `direct` `direct-thread` | read-only Direct threads and messages (aiograpi only) |
 | **Saved** | `collections` `saved` | read-only saved collections and saved posts for the logged-in aiograpi account |
-| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | poll-based snapshot diffing; cli-history |
+| **Watch / diff** | `watch` `unwatch` `watching` `diff` `history` | persistent poll-based snapshot diffing; foreground daemon; cli-history |
 | **Operational** | `quota` `health` `config` `purge` | balance + p50/p95 latency + error breakdown, effective config with origins, sqlite/cache cleanup |
 | **Session** | `target` `current` `clear` | active-target plumbing for the REPL |
 | **Batch / dossier** | `batch` `dossier` 🔥 | run one command across a target list, **`dossier` = full target package (profile + media + network + analytics) with `--maltego` CSV per section** |
@@ -257,6 +266,7 @@ Pretty much every command takes `--limit N` (paging cap) and supports `--json` /
 
 - `~/.insto/config.toml` — settings (mode `0600`).
 - `~/.insto/store.db` — sqlite store: snapshots, watches, cli history.
+- `~/.insto/store.db.watch.lock` — stable owner-only POSIX executor lock (kept on disk, advisory ownership is released when the process exits).
 - `~/.insto/logs/insto.log` — rotating log file (mode `0600`, secrets redacted).
 - `~/.insto/aiograpi.session.json` — persisted Instagram session for the
   aiograpi backend (mode `0600`; only created when you pick that backend).

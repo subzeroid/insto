@@ -631,48 +631,28 @@ async def _safe_refresh_quota(facade: OsintFacade, *, timeout: float = 2.0) -> N
         await asyncio.wait_for(refresh(), timeout=timeout)
 
 
-def _bootstrap(config: Config | None = None) -> tuple[OsintFacade, Callable[[], Awaitable[None]]]:
-    """Construct facade + cleanup closure. Separated so tests can stub it."""
+async def _bootstrap(
+    config: Config | None = None,
+    *,
+    watch_output: Callable[[str], None] | None = None,
+) -> tuple[OsintFacade, Callable[[], Awaitable[None]]]:
+    """Enter the shared REPL runtime and return its tested cleanup seam."""
     cfg = config if config is not None else load_config()
-
-    # Reuse a single httpx client across CDN downloads so HTTP/2 connection
-    # reuse + TLS session resumption work for the whole REPL session. The
-    # facade owns the client and closes it via aclose(). Same proxy as the
-    # backend API client — see cli._run_oneshot for the rationale.
-    import httpx as _httpx
-
-    from insto.backends._cdn import DEFAULT_TIMEOUT as _CDN_TIMEOUT
     from insto.cli import _build_backend
-    from insto.service.facade import OsintFacade
-    from insto.service.history import HistoryStore
+    from insto.service.runtime import open_runtime
 
-    # Open the sqlite store first: it is the most likely step to raise
-    # (permissions, disk, schema migration) and is the only resource that
-    # needs sync cleanup. Backend and cdn clients are constructed last so
-    # a `HistoryStore(...)` failure does not leak network sockets.
-    history = HistoryStore(cfg.db_path)
-    try:
-        backend = _build_backend(cfg)
-        cdn_kwargs: dict[str, Any] = {"follow_redirects": False, "timeout": _CDN_TIMEOUT}
-        if cfg.hiker_proxy:
-            cdn_kwargs["proxy"] = cfg.hiker_proxy
-        cdn_client = _httpx.AsyncClient(**cdn_kwargs)
-        facade = OsintFacade(backend=backend, history=history, config=cfg, cdn_client=cdn_client)
-    except BaseException:
-        with contextlib.suppress(Exception):
-            history.close()
-        raise
+    context = open_runtime(
+        cfg,
+        role="repl",
+        backend_factory=_build_backend,
+        watch_output=watch_output,
+    )
+    runtime = await context.__aenter__()
 
     async def cleanup() -> None:
-        # Cancel watches and close the backend BEFORE the history store —
-        # an in-flight tick may still call into history.add_snapshot_async,
-        # and closing the sqlite connection underneath it would error.
-        with contextlib.suppress(Exception):
-            await facade.aclose()
-        with contextlib.suppress(Exception):
-            history.close()
+        await context.__aexit__(None, None, None)
 
-    return facade, cleanup
+    return runtime.facade, cleanup
 
 
 def run_repl(
@@ -683,10 +663,16 @@ def run_repl(
     `target` is the optional CLI positional (`insto @user`): when set, it is
     pre-selected as the active session target before the banner renders.
     """
-    facade, cleanup = _bootstrap(config)
-    cfg = config if config is not None else facade.config
+    cfg = config if config is not None else load_config()
 
     async def _main() -> None:
+        console = Console(theme=get_theme(cfg.theme))
+
+        def watch_output(message: str) -> None:
+            with patch_stdout(raw=True):
+                console.print(message)
+
+        facade, cleanup = await _bootstrap(cfg, watch_output=watch_output)
         # Refresh quota *before* the welcome screen renders, so the banner
         # shows real numbers ("14.7M requests left · $4,417") instead of
         # "balance: pending". The roundtrip costs ~200ms and is bounded by a
@@ -694,7 +680,7 @@ def run_repl(
         # banner falls back to the "pending" label and the REPL still opens.
         await _safe_refresh_quota(facade)
 
-        repl = Repl(facade=facade, config=cfg, email=email)
+        repl = Repl(facade=facade, config=cfg, console=console, email=email)
         # Pre-select the CLI-supplied target so the first banner + prompt show
         # it. Local-only (no network), best-effort: a bad target warns and
         # opens the REPL with none set.

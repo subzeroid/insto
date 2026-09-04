@@ -19,6 +19,7 @@ from typing import Literal
 
 ProfileAccess = Literal["public", "followed", "private", "blocked", "deleted"]
 WatchStatus = Literal["active", "paused"]
+WatchRegistrationKind = Literal["created", "reactivated", "already_active", "full"]
 
 
 @dataclass(slots=True)
@@ -261,19 +262,25 @@ class Quota:
         return cls(remaining=None, limit=None, reset_at=None)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class WatchSpec:
-    """A `/watch` registration. Lives in the `watches` sqlite table.
-
-    `interval_seconds` is enforced ≥ 300 (5 minutes) by the watch scheduler,
-    not by the dataclass — the DTO only carries state.
-    """
+    """Immutable persisted `/watch` registration."""
 
     user: str
+    registration_id: str
     interval_seconds: int
     last_ok: int | None = None
     last_error: str | None = None
+    consecutive_errors: int = 0
     status: WatchStatus = "active"
+
+
+@dataclass(frozen=True, slots=True)
+class WatchRegistration:
+    """Typed result of an atomic watch registration attempt."""
+
+    kind: WatchRegistrationKind
+    spec: WatchSpec | None
 
 
 @dataclass(slots=True)

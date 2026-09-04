@@ -1,6 +1,7 @@
 # Roadmap
 
-Deferred work that is still relevant after the aiograpi 0.9.x update.
+Shipped follow-ups and deferred work that remain relevant after the aiograpi
+0.9.x update.
 
 ## aiograpi follow-ups
 
@@ -99,11 +100,12 @@ Next:
 
 Priority: shipped
 
-## Existing deferred work
+## Recently shipped
 
 ### Persistent watch daemon
 
-Turn session-local `/watch` registrations into a persistent daemon with restart recovery and a control surface from REPL / one-shot CLI.
+Persistent `/watch` registrations now recover across process restarts and have
+a shared control surface in the REPL and one-shot CLI.
 
 Use case: a local long-running monitor for a small set of important targets,
 so profile snapshots and `/diff` history keep moving after the REPL exits or
@@ -124,7 +126,20 @@ Non-goals for the first slice: broad discovery crawling, high-volume watch
 lists, a network service, an HTTP API, telemetry, phone-home, or lowering the
 interval floor outside tests.
 
-Priority: P2
+Status, 2026-09-04:
+
+- Added schema-v2 persistent registrations with conditional generation ids and
+  error streaks that survive restart.
+- Added one secure POSIX executor lock per canonical database plus REPL
+  control-only handoff.
+- Added `insto watch-daemon` with recovery, deterministic overdue staggering,
+  load/risk output, and graceful SIGINT/SIGTERM shutdown.
+- Added offline process coverage for tick persistence, contention, shutdown,
+  and restart.
+
+Priority: shipped
+
+## Existing deferred work
 
 ### At-rest store encryption
 

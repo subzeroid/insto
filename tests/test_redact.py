@@ -47,6 +47,12 @@ def test_redacts_bearer_header() -> None:
     assert "Bearer ***" in out
 
 
+def test_bearer_redaction_is_stable_when_registered_secret_overlaps_token() -> None:
+    register_secret("secret")
+
+    assert redact_secrets("Bearer tok-super-secret") == "Bearer ***"
+
+
 def test_short_env_token_not_substituted(monkeypatch: pytest.MonkeyPatch) -> None:
     """Avoid replacing trivially-short strings — would produce nonsense."""
     monkeypatch.setenv("HIKERAPI_TOKEN", "ab")

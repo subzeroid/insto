@@ -48,7 +48,7 @@ def test_repl_target_info_posts_quit_session(
 
     async def runner() -> None:
         config = load_config()
-        facade, cleanup = repl_mod._bootstrap(config)
+        facade, cleanup = await repl_mod._bootstrap(config)
         try:
             with (
                 create_pipe_input() as pipe,

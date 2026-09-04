@@ -67,15 +67,37 @@ insto @nasa -c hashtags --csv - | awk -F, '$2=="space"{print $3}'
 
 ```text
 /watch nasa 600            # poll every 10 minutes (300s is the floor)
-/watching                  # list active watches
+/watching                  # list persisted active/paused watches
 /diff nasa                 # diff vs the most recent snapshot
 /unwatch nasa
 ```
 
-Watches are session-local today: registrations are stored in sqlite, but the
-polling task dies when the REPL exits. Persistent daemon recovery is tracked in
-the [Roadmap](roadmap.md) and stays intentionally small: 1-3 targets, 10-60
-minute intervals for normal use.
+`/watch` writes to sqlite immediately. A REPL executes the registered watches
+when it owns the store's executor lock; if another REPL or daemon owns it, the
+registration is still saved and that owner discovers it within about two
+seconds. One-shot registration also persists without keeping the command alive:
+
+```sh
+insto @nasa -c watch 600   # save a 10-minute watch, then exit
+insto watch-daemon         # foreground executor; Ctrl+C or SIGTERM stops it
+```
+
+There can be at most three active watches and the interval floor is 300 seconds.
+A tick retries once. Two consecutive failed ticks pause that target across
+process restarts; authentication or account-ban errors pause it immediately.
+Run `/watch nasa 600` again to reactivate a paused row, or `/unwatch nasa` to
+delete it. A successful tick clears the stored error counter.
+
+On startup the daemon reports its sqlite path, recovered count, estimated
+ticks/backend calls per hour, and the relevant quota/cost (HikerAPI) or
+rate-limit/account (aiograpi) risk. At the minimum interval, three watches mean
+36 ticks/hour and an estimated 72-108 backend calls/hour. Recovered overdue
+targets are staggered by two seconds, and each target uses fixed-delay polling,
+so slow calls never overlap or create catch-up bursts.
+
+The foreground daemon, signals, and single-executor advisory lock are POSIX-only
+in this release. Use a shell, service manager, or terminal multiplexer if the
+process should be restarted automatically after a machine reboot.
 
 ## Privacy
 

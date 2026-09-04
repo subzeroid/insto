@@ -1,16 +1,7 @@
-"""Tests for `insto.commands.watch`: /watch, /unwatch, /watching, /diff, /history.
-
-The watch tick is exercised directly through `WatchManager.tick_once(...)`
-so tests do not have to wait minutes for the periodic loop. The full
-periodic loop is exercised in the cancellation test where every watch is
-sleeping in its 5-minute interval and `aclose()` cancels them.
-"""
+"""Tests for persistent watch controls plus `/diff` and `/history`."""
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import time
 from collections.abc import AsyncGenerator, Generator
 from pathlib import Path
 
@@ -19,17 +10,12 @@ from rich.console import Console
 
 # Importing the package registers /watch, /unwatch, /watching, /diff, /history.
 import insto.commands  # noqa: F401  (side-effect import)
-from insto.commands._base import (
-    CommandUsageError,
-    Session,
-    dispatch,
-)
+from insto._redact import register_secret
+from insto.commands._base import CommandUsageError, Session, dispatch
 from insto.config import Config
-from insto.exceptions import Banned, Transient
 from insto.models import Profile
 from insto.service.facade import OsintFacade
 from insto.service.history import HistoryStore
-from insto.service.watch import WatchManager
 from tests.fakes import FakeBackend
 
 # ---------------------------------------------------------------------------
@@ -73,7 +59,7 @@ async def facade(
     try:
         yield f
     finally:
-        await f.watches.cancel_all()
+        await f.aclose()
 
 
 @pytest.fixture
@@ -94,20 +80,17 @@ def console() -> Console:
 async def test_watch_registers_target_and_caps_at_three(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    try:
-        await dispatch("/watch alice 600", facade=facade, session=session, console=console)
-        await dispatch("/watch bob 600", facade=facade, session=session, console=console)
-        await dispatch("/watch carol 600", facade=facade, session=session, console=console)
-        assert len(facade.watches) == 3
-        with pytest.raises(CommandUsageError, match="too many active watches"):
-            await dispatch(
-                "/watch dave 600",
-                facade=facade,
-                session=session,
-                console=console,
-            )
-    finally:
-        await facade.watches.cancel_all()
+    await dispatch("/watch alice 600", facade=facade, session=session, console=console)
+    await dispatch("/watch bob 600", facade=facade, session=session, console=console)
+    await dispatch("/watch carol 600", facade=facade, session=session, console=console)
+    assert len(facade.history.list_watches()) == 3
+    with pytest.raises(CommandUsageError, match="too many active watches"):
+        await dispatch(
+            "/watch dave 600",
+            facade=facade,
+            session=session,
+            console=console,
+        )
 
 
 async def test_watch_rejects_short_interval(
@@ -120,34 +103,40 @@ async def test_watch_rejects_short_interval(
             session=session,
             console=console,
         )
-    assert len(facade.watches) == 0
+    assert facade.history.list_watches() == []
 
 
 async def test_watch_rejects_duplicate_user(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    try:
-        await dispatch("/watch alice 600", facade=facade, session=session, console=console)
-        with pytest.raises(CommandUsageError, match="already watching"):
-            await dispatch(
-                "/watch alice 600",
-                facade=facade,
-                session=session,
-                console=console,
-            )
-    finally:
-        await facade.watches.cancel_all()
+    await dispatch("/watch alice 600", facade=facade, session=session, console=console)
+    with pytest.raises(CommandUsageError, match="already watching"):
+        await dispatch(
+            "/watch @ALICE 600",
+            facade=facade,
+            session=session,
+            console=console,
+        )
 
 
 async def test_watch_uses_session_target_when_no_arg(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
     session.set_target("alice")
-    try:
-        await dispatch("/watch", facade=facade, session=session, console=console)
-        assert "alice" in facade.watches
-    finally:
-        await facade.watches.cancel_all()
+    payload = await dispatch("/watch", facade=facade, session=session, console=console)
+    assert payload["user"] == "alice"
+    assert facade.history.get_watch("alice") is not None
+
+
+async def test_watch_treats_single_numeric_arg_as_interval_for_session_target(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    session.set_target("alice")
+
+    payload = await dispatch("/watch 600", facade=facade, session=session, console=console)
+
+    assert payload["user"] == "alice"
+    assert payload["interval_seconds"] == 600
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +147,10 @@ async def test_watch_uses_session_target_when_no_arg(
 async def test_unwatch_removes_active_watch(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    try:
-        await dispatch("/watch alice 600", facade=facade, session=session, console=console)
-        result = await dispatch("/unwatch alice", facade=facade, session=session, console=console)
-        assert result is True
-        assert "alice" not in facade.watches
-    finally:
-        await facade.watches.cancel_all()
+    await dispatch("/watch alice 600", facade=facade, session=session, console=console)
+    result = await dispatch("/unwatch @ALICE", facade=facade, session=session, console=console)
+    assert result is True
+    assert facade.history.get_watch("alice") is None
 
 
 async def test_unwatch_unknown_returns_false(
@@ -177,14 +163,12 @@ async def test_unwatch_unknown_returns_false(
 async def test_watching_lists_active_watches(
     facade: OsintFacade, session: Session, console: Console
 ) -> None:
-    try:
-        await dispatch("/watch alice 600", facade=facade, session=session, console=console)
-        await dispatch("/watch bob 900", facade=facade, session=session, console=console)
-        rows = await dispatch("/watching", facade=facade, session=session, console=console)
-        users = sorted(r["user"] for r in rows)
-        assert users == ["alice", "bob"]
-    finally:
-        await facade.watches.cancel_all()
+    await dispatch("/watch alice 600", facade=facade, session=session, console=console)
+    await dispatch("/watch bob 900", facade=facade, session=session, console=console)
+    rows = await dispatch("/watching", facade=facade, session=session, console=console)
+    users = sorted(r["user"] for r in rows)
+    assert users == ["alice", "bob"]
+    assert all("registration_id" not in row for row in rows)
 
 
 async def test_watching_when_empty(facade: OsintFacade, session: Session, console: Console) -> None:
@@ -193,117 +177,76 @@ async def test_watching_when_empty(facade: OsintFacade, session: Session, consol
     assert "no active watches" in console.export_text()
 
 
-# ---------------------------------------------------------------------------
-# Tick state machine — direct WatchManager API
-# ---------------------------------------------------------------------------
+async def test_watch_reactivates_paused_row_with_new_internal_id(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    created = facade.history.register_watch("alice", 300).spec
+    assert created is not None
+    assert facade.history.update_watch_state(
+        created, last_error="temporary", consecutive_errors=2, status="paused"
+    )
+
+    payload = await dispatch("/watch ALICE 900", facade=facade, session=session, console=console)
+    current = facade.history.get_watch("alice")
+    assert current is not None
+    assert current.registration_id != created.registration_id
+    assert current.interval_seconds == 900
+    assert current.status == "active"
+    assert current.consecutive_errors == 0
+    assert current.last_error is None
+    assert "registration_id" not in payload
 
 
-async def test_tick_paused_after_two_consecutive_failures() -> None:
-    mgr = WatchManager()
-    calls = {"n": 0}
+async def test_watch_and_unwatch_request_immediate_reconciliation(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    calls = 0
 
-    async def tick() -> None:
-        calls["n"] += 1
-        raise Transient("network blip")
+    class CoordinatorSpy:
+        def request_reconcile(self) -> None:
+            nonlocal calls
+            calls += 1
 
-    mgr.add("alice", 600, tick=tick, start=False)
+        async def stop(self) -> None:
+            return None
 
-    spec = await mgr.tick_once("alice")
-    assert spec.status == "active"
-    # one failed tick uses both the initial attempt and one retry
-    assert calls["n"] == 2
-
-    spec = await mgr.tick_once("alice")
-    assert spec.status == "paused"
-    assert spec.last_error and "network blip" in spec.last_error
-    assert calls["n"] == 4
-
-    await mgr.cancel_all()
+    facade.watch_daemon = CoordinatorSpy()  # type: ignore[assignment]
+    await dispatch("/watch alice 300", facade=facade, session=session, console=console)
+    await dispatch("/unwatch alice", facade=facade, session=session, console=console)
+    assert calls == 2
 
 
-async def test_tick_recovers_on_retry() -> None:
-    mgr = WatchManager()
-    state = {"n": 0}
-
-    async def tick() -> None:
-        state["n"] += 1
-        if state["n"] == 1:
-            raise Transient("flap")
-
-    mgr.add("alice", 600, tick=tick, start=False)
-    spec = await mgr.tick_once("alice")
-    assert spec.status == "active"
-    assert spec.last_error is None
-    assert spec.last_ok is not None
-    await mgr.cancel_all()
+async def test_one_shot_watch_prints_daemon_reminder(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    facade.watch_role = "oneshot"
+    payload = await dispatch("/watch @Alice 300", facade=facade, session=session, console=console)
+    assert payload["user"] == "alice"
+    assert "registration_id" not in payload
+    assert "insto watch-daemon" in console.export_text()
 
 
-async def test_tick_banned_pauses_immediately_without_breaking_loop() -> None:
-    mgr = WatchManager()
-    calls = {"n": 0}
+async def test_watching_redacts_persisted_errors_and_hides_internal_id(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    secret = "tok-super-secret"
+    register_secret(secret)
+    created = facade.history.register_watch("alice", 300).spec
+    assert created is not None
+    assert facade.history.update_watch_state(created, last_error=f"Bearer {secret}")
 
-    async def tick() -> None:
-        calls["n"] += 1
-        raise Banned("account suspended")
-
-    mgr.add("alice", 600, tick=tick, start=False)
-    spec = await mgr.tick_once("alice")
-    assert spec.status == "paused"
-    assert calls["n"] == 1  # no retry on a hard ban
-    assert "suspended" in (spec.last_error or "")
-    # The manager itself stayed alive after the failed tick.
-    assert "alice" in mgr
-    await mgr.cancel_all()
-
-
-async def test_cancel_all_drains_running_loop_tasks_quickly() -> None:
-    mgr = WatchManager()
-
-    async def tick() -> None:
-        return None
-
-    for user in ("alice", "bob", "carol"):
-        mgr.add(user, 600, tick=tick)
-
-    # Yield once so the loop tasks reach their first `asyncio.sleep`.
-    await asyncio.sleep(0)
-
-    start = time.monotonic()
-    await mgr.cancel_all()
-    elapsed = time.monotonic() - start
-    assert elapsed < 0.1
-    assert len(mgr) == 0
-
-
-async def test_cancel_all_drains_in_flight_tick() -> None:
-    """A cancellation while a tick is mid-flight must not leave a detached
-    coroutine running — `cancel_all` is awaited from REPL shutdown right
-    before the history store closes, and a stray tick would write to a
-    closed sqlite connection.
-    """
-    mgr = WatchManager()
-    started = asyncio.Event()
-    finished = False
-
-    async def slow_tick() -> None:
-        nonlocal finished
-        started.set()
-        try:
-            await asyncio.sleep(60)
-        finally:
-            finished = True
-
-    spec = mgr.add("alice", 1, tick=slow_tick, start=False)
-    assert spec.user == "alice"
-    # Drive a tick directly so we control timing.
-    tick_task = asyncio.create_task(mgr.tick_once("alice"))
-    await started.wait()  # tick is now running inside _run_tick
-    await mgr.cancel_all()
-    # cancel_all must have cancelled the in-flight invoke task.
-    assert finished is True
-    # Drain the orphaned outer task.
-    with contextlib.suppress(BaseException):
-        await tick_task
+    rows = await dispatch("/watching", facade=facade, session=session, console=console)
+    assert rows == [
+        {
+            "user": "alice",
+            "interval_seconds": 300,
+            "last_ok": None,
+            "last_error": "Bearer ***",
+            "consecutive_errors": 0,
+            "status": "active",
+        }
+    ]
+    assert secret not in console.export_text()
 
 
 # ---------------------------------------------------------------------------

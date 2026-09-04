@@ -91,13 +91,23 @@ def test_run_repl_pre_selects_startup_target(
     async def _cleanup() -> None:
         return None
 
-    monkeypatch.setattr(repl_mod, "_bootstrap", lambda cfg=None: (facade, _cleanup))
+    async def _fake_bootstrap(
+        cfg: Config | None = None, *, watch_output: object = None
+    ) -> tuple[OsintFacade, object]:
+        return facade, _cleanup
+
+    monkeypatch.setattr(repl_mod, "_bootstrap", _fake_bootstrap)
 
     captured: dict[str, str | None] = {}
 
     class StubRepl:
         def __init__(
-            self, *, facade: OsintFacade, config: Config, email: str | None = None
+            self,
+            *,
+            facade: OsintFacade,
+            config: Config,
+            console: Console,
+            email: str | None = None,
         ) -> None:
             self.facade = facade
             self.session = Session()

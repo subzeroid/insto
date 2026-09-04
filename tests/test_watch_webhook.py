@@ -2,13 +2,54 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 import pytest
 
 from insto.exceptions import BackendError
-from insto.service.watch_webhook import build_watch_event, validate_webhook_url
+from insto.service import watch_webhook
+from insto.service.watch_webhook import (
+    WebhookDeliveryError,
+    WebhookNotifier,
+    build_watch_event,
+    validate_webhook_url,
+)
+
+ENDPOINT = "https://receiver.example/private-hook?token=endpoint-secret"
+PAYLOAD: dict[str, Any] = {
+    "schema_version": 1,
+    "event": "watch.changed",
+    "event_id": "evt-delivery-123",
+    "username": "alice",
+    "observed_at": "2026-09-04T18:30:45Z",
+    "changes": {"biography": {"old": "old", "new": "new"}},
+    "previous_usernames": ["old_alice"],
+}
+
+
+class GuardedStream(httpx.AsyncByteStream):
+    """Response stream that records closure and fails if anyone reads it."""
+
+    def __init__(self) -> None:
+        self.read = False
+        self.close_calls = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        self.read = True
+        raise AssertionError("webhook response body must not be read")
+        yield b"unreachable"
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+
+
+async def _close_notifier(notifier: WebhookNotifier) -> None:
+    await notifier.aclose()
 
 
 @pytest.mark.parametrize(
@@ -146,3 +187,366 @@ def test_build_watch_event_copies_nested_mutable_values() -> None:
 
     assert event["changes"] == {"labels": {"old": [], "new": ["one"]}}
     assert event["previous_usernames"] == ["old_alice"]
+
+
+@pytest.mark.parametrize("status", range(200, 300))
+async def test_notifier_accepts_every_2xx_class_status(status: int) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(status, stream=GuardedStream())
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    try:
+        await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert len(requests) == 1
+    assert requests[0].method == "POST"
+    assert str(requests[0].url) == ENDPOINT
+    assert json.loads(requests[0].content) == PAYLOAD
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_message"),
+    [
+        ("transport", "watch webhook delivery failed: transport error"),
+        ("timeout", "watch webhook delivery failed: timeout"),
+        (408, "watch webhook delivery failed: HTTP 408"),
+        (429, "watch webhook delivery failed: HTTP 429"),
+        (500, "watch webhook delivery failed: HTTP 500"),
+        (503, "watch webhook delivery failed: HTTP 503"),
+        (599, "watch webhook delivery failed: HTTP 599"),
+    ],
+)
+async def test_notifier_retries_transient_failures_three_times(
+    failure: str | int,
+    expected_message: str,
+) -> None:
+    requests: list[dict[str, Any]] = []
+    streams: list[GuardedStream] = []
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if failure == "transport":
+            raise httpx.ConnectError(
+                "raw failure at https://internal.example/private-secret",
+                request=request,
+            )
+        if failure == "timeout":
+            raise TimeoutError("raw failure at https://internal.example/private-secret")
+        stream = GuardedStream()
+        streams.append(stream)
+        return httpx.Response(
+            int(failure),
+            stream=stream,
+            headers={"x-private": "body-secret"},
+        )
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        with pytest.raises(WebhookDeliveryError) as caught:
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert str(caught.value) == expected_message
+    assert ENDPOINT not in str(caught.value)
+    assert "private-secret" not in str(caught.value)
+    assert "body-secret" not in str(caught.value)
+    assert requests == [PAYLOAD, PAYLOAD, PAYLOAD]
+    assert all(request["event_id"] == "evt-delivery-123" for request in requests)
+    assert delays == [0.25, 1.0]
+    assert all(not stream.read and stream.close_calls == 1 for stream in streams)
+
+
+@pytest.mark.parametrize(
+    ("outcomes", "expected_attempts", "expected_delays"),
+    [
+        (("transport", 503, 204), 3, [0.25, 1.0]),
+        ((429, 201), 2, [0.25]),
+    ],
+)
+async def test_notifier_stops_retrying_after_mixed_success(
+    outcomes: tuple[str | int, ...],
+    expected_attempts: int,
+    expected_delays: list[float],
+) -> None:
+    pending = list(outcomes)
+    requests: list[dict[str, Any]] = []
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        outcome = pending.pop(0)
+        if outcome == "transport":
+            raise httpx.ReadError("raw failure", request=request)
+        return httpx.Response(outcome)
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert requests == [PAYLOAD] * expected_attempts
+    assert delays == expected_delays
+
+
+async def test_notifier_freezes_payload_for_all_attempts() -> None:
+    payload = {
+        **PAYLOAD,
+        "changes": {"labels": {"old": [], "new": ["one"]}},
+    }
+    expected = json.loads(json.dumps(payload))
+    request_bodies: list[bytes] = []
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        request_bodies.append(request.content)
+        return httpx.Response(503 if attempts == 1 else 204)
+
+    async def mutate_payload(_delay: float) -> None:
+        payload["event_id"] = "mutated-event-id"
+        payload["changes"]["labels"]["new"].append("two")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=mutate_payload)
+    try:
+        await notifier.send(payload)
+    finally:
+        await _close_notifier(notifier)
+
+    assert [json.loads(body) for body in request_bodies] == [expected, expected]
+    assert request_bodies[0] == request_bodies[1]
+
+
+async def test_notifier_converts_unexpected_client_failure_safely() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise RuntimeError("raw endpoint-secret failure details")
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        with pytest.raises(WebhookDeliveryError) as caught:
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert str(caught.value) == "watch webhook delivery failed: unexpected error"
+    assert "endpoint-secret" not in str(caught.value)
+    assert attempts == 1
+    assert delays == []
+
+
+@pytest.mark.parametrize("status", [300, 301, 307, 308, 400, 401, 404, 409, 499])
+async def test_notifier_fails_permanent_status_once(status: int) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(status, content=b"private response body sentinel")
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        with pytest.raises(WebhookDeliveryError) as caught:
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert str(caught.value) == f"watch webhook delivery failed: HTTP {status}"
+    assert "response body sentinel" not in str(caught.value)
+    assert ENDPOINT not in str(caught.value)
+    assert attempts == 1
+    assert delays == []
+
+
+async def test_notifier_does_not_follow_redirects() -> None:
+    requested_urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_urls.append(str(request.url))
+        return httpx.Response(302, headers={"location": "https://redirect.example/private"})
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    try:
+        with pytest.raises(WebhookDeliveryError, match="HTTP 302"):
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert requested_urls == [ENDPOINT]
+
+
+async def test_notifier_default_client_disables_redirects_and_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constructor_calls: list[dict[str, Any]] = []
+    real_async_client = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        assert args == ()
+        constructor_calls.append(kwargs)
+        return real_async_client(**kwargs)
+
+    monkeypatch.setattr(watch_webhook.httpx, "AsyncClient", client_factory)
+    notifier = WebhookNotifier(ENDPOINT)
+    await notifier.aclose()
+
+    assert constructor_calls == [{"follow_redirects": False, "trust_env": False}]
+
+
+async def test_notifier_enforces_hard_attempt_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(watch_webhook, "ATTEMPT_TIMEOUT_SECONDS", 0.01)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        with pytest.raises(WebhookDeliveryError) as caught:
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert str(caught.value) == "watch webhook delivery failed: timeout"
+    assert attempts == 3
+    assert delays == [0.25, 1.0]
+
+
+async def test_notifier_closes_large_stream_without_reading_body() -> None:
+    stream = GuardedStream()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-length": str(10 * 1024 * 1024)},
+            stream=stream,
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    try:
+        await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert stream.read is False
+    assert stream.close_calls == 1
+
+
+async def test_cancellation_propagates_during_request() -> None:
+    request_started = asyncio.Event()
+    attempts = 0
+
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        request_started.set()
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    task = asyncio.create_task(notifier.send(PAYLOAD))
+    await request_started.wait()
+    task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        await _close_notifier(notifier)
+
+    assert attempts == 1
+
+
+async def test_cancellation_propagates_during_retry_sleep() -> None:
+    sleep_started = asyncio.Event()
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ConnectError("raw failure", request=request)
+
+    async def blocking_sleep(delay: float) -> None:
+        delays.append(delay)
+        sleep_started.set()
+        await asyncio.Event().wait()
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=blocking_sleep)
+    task = asyncio.create_task(notifier.send(PAYLOAD))
+    await sleep_started.wait()
+    task.cancel()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        await _close_notifier(notifier)
+
+    assert attempts == 1
+    assert delays == [0.25]
+
+
+async def test_notifier_closes_client_exactly_once() -> None:
+    class CloseCountingClient(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__(transport=httpx.MockTransport(lambda _request: httpx.Response(204)))
+            self.close_calls = 0
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            await super().aclose()
+
+    client = CloseCountingClient()
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+
+    await notifier.aclose()
+    await notifier.aclose()
+
+    assert client.close_calls == 1

@@ -1,6 +1,6 @@
 # CLI reference
 
-Every command works in the REPL (with `/` prefix) and as a one-shot (`insto [@user] -c <cmd> [args]`). The single grammar is intentional — the REPL is just a prompt around the same dispatcher.
+Slash commands work in the REPL and as a one-shot (`insto [@user] -c <cmd> [args]`). The single grammar is intentional — the REPL is just a prompt around the same dispatcher. Top-level `setup`, `watch-daemon`, and `watch-service` have their own lifecycle and are not slash commands.
 
 ## Global flags
 
@@ -30,10 +30,20 @@ insto @instagram                       # REPL with @instagram pre-selected as th
 insto -c info instagram                # one-shot; inline target
 insto setup                            # interactive config wizard
 insto watch-daemon                     # foreground executor for persisted watches
+insto watch-service install            # macOS user LaunchAgent, no sudo
+insto watch-service status --json       # credential-free status, no provider calls
+insto watch-service uninstall          # preserves monitoring data and credentials
 insto --print-completion {bash|zsh}    # emit completion script (needs insto[completion])
 insto --version
 insto --help
 ```
+
+`watch-service` is macOS-only and takes no global credential flags. Its complete
+surface is `install [--env-file /absolute/path/file.toml]`, `status [--json]`, and
+`uninstall`. Status JSON uses `schema_version: 1`, not the slash-command export
+envelope; it distinguishes installation, registration, optional process
+diagnostics, database availability, and persisted watches. See
+[macOS user service](basic-usage.md#macos-user-service) for secrets and recovery.
 
 ## Slash-command groups
 

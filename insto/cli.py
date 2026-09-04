@@ -28,6 +28,7 @@ import asyncio
 import contextlib
 import getpass
 import importlib.util
+import json
 import logging
 import os
 import shlex
@@ -271,7 +272,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="TARGET",
         help=(
             "username (e.g. @ferrari), `setup` to run the wizard, "
-            "or `watch-daemon` to execute persisted watches"
+            "`watch-daemon` to execute persisted watches, "
+            "or `watch-service` to manage the macOS user service"
         ),
     )
     parser.add_argument(
@@ -671,7 +673,12 @@ async def _run_oneshot(
 # ---------------------------------------------------------------------------
 
 
-async def _run_watch_daemon(config: Config, log: logging.Logger) -> int:
+async def _run_watch_daemon(
+    config: Config,
+    log: logging.Logger,
+    *,
+    output: Callable[[str], None] | None = None,
+) -> int:
     """Execute persisted watches in the foreground until SIGINT/SIGTERM."""
     from insto.service.runtime import open_runtime
     from insto.service.watch_daemon import estimate_watch_load
@@ -681,7 +688,10 @@ async def _run_watch_daemon(config: Config, log: logging.Logger) -> int:
     installed_signals: list[signal.Signals] = []
 
     def daemon_output(message: str) -> None:
-        print(message, flush=True)
+        if output is None:
+            print(message, flush=True)
+        else:
+            output(message)
 
     try:
         for signum in (signal.SIGINT, signal.SIGTERM):
@@ -737,9 +747,87 @@ async def _run_watch_daemon(config: Config, log: logging.Logger) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _run_watch_service(argv: list[str]) -> int:
+    """Manage the service before logging/config initialization can touch disk."""
+    parser = argparse.ArgumentParser(
+        prog="insto watch-service",
+        description="Manage a macOS user watcher service without sudo.",
+        allow_abbrev=False,
+    )
+    subparsers = parser.add_subparsers(dest="action", required=True)
+    install = subparsers.add_parser("install", help="install and load the user service")
+    install.add_argument("--env-file", type=Path, help="explicit private service TOML file")
+    status = subparsers.add_parser("status", help="inspect service and persisted watches")
+    status.add_argument("--json", action="store_true", help="emit versioned status JSON")
+    subparsers.add_parser("uninstall", help="unload service, preserving all monitoring data")
+    for arg in argv:
+        if arg.partition("=")[0] in ("--hiker-token", "--proxy", "--backend"):
+            parser.error("service overrides belong in protected config or an explicit --env-file")
+    args = parser.parse_args(argv)
+    from insto.service.watch_service import (
+        install_service,
+        service_status,
+        uninstall_service,
+    )
+
+    try:
+        if args.action == "install":
+            result = asyncio.run(install_service(env_file=args.env_file))
+        elif args.action == "uninstall":
+            result = asyncio.run(uninstall_service())
+        else:
+            result = asyncio.run(service_status())
+        if getattr(args, "json", False):
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        else:
+            _print_service_result(result)
+        return 0
+    except (BackendError, OSError) as exc:
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+
+
+def _print_service_result(result: dict[str, Any]) -> None:
+    print(f"watch service: {result.get('installation', 'unknown')}")
+    if "registration" in result:
+        print(f"registration: {result['registration']}")
+    if "process" in result:
+        process = result["process"]
+        print(
+            f"process: {process.get('state') or 'unknown'} · "
+            f"PID: {process.get('pid') or 'unknown'} · "
+            f"last exit: {process.get('last_exit_code')}"
+        )
+    for key, value in result.get("paths", {}).items():
+        print(f"{key}: {value}")
+    if result.get("paths", {}).get("python") and result.get("interpreter_available") is False:
+        print("interpreter unavailable; reinstall the service from a durable Python environment")
+    if "database_state" in result:
+        print(f"database: {result['database_state']}")
+    if result.get("database_error"):
+        print(redact_secrets(str(result["database_error"])))
+    if result.get("error"):
+        print(redact_secrets(str(result["error"])))
+    for watch in result.get("watches", []):
+        print(
+            f"@{watch.get('username', watch.get('user', '?'))} · {watch['status']} · "
+            f"interval {watch['interval_seconds']}s · "
+            f"last success: {watch.get('last_ok') or 'never'} · "
+            f"recorded error: {'yes' if watch.get('has_error') else 'no'}"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = argv if argv is not None else sys.argv[1:]
+    if raw_argv and raw_argv[0] == "watch-service":
+        return _run_watch_service(raw_argv[1:])
     parser = build_parser()
-    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    args = parser.parse_args(raw_argv)
+
+    if args.target == "watch-service" and args.cmd_argv is None:
+        parser.error(
+            "use `insto watch-service --help`; service commands do not take global options"
+        )
 
     if args.debug:
         level = logging.DEBUG

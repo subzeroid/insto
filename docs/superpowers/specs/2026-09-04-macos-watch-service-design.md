@@ -2,7 +2,7 @@
 
 Date: 2026-09-04
 
-Status: approved by user; engineering review complete. Implementation follows in the paired plan.
+Status: implemented and independently reviewed; local verification complete. Evidence is recorded in the paired plan. Not merged or released.
 
 ## Goal and approved boundary
 

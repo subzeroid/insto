@@ -193,6 +193,9 @@ cat targets.txt | insto -c batch - info --yes              # stdin pipe + non-in
 insto -c dossier instagram --maltego                       # full target package, Maltego CSVs per section
 insto @ferrari -c watch                                   # persist a 5-minute watch and exit
 insto watch-daemon                                        # execute persisted watches in foreground
+insto watch-service install                               # macOS: run at login, without sudo
+insto watch-service status --json                         # service + persisted watch status
+insto watch-service uninstall                             # preserve watches, config and logs
 ```
 
 Only one REPL or daemon executes watches for a given sqlite store. Registrations
@@ -204,10 +207,18 @@ quota/cost or account-risk reminder at startup. Stop it with `Ctrl+C` or
 
 Set `INSTO_WATCH_WEBHOOK_URL` to send best-effort JSON notifications from the
 REPL or watch daemon after persisted profile changes. One-shot commands never
-send them. The URL is not persisted, and `/config` reports only `configured` or
+send them. Insto does not persist the URL, and `/config` reports only `configured` or
 `disabled`, never the value. Use a trusted HTTPS receiver; HTTP is accepted only
 for localhost or a loopback address. See [Basic usage](docs/basic-usage.md#watch-webhook-notifications)
 for the payload and delivery contract.
+
+On macOS, `watch-service` manages a user LaunchAgent around the same daemon.
+Install uses the protected `config.toml`, not credentials inherited from the
+terminal. An optional explicit private TOML file supplies environment-only
+settings such as the webhook URL; only its path is stored in the service
+definition. See [macOS user service](docs/basic-usage.md#macos-user-service)
+for setup, safe secret handling, status, and recovery. The agent runs while you
+are logged in and the machine is awake, not before login or during sleep.
 
 `-c <cmd>` consumes the rest of `argv` as the slash-command's arguments,
 so `-c batch targets.txt info` runs `batch targets.txt info` (one `-c`

@@ -45,6 +45,31 @@ jobs:
         # See issue tracker before raising back to 80.
         run: uv run pytest --cov=insto --cov-fail-under=75
 
+  macos-watch-service:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Install offline test dependencies
+        run: uv sync --frozen
+      - name: Service and CLI contracts
+        run: >-
+          uv run --frozen pytest tests/test_watch_service.py
+          tests/test_watch_service_runner.py tests/test_watch_service_cli.py
+          tests/test_history_readonly.py tests/e2e/test_watch_daemon.py
+      - name: Build and install wheel for native smoke
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/insto-service-dist"
+          uv venv "$RUNNER_TEMP/insto-service-venv"
+          uv pip install --python "$RUNNER_TEMP/insto-service-venv/bin/python" "$RUNNER_TEMP"/insto-service-dist/*.whl
+      - name: Native LaunchAgent smoke (explicit skip without GUI domain)
+        env:
+          INSTO_TEST_LAUNCHD: "1"
+        run: |
+          INSTO_TEST_PYTHON="$RUNNER_TEMP/insto-service-venv/bin/python" uv run --frozen pytest tests/e2e/test_watch_service.py -q -rs
+
   live-test:
     # Live aiograpi end-to-end through the real CLI entrypoint, driven by
     # pooled accounts. Canonical-repo only: PRs from forks never receive the

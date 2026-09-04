@@ -40,6 +40,8 @@ class WebhookNotifier:
         )
         self._sleep = sleep
         self._closed = False
+        self._close_lock = asyncio.Lock()
+        self._response_close_tasks: set[asyncio.Task[None]] = set()
 
     async def send(self, payload: dict[str, Any]) -> None:
         """POST one event, retrying only controlled transient failures."""
@@ -57,11 +59,11 @@ class WebhookNotifier:
                     try:
                         status = response.status_code
                     finally:
-                        await response.aclose()
+                        await self._close_response(response)
+            except (httpx.TimeoutException, TimeoutError):
+                failure = "timeout"
             except httpx.TransportError:
                 failure = "transport error"
-            except TimeoutError:
-                failure = "timeout"
             except Exception:
                 raise WebhookDeliveryError(
                     "watch webhook delivery failed: unexpected error"
@@ -80,16 +82,43 @@ class WebhookNotifier:
 
     async def aclose(self) -> None:
         """Close the reusable client once."""
-        if self._closed:
+        async with self._close_lock:
+            if self._closed:
+                return
+            await self._drain_response_closes()
+            await self._client.aclose()
+            self._closed = True
+
+    async def _close_response(self, response: httpx.Response) -> None:
+        close_task = asyncio.create_task(
+            response.aclose(),
+            name="insto-webhook-response-close",
+        )
+        self._response_close_tasks.add(close_task)
+        close_task.add_done_callback(self._response_close_done)
+        await asyncio.shield(close_task)
+
+    def _response_close_done(self, task: asyncio.Task[None]) -> None:
+        self._response_close_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
+
+    async def _drain_response_closes(self) -> None:
+        tasks = set(self._response_close_tasks)
+        if not tasks:
             return
-        self._closed = True
-        await self._client.aclose()
+        _, pending = await asyncio.wait(tasks, timeout=ATTEMPT_TIMEOUT_SECONDS)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.sleep(0)
 
 
 def validate_webhook_url(value: str) -> str:
     """Return an accepted webhook URL without exposing rejected URL contents."""
     try:
         endpoint = httpx.URL(value)
+        port = endpoint.port
     except (httpx.InvalidURL, TypeError):
         raise BackendError("invalid watch webhook URL: malformed URL") from None
 
@@ -99,6 +128,8 @@ def validate_webhook_url(value: str) -> str:
         raise BackendError("invalid watch webhook URL: host required")
     if "#" in value:
         raise BackendError("invalid watch webhook URL: fragments are not allowed")
+    if port is not None and port > 65535:
+        raise BackendError("invalid watch webhook URL: port is outside the valid range")
     if endpoint.scheme not in {"http", "https"}:
         raise BackendError("invalid watch webhook URL: unsupported scheme")
     if endpoint.scheme == "https":

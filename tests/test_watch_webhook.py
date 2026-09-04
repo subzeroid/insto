@@ -48,6 +48,27 @@ class GuardedStream(httpx.AsyncByteStream):
         self.close_calls += 1
 
 
+class BlockingCloseStream(GuardedStream):
+    """A response stream whose close can be released or cancelled by a test."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_started = asyncio.Event()
+        self.allow_close = asyncio.Event()
+        self.close_completed = False
+        self.close_cancelled = False
+
+    async def aclose(self) -> None:
+        self.close_calls += 1
+        self.close_started.set()
+        try:
+            await self.allow_close.wait()
+        except asyncio.CancelledError:
+            self.close_cancelled = True
+            raise
+        self.close_completed = True
+
+
 async def _close_notifier(notifier: WebhookNotifier) -> None:
     await notifier.aclose()
 
@@ -57,6 +78,7 @@ async def _close_notifier(notifier: WebhookNotifier) -> None:
     [
         "https://receiver.example/hooks/watch?token=secret",
         "https://receiver.example:8443/hooks/watch",
+        "https://receiver.example:65535/hooks/watch",
         "http://localhost/hooks/watch",
         "http://127.0.0.1/hooks/watch",
         "http://127.255.255.254/hooks/watch",
@@ -76,6 +98,7 @@ def test_validate_webhook_url_accepts_secure_and_local_endpoints(endpoint: str) 
         ("ftp://receiver.example/secret/path?token=shh", "scheme"),
         ("http://receiver.example/secret/path?token=shh", "HTTPS"),
         ("http://192.0.2.1/secret/path?token=shh", "HTTPS"),
+        ("https://receiver.example:65536/secret/path?token=shh", "port"),
     ],
 )
 def test_validate_webhook_url_rejects_safely(endpoint: str, reason: str) -> None:
@@ -266,6 +289,31 @@ async def test_notifier_retries_transient_failures_three_times(
     assert all(request["event_id"] == "evt-delivery-123" for request in requests)
     assert delays == [0.25, 1.0]
     assert all(not stream.read and stream.close_calls == 1 for stream in streams)
+
+
+async def test_notifier_reports_native_httpx_timeout_as_timeout() -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.ReadTimeout("raw timeout details", request=request)
+
+    async def record_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=record_sleep)
+    try:
+        with pytest.raises(WebhookDeliveryError) as caught:
+            await notifier.send(PAYLOAD)
+    finally:
+        await _close_notifier(notifier)
+
+    assert str(caught.value) == "watch webhook delivery failed: timeout"
+    assert attempts == 3
+    assert delays == [0.25, 1.0]
 
 
 @pytest.mark.parametrize(
@@ -503,6 +551,60 @@ async def test_cancellation_propagates_during_request() -> None:
     assert attempts == 1
 
 
+async def test_cancellation_after_headers_defers_response_cleanup_to_teardown() -> None:
+    stream = BlockingCloseStream()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=stream)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    send_task = asyncio.create_task(notifier.send(PAYLOAD))
+    await stream.close_started.wait()
+    send_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(send_task, timeout=0.1)
+    assert stream.close_cancelled is False
+
+    teardown_task = asyncio.create_task(notifier.aclose())
+    await asyncio.sleep(0)
+    assert teardown_task.done() is False
+
+    stream.allow_close.set()
+    await asyncio.wait_for(teardown_task, timeout=0.1)
+    assert stream.close_completed is True
+    assert stream.close_calls == 1
+    assert stream.read is False
+
+
+async def test_teardown_bounds_stuck_response_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    streams: list[BlockingCloseStream] = []
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        stream = BlockingCloseStream()
+        streams.append(stream)
+        return httpx.Response(200, stream=stream)
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(watch_webhook, "ATTEMPT_TIMEOUT_SECONDS", 0.01)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    notifier = WebhookNotifier(ENDPOINT, client=client, sleep=no_sleep)
+
+    with pytest.raises(WebhookDeliveryError, match="timeout"):
+        await notifier.send(PAYLOAD)
+    assert len(streams) == 3
+    assert all(stream.close_cancelled is False for stream in streams)
+
+    await asyncio.wait_for(notifier.aclose(), timeout=0.1)
+    await asyncio.sleep(0)
+    assert all(stream.close_cancelled is True for stream in streams)
+
+
 async def test_cancellation_propagates_during_retry_sleep() -> None:
     sleep_started = asyncio.Event()
     attempts = 0
@@ -550,3 +652,86 @@ async def test_notifier_closes_client_exactly_once() -> None:
     await notifier.aclose()
 
     assert client.close_calls == 1
+
+
+async def test_notifier_retries_client_close_after_failure() -> None:
+    class FailOnceClient(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                raise RuntimeError("close failed")
+            await super().aclose()
+
+    client = FailOnceClient()
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        await notifier.aclose()
+    await notifier.aclose()
+    await notifier.aclose()
+
+    assert client.close_calls == 2
+
+
+async def test_notifier_retries_client_close_after_cancellation() -> None:
+    class CancelOnceClient(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+            self.close_started = asyncio.Event()
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                self.close_started.set()
+                await asyncio.Event().wait()
+            await super().aclose()
+
+    client = CancelOnceClient()
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    first_close = asyncio.create_task(notifier.aclose())
+    await client.close_started.wait()
+    first_close.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await first_close
+    await notifier.aclose()
+    await notifier.aclose()
+
+    assert client.close_calls == 2
+
+
+async def test_concurrent_notifier_close_retries_after_first_caller_fails() -> None:
+    class BlockingFailOnceClient(httpx.AsyncClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+            self.close_started = asyncio.Event()
+            self.allow_close = asyncio.Event()
+
+        async def aclose(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                self.close_started.set()
+                await self.allow_close.wait()
+                raise RuntimeError("first concurrent close failed")
+            await super().aclose()
+
+    client = BlockingFailOnceClient()
+    notifier = WebhookNotifier(ENDPOINT, client=client)
+    first_close = asyncio.create_task(notifier.aclose())
+    await client.close_started.wait()
+    second_close = asyncio.create_task(notifier.aclose())
+    await asyncio.sleep(0)
+
+    assert client.close_calls == 1
+    client.allow_close.set()
+    results = await asyncio.gather(first_close, second_close, return_exceptions=True)
+
+    assert isinstance(results[0], RuntimeError)
+    assert results[1] is None
+    assert client.close_calls == 2

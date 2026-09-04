@@ -39,19 +39,46 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 from insto.exceptions import BackendError
-from insto.models import Profile, Snapshot, WatchSpec
+from insto.models import Profile, Snapshot, WatchRegistration, WatchSpec, WatchStatus
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
-_MIGRATIONS: dict[int, str] = {}
+_MIGRATIONS: dict[int, tuple[str, ...]] = {
+    2: (
+        "ALTER TABLE watches RENAME TO watches_v1",
+        """
+        CREATE TABLE watches (
+            user TEXT PRIMARY KEY,
+            registration_id TEXT NOT NULL UNIQUE,
+            interval_seconds INTEGER NOT NULL CHECK(interval_seconds >= 300),
+            last_ok INTEGER,
+            last_error TEXT,
+            consecutive_errors INTEGER NOT NULL DEFAULT 0 CHECK(consecutive_errors >= 0),
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused'))
+        )
+        """,
+        """
+        INSERT INTO watches(
+            user, registration_id, interval_seconds, last_ok, last_error,
+            consecutive_errors, status
+        )
+        SELECT lower(ltrim(user, '@')), lower(hex(randomblob(16))),
+               interval_seconds, last_ok, last_error, 0, status
+        FROM watches_v1
+        """,
+        "DROP TABLE watches_v1",
+    )
+}
 
 _LOCK_RETRY_DELAYS_MS: tuple[int, ...] = (100, 250, 500)
 
@@ -76,6 +103,14 @@ _PROFILE_TRACKED_FIELDS: tuple[str, ...] = (
 )
 
 T = TypeVar("T")
+_WATCH_USERNAME_RE = re.compile(r"^[A-Za-z0-9._]+$")
+
+
+class _Unchanged:
+    __slots__ = ()
+
+
+UNCHANGED = _Unchanged()
 
 
 def hash_url(url: str | None) -> str | None:
@@ -135,13 +170,17 @@ class HistoryStore:
             isolation_level=None,
         )
         self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
-        self._conn.execute("PRAGMA foreign_keys=ON")
-        with contextlib.suppress(OSError):
-            os.chmod(db_path, 0o600)
-        self._init_schema()
-        self._migrate_to_latest()
+        try:
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            with contextlib.suppress(OSError):
+                os.chmod(db_path, 0o600)
+            self._init_schema()
+            self._migrate_to_latest()
+        except BaseException:
+            self._conn.close()
+            raise
 
     @property
     def path(self) -> Path:
@@ -172,10 +211,14 @@ class HistoryStore:
 
                 CREATE TABLE IF NOT EXISTS watches (
                     user TEXT PRIMARY KEY,
-                    interval_seconds INTEGER NOT NULL,
+                    registration_id TEXT NOT NULL UNIQUE,
+                    interval_seconds INTEGER NOT NULL CHECK(interval_seconds >= 300),
                     last_ok INTEGER,
                     last_error TEXT,
+                    consecutive_errors INTEGER NOT NULL DEFAULT 0
+                        CHECK(consecutive_errors >= 0),
                     status TEXT NOT NULL DEFAULT 'active'
+                        CHECK(status IN ('active', 'paused'))
                 );
 
                 CREATE TABLE IF NOT EXISTS snapshots (
@@ -209,10 +252,11 @@ class HistoryStore:
                         )
                     elif current < _SCHEMA_VERSION:
                         for v in range(current + 1, _SCHEMA_VERSION + 1):
-                            sql = _MIGRATIONS.get(v)
-                            if sql is None:
+                            statements = _MIGRATIONS.get(v)
+                            if statements is None:
                                 raise BackendError(f"missing migration for schema version {v}")
-                            cur.executescript(sql)
+                            for statement in statements:
+                                cur.execute(statement)
                         cur.execute(
                             "UPDATE _meta SET value = ? WHERE key = 'schema_version'",
                             (str(_SCHEMA_VERSION),),
@@ -405,86 +449,166 @@ class HistoryStore:
 
     # ------------------------------------------------------------------ watches
 
-    def add_watch(self, spec: WatchSpec) -> None:
-        def _do() -> None:
-            with self._lock:
-                self._conn.execute(
-                    """
-                    INSERT INTO watches(user, interval_seconds, last_ok, last_error, status)
-                    VALUES(?, ?, ?, ?, ?)
-                    ON CONFLICT(user) DO UPDATE SET
-                        interval_seconds = excluded.interval_seconds,
-                        last_ok = excluded.last_ok,
-                        last_error = excluded.last_error,
-                        status = excluded.status
-                    """,
-                    (
-                        spec.user,
-                        spec.interval_seconds,
-                        spec.last_ok,
-                        spec.last_error,
-                        spec.status,
-                    ),
-                )
+    def register_watch(self, user: str, interval_seconds: int) -> WatchRegistration:
+        """Atomically create/reactivate a canonical watch within the global cap."""
+        canonical = _canonical_watch_user(user)
+        if interval_seconds < 300:
+            raise ValueError(
+                f"watch interval must be at least 300 seconds (got {interval_seconds})"
+            )
 
-        _with_lock_retry(_do)
+        def _do() -> WatchRegistration:
+            with self._lock:
+                cur = self._conn.cursor()
+                cur.execute("BEGIN IMMEDIATE")
+                try:
+                    row = cur.execute(
+                        _WATCH_SELECT + " WHERE user = ?",
+                        (canonical,),
+                    ).fetchone()
+                    if row is not None and row["status"] == "active":
+                        result = WatchRegistration("already_active", _row_to_watchspec(row))
+                    elif row is not None:
+                        registration_id = uuid.uuid4().hex
+                        cur.execute(
+                            """
+                            UPDATE watches
+                            SET registration_id = ?, interval_seconds = ?, last_error = NULL,
+                                consecutive_errors = 0, status = 'active'
+                            WHERE user = ?
+                            """,
+                            (registration_id, interval_seconds, canonical),
+                        )
+                        updated = cur.execute(
+                            _WATCH_SELECT + " WHERE user = ?", (canonical,)
+                        ).fetchone()
+                        assert updated is not None
+                        result = WatchRegistration("reactivated", _row_to_watchspec(updated))
+                    else:
+                        active_count = cur.execute(
+                            "SELECT COUNT(*) FROM watches WHERE status = 'active'"
+                        ).fetchone()[0]
+                        if active_count >= 3:
+                            result = WatchRegistration("full", None)
+                        else:
+                            registration_id = uuid.uuid4().hex
+                            cur.execute(
+                                """
+                                INSERT INTO watches(
+                                    user, registration_id, interval_seconds, last_ok,
+                                    last_error, consecutive_errors, status
+                                ) VALUES(?, ?, ?, NULL, NULL, 0, 'active')
+                                """,
+                                (canonical, registration_id, interval_seconds),
+                            )
+                            created = cur.execute(
+                                _WATCH_SELECT + " WHERE user = ?", (canonical,)
+                            ).fetchone()
+                            assert created is not None
+                            result = WatchRegistration("created", _row_to_watchspec(created))
+                    cur.execute("COMMIT")
+                    return result
+                except BaseException:
+                    cur.execute("ROLLBACK")
+                    raise
+
+        return _with_lock_retry(_do)
+
+    async def register_watch_async(self, user: str, interval_seconds: int) -> WatchRegistration:
+        return await asyncio.to_thread(self.register_watch, user, interval_seconds)
 
     def get_watch(self, user: str) -> WatchSpec | None:
+        canonical = _canonical_watch_user(user)
         with self._lock:
             row = self._conn.execute(
-                "SELECT user, interval_seconds, last_ok, last_error, status "
-                "FROM watches WHERE user = ?",
-                (user,),
+                _WATCH_SELECT + " WHERE user = ?",
+                (canonical,),
             ).fetchone()
         if row is None:
             return None
         return _row_to_watchspec(row)
 
+    async def get_watch_async(self, user: str) -> WatchSpec | None:
+        return await asyncio.to_thread(self.get_watch, user)
+
     def list_watches(self) -> list[WatchSpec]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT user, interval_seconds, last_ok, last_error, status "
-                "FROM watches ORDER BY user ASC"
+                _WATCH_SELECT + " ORDER BY user ASC"
             ).fetchall()
         return [_row_to_watchspec(r) for r in rows]
 
+    async def list_watches_async(self) -> list[WatchSpec]:
+        return await asyncio.to_thread(self.list_watches)
+
     def update_watch_state(
         self,
-        user: str,
+        spec: WatchSpec,
         *,
-        last_ok: int | None = None,
-        last_error: str | None = None,
-        status: str | None = None,
-    ) -> None:
+        last_ok: int | None | _Unchanged = UNCHANGED,
+        last_error: str | None | _Unchanged = UNCHANGED,
+        consecutive_errors: int | _Unchanged = UNCHANGED,
+        status: WatchStatus | _Unchanged = UNCHANGED,
+    ) -> bool:
         sets: list[str] = []
         args: list[Any] = []
-        if last_ok is not None:
+        if not isinstance(last_ok, _Unchanged):
             sets.append("last_ok = ?")
             args.append(last_ok)
-        if last_error is not None:
+        if not isinstance(last_error, _Unchanged):
             sets.append("last_error = ?")
             args.append(last_error)
-        if status is not None:
+        if not isinstance(consecutive_errors, _Unchanged):
+            if consecutive_errors < 0:
+                raise ValueError("consecutive_errors must be non-negative")
+            sets.append("consecutive_errors = ?")
+            args.append(consecutive_errors)
+        if not isinstance(status, _Unchanged):
+            if status not in ("active", "paused"):
+                raise ValueError(f"invalid watch status: {status}")
             sets.append("status = ?")
             args.append(status)
         if not sets:
-            return
-        args.append(user)
-        sql = f"UPDATE watches SET {', '.join(sets)} WHERE user = ?"
+            return False
+        args.extend((spec.user, spec.registration_id))
+        sql = f"UPDATE watches SET {', '.join(sets)} WHERE user = ? AND registration_id = ?"
 
-        def _do() -> None:
-            with self._lock:
-                self._conn.execute(sql, args)
-
-        _with_lock_retry(_do)
-
-    def delete_watch(self, user: str) -> bool:
         def _do() -> int:
             with self._lock:
-                cur = self._conn.execute("DELETE FROM watches WHERE user = ?", (user,))
+                return self._conn.execute(sql, args).rowcount
+
+        return _with_lock_retry(_do) > 0
+
+    async def update_watch_state_async(
+        self,
+        spec: WatchSpec,
+        *,
+        last_ok: int | None | _Unchanged = UNCHANGED,
+        last_error: str | None | _Unchanged = UNCHANGED,
+        consecutive_errors: int | _Unchanged = UNCHANGED,
+        status: WatchStatus | _Unchanged = UNCHANGED,
+    ) -> bool:
+        return await asyncio.to_thread(
+            self.update_watch_state,
+            spec,
+            last_ok=last_ok,
+            last_error=last_error,
+            consecutive_errors=consecutive_errors,
+            status=status,
+        )
+
+    def delete_watch(self, user: str) -> bool:
+        canonical = _canonical_watch_user(user)
+
+        def _do() -> int:
+            with self._lock:
+                cur = self._conn.execute("DELETE FROM watches WHERE user = ?", (canonical,))
                 return cur.rowcount
 
         return _with_lock_retry(_do) > 0
+
+    async def delete_watch_async(self, user: str) -> bool:
+        return await asyncio.to_thread(self.delete_watch, user)
 
     # ----------------------------------------------------------------- retention
 
@@ -563,13 +687,28 @@ class HistoryStore:
         return _with_lock_retry(_do)
 
 
+_WATCH_SELECT = (
+    "SELECT user, registration_id, interval_seconds, last_ok, last_error, "
+    "consecutive_errors, status FROM watches"
+)
+
+
+def _canonical_watch_user(user: str) -> str:
+    canonical = user.lstrip("@").strip().lower()
+    if not canonical or not _WATCH_USERNAME_RE.fullmatch(canonical) or canonical in (".", ".."):
+        raise ValueError("invalid watch username")
+    return canonical
+
+
 def _row_to_watchspec(row: sqlite3.Row) -> WatchSpec:
     status = row["status"] if row["status"] in ("active", "paused") else "active"
     return WatchSpec(
         user=row["user"],
+        registration_id=row["registration_id"],
         interval_seconds=row["interval_seconds"],
         last_ok=row["last_ok"],
         last_error=row["last_error"],
+        consecutive_errors=row["consecutive_errors"],
         status=status,  # type: ignore[arg-type]
     )
 

@@ -55,6 +55,7 @@ async def test_one_shot_runtime_never_acquires_executor_and_cleans_up(tmp_path: 
         history = runtime.history
         assert runtime.role == "oneshot"
         assert runtime.coordinator is None
+        assert runtime.facade.watches is runtime.manager
         assert runtime.manager.executor_acquired is False
         assert runtime.facade.watch_role == "oneshot"
 
@@ -84,6 +85,7 @@ async def test_daemon_runtime_acquires_before_yield_and_releases_last(tmp_path: 
     ) as runtime:
         runtime_manager = runtime.manager
         assert runtime.coordinator is not None
+        assert runtime.facade.watches is runtime.manager
         assert runtime.manager.executor_acquired is True
         assert [spec.user for spec in runtime.manager.list()] == ["alice"]
 

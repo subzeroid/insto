@@ -91,8 +91,10 @@ class OsintFacade:
         self.config = config
         self._cdn_client = cdn_client
         self._pk_cache: dict[str, str] = {}
-        self.watches = watches or WatchManager(
-            WatchProcessLock(history.path), release_when_empty=True
+        self.watches = (
+            watches
+            if watches is not None
+            else WatchManager(WatchProcessLock(history.path), release_when_empty=True)
         )
         self.watch_role = watch_role
         self.watch_daemon: WatchDaemon | None = None

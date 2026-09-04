@@ -11,7 +11,7 @@ import pytest
 from insto.exceptions import Banned, Transient
 from insto.models import WatchSpec
 from insto.service.watch import WatchError, WatchManager
-from insto.service.watch_lock import WatchProcessLock
+from insto.service.watch_lock import WatchLockBusyError, WatchProcessLock
 
 
 def _spec(
@@ -213,6 +213,87 @@ async def test_daemon_cancel_all_retains_lock_until_explicit_release(tmp_path: P
     assert manager.executor_acquired is True
     manager.release_executor()
     assert manager.executor_acquired is False
+
+
+@pytest.mark.parametrize("first_operation", ["remove", "cancel_all"])
+async def test_concurrent_drains_keep_executor_until_tick_cleanup_finishes(
+    tmp_path: Path, first_operation: str
+) -> None:
+    manager = _manager(tmp_path, release_when_empty=True)
+    manager.acquire_executor()
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def tick() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_started.set()
+            await finish_cleanup.wait()
+            cleanup_finished.set()
+
+    manager.add(_spec(), tick=tick, state_changed=_accept, initial_delay=0)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    first = asyncio.create_task(
+        manager.remove("alice") if first_operation == "remove" else manager.cancel_all()
+    )
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+    second = asyncio.create_task(manager.cancel_all())
+    contender = WatchProcessLock(tmp_path / "store.db")
+    try:
+        done, _ = await asyncio.wait({second}, timeout=0.02)
+        assert not done, "a concurrent drain must join the in-flight cleanup"
+        assert not cleanup_finished.is_set()
+        with pytest.raises(WatchLockBusyError):
+            contender.acquire()
+        with pytest.raises(WatchError, match="tasks remain"):
+            manager.release_executor()
+    finally:
+        contender.release()
+        finish_cleanup.set()
+        await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+    assert cleanup_finished.is_set()
+    contender.acquire()
+    contender.release()
+
+
+async def test_cancelled_remove_can_be_drained_without_recancelling_tick(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, release_when_empty=True)
+    manager.acquire_executor()
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+
+    async def tick() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_started.set()
+            await finish_cleanup.wait()
+            cleanup_finished.set()
+
+    manager.add(_spec(), tick=tick, state_changed=_accept, initial_delay=0)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    removing = asyncio.create_task(manager.remove("alice"))
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+    removing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await removing
+    draining = asyncio.create_task(manager.cancel_all())
+    try:
+        done, _ = await asyncio.wait({draining}, timeout=0.02)
+        assert not done
+        assert manager.executor_acquired
+    finally:
+        finish_cleanup.set()
+        await asyncio.wait_for(draining, timeout=1)
+    assert cleanup_finished.is_set()
+    assert not manager.executor_acquired
 
 
 async def test_slow_tick_never_overlaps_or_queues_catch_up(tmp_path: Path) -> None:

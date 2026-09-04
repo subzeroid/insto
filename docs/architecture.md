@@ -117,6 +117,15 @@ across restarts; `Banned` and `AuthInvalid` pause immediately. Success clears th
 error and counter. Coordinator/storage failures are fatal to the executor and
 drain all tasks. SIGINT/SIGTERM shutdown drains reconcile and tick tasks before
 clients, sqlite, and the POSIX advisory lock are released.
+Concurrent removal and shutdown paths share one drain per watch; entries stay
+registered until their tasks finish, so an empty registry cannot release the
+executor while another caller is still draining a tick.
+
+The foreground daemon runs best-effort retention at startup and hourly using
+`HistoryStore.prune_async()`. Its supervised maintenance task finishes any
+started SQLite operation before shutdown closes the store. Retention failures
+do not pause watches and are retried at the next interval. Daemon output is
+flushed per message so service managers and redirected logs see it immediately.
 
 Limits remain three active watches and a 300-second floor: at the ceiling this
 is 36 ticks/hour and an estimated 72-108 backend calls/hour. The lock/signal

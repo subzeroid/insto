@@ -96,7 +96,6 @@ class Config:
     output_dir: Path = field(default_factory=lambda: Path("./output"))
     db_path: Path = field(default_factory=db_path)
     cli_history_path: Path = field(default_factory=cli_history_path)
-    watch_webhook_url: str | None = None
     theme: str = DEFAULT_THEME_NAME
     backend: str = BACKEND_HIKERAPI
     aiograpi_username: str | None = None
@@ -106,6 +105,7 @@ class Config:
         default_factory=lambda: config_dir() / "aiograpi.session.json"
     )
     sources: dict[str, Origin] = field(default_factory=dict)
+    watch_webhook_url: str | None = None
 
 
 def _check_not_world_readable(path: Path) -> None:

@@ -144,7 +144,7 @@ def validate_webhook_url(value: str) -> str:
         raise BackendError("invalid watch webhook URL: host required")
     if "#" in value:
         raise BackendError("invalid watch webhook URL: fragments are not allowed")
-    if port is not None and port > 65535:
+    if port is not None and not 1 <= port <= 65535:
         raise BackendError("invalid watch webhook URL: port is outside the valid range")
     if endpoint.scheme not in {"http", "https"}:
         raise BackendError("invalid watch webhook URL: unsupported scheme")

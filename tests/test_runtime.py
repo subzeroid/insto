@@ -18,7 +18,7 @@ from insto.exceptions import BackendError, Transient
 from insto.models import Profile
 from insto.service import runtime as runtime_service
 from insto.service.history import HistoryStore
-from insto.service.runtime import RuntimeRole, open_runtime
+from insto.service.runtime import Runtime, RuntimeRole, open_runtime
 from insto.service.watch_lock import WatchLockBusyError, WatchProcessLock
 from insto.service.watch_webhook import WebhookDeliveryError
 from tests.fakes import FakeBackend
@@ -122,6 +122,31 @@ def _assert_successful_state(state: Any) -> None:
     assert state.last_ok is not None
     assert state.consecutive_errors == 0
     assert state.last_error is None
+
+
+def test_runtime_preserves_legacy_positional_field_order() -> None:
+    values = (
+        Config(),
+        "repl",
+        object(),
+        object(),
+        object(),
+        object(),
+        object(),
+    )
+
+    runtime = Runtime(*values)
+
+    assert (
+        runtime.config,
+        runtime.role,
+        runtime.history,
+        runtime.facade,
+        runtime.manager,
+        runtime.coordinator,
+        runtime.coordinator_task,
+    ) == values
+    assert runtime.webhook_notifier is None
 
 
 async def test_one_shot_runtime_never_acquires_executor_and_cleans_up(tmp_path: Path) -> None:

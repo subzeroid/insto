@@ -58,8 +58,8 @@ class Runtime:
     facade: OsintFacade
     manager: WatchManager
     coordinator: WatchDaemon | None
-    webhook_notifier: WatchWebhookNotifier | None
     coordinator_task: asyncio.Task[None] | None = None
+    webhook_notifier: WatchWebhookNotifier | None = None
 
 
 def _default_cdn_client(config: Config) -> httpx.AsyncClient:
@@ -145,13 +145,13 @@ async def open_runtime(
             facade.watch_daemon = coordinator
 
         runtime = Runtime(
-            config,
-            role,
-            history,
-            facade,
-            manager,
-            coordinator,
-            webhook_notifier,
+            config=config,
+            role=role,
+            history=history,
+            facade=facade,
+            manager=manager,
+            coordinator=coordinator,
+            webhook_notifier=webhook_notifier,
         )
         if coordinator is not None and role == "daemon":
             await coordinator.start()

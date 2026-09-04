@@ -1003,3 +1003,59 @@ async def test_repeated_cancellation_during_teardown_waits_for_all_cleanup(
     probe = WatchProcessLock(config.db_path)
     probe.acquire()
     probe.release()
+
+
+async def test_repl_shutdown_keeps_executor_until_concurrent_drains_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    history = HistoryStore(config.db_path)
+    try:
+        spec = history.register_watch("alice", 300).spec
+        assert spec is not None
+        assert history.update_watch_state(spec, last_ok=0)
+    finally:
+        history.close()
+    started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    finish_cleanup = asyncio.Event()
+    cleanup_finished = asyncio.Event()
+    events: list[str] = []
+
+    async def blocked_tick(_facade: Any, _user: str) -> dict[str, Any]:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup_started.set()
+            await finish_cleanup.wait()
+            cleanup_finished.set()
+        return {}
+
+    monkeypatch.setattr(runtime_service.OsintFacade, "diff_and_snapshot", blocked_tick)
+    context = open_runtime(
+        config,
+        role="repl",
+        backend_factory=lambda _: ClosingBackend(events),
+        cdn_client_factory=lambda _: ClosingClient(events),
+    )
+    await context.__aenter__()
+    await asyncio.wait_for(started.wait(), timeout=1)
+    closing = asyncio.create_task(context.__aexit__(None, None, None))
+    contender = WatchProcessLock(config.db_path)
+    try:
+        await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+        done, _ = await asyncio.wait({closing}, timeout=0.02)
+        assert not done
+        assert not cleanup_finished.is_set()
+        assert events == []
+        with pytest.raises(WatchLockBusyError):
+            contender.acquire()
+    finally:
+        contender.release()
+        finish_cleanup.set()
+        await asyncio.wait_for(closing, timeout=1)
+    assert cleanup_finished.is_set()
+    assert events == ["cdn", "backend"]
+    contender.acquire()
+    contender.release()

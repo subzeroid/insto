@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import threading
+import time
 from collections.abc import Callable, Generator
 from pathlib import Path
 
@@ -60,6 +63,28 @@ def _persist_state(
     return current
 
 
+def _seed_snapshot(store: HistoryStore, *, target: str, captured_at: int) -> None:
+    with store._lock:
+        store._conn.execute(
+            """
+            INSERT INTO snapshots(
+                target_pk, captured_at, profile_fields_json,
+                last_post_pks_json, avatar_url_hash, banner_url_hash
+            ) VALUES (?, ?, ?, ?, NULL, NULL)
+            """,
+            (target, captured_at, json.dumps({"username": target}), json.dumps([])),
+        )
+
+
+def _snapshot_count(store: HistoryStore, target: str) -> int:
+    with store._lock:
+        row = store._conn.execute(
+            "SELECT COUNT(*) FROM snapshots WHERE target_pk = ?", (target,)
+        ).fetchone()
+    assert row is not None
+    return int(row[0])
+
+
 def test_initial_delay_and_startup_offsets_are_deterministic() -> None:
     no_history = WatchSpec("carol", "c", 300)
     future = WatchSpec("dave", "d", 300, last_ok=950)
@@ -106,6 +131,140 @@ async def test_daemon_recovers_active_rows_and_skips_paused(history: HistoryStor
     await daemon.stop()
     assert manager.executor_acquired is True
     manager.release_executor()
+
+
+async def test_daemon_start_prunes_expired_and_excess_snapshots(history: HistoryStore) -> None:
+    now = int(time.time())
+    _seed_snapshot(history, target="expired", captured_at=now - 31 * 86400)
+    for offset in range(105):
+        _seed_snapshot(history, target="capped", captured_at=now - offset)
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=_ticks([]),
+        role="daemon",
+    )
+
+    await daemon.start()
+
+    assert _snapshot_count(history, "expired") == 0
+    assert _snapshot_count(history, "capped") == 100
+    await daemon.stop()
+    manager.release_executor()
+
+
+async def test_prune_failures_are_nonfatal_and_periodically_retried(
+    history: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+
+    async def flaky_prune() -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise RuntimeError("temporary prune failure")
+        return {"cli_history_deleted": 0, "snapshots_deleted": 0}
+
+    monkeypatch.setattr(history, "prune_async", flaky_prune)
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=_ticks([]),
+        role="daemon",
+        prune_seconds=0.01,
+    )
+    await daemon.start()
+    stop = asyncio.Event()
+    run_task = asyncio.create_task(daemon.run(stop))
+
+    for _ in range(100):
+        if calls >= 3:
+            break
+        await asyncio.sleep(0.005)
+
+    assert calls >= 3
+    assert run_task.done() is False
+    stop.set()
+    await asyncio.wait_for(run_task, timeout=1)
+    manager.release_executor()
+
+
+async def test_shutdown_drains_started_prune_before_returning(
+    history: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    prune_started = threading.Event()
+    release_prune = threading.Event()
+
+    def blocking_prune() -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            prune_started.set()
+            assert release_prune.wait(timeout=2)
+        return {"cli_history_deleted": 0, "snapshots_deleted": 0}
+
+    monkeypatch.setattr(history, "prune", blocking_prune)
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=_ticks([]),
+        role="daemon",
+        prune_seconds=0.01,
+    )
+    await daemon.start()
+    stop = asyncio.Event()
+    run_task = asyncio.create_task(daemon.run(stop))
+    assert await asyncio.to_thread(prune_started.wait, 1)
+
+    stop.set()
+    await asyncio.sleep(0.02)
+    assert run_task.done() is False
+    release_prune.set()
+    await asyncio.wait_for(run_task, timeout=1)
+    manager.release_executor()
+
+
+async def test_repeated_startup_cancellation_drains_prune_before_releasing_executor(
+    history: HistoryStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prune_started = threading.Event()
+    release_prune = threading.Event()
+    prune_finished = threading.Event()
+
+    def blocking_prune() -> dict[str, int]:
+        prune_started.set()
+        assert release_prune.wait(timeout=2)
+        prune_finished.set()
+        return {"cli_history_deleted": 0, "snapshots_deleted": 0}
+
+    monkeypatch.setattr(history, "prune", blocking_prune)
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=_ticks([]),
+        role="daemon",
+    )
+    starting = asyncio.create_task(daemon.start())
+    try:
+        assert await asyncio.to_thread(prune_started.wait, 1)
+        starting.cancel()
+        await asyncio.sleep(0)
+        starting.cancel()
+        done, _ = await asyncio.wait({starting}, timeout=0.02)
+        assert not done, "cancelled startup must wait for its SQLite worker"
+        assert manager.executor_acquired
+        assert not prune_finished.is_set()
+    finally:
+        release_prune.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(starting, timeout=1)
+    assert prune_finished.is_set()
+    assert not manager.executor_acquired
 
 
 async def test_reconcile_add_remove_pause_and_replace(history: HistoryStore) -> None:

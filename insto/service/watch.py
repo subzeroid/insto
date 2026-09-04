@@ -63,6 +63,7 @@ class _Entry:
     consecutive_errors: int = 0
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     invoke_task: asyncio.Task[None] | None = field(default=None, repr=False)
+    drain_task: asyncio.Task[None] | None = field(default=None, repr=False)
 
     @classmethod
     def from_spec(
@@ -172,10 +173,12 @@ class WatchManager:
         return entry.to_spec()
 
     async def remove(self, user: str, *, release_when_empty: bool = True) -> bool:
-        entry = self._entries.pop(user, None)
+        entry = self._entries.get(user)
         if entry is None:
             return False
         await self._cancel_entry(entry)
+        if self._entries.get(user) is entry:
+            del self._entries[user]
         if release_when_empty:
             self._release_if_empty()
         return True
@@ -195,12 +198,13 @@ class WatchManager:
 
     async def cancel_all(self) -> None:
         entries = list(self._entries.values())
-        self._entries.clear()
         if entries:
             await asyncio.gather(
                 *(self._cancel_entry(entry) for entry in entries),
-                return_exceptions=True,
             )
+        for entry in entries:
+            if self._entries.get(entry.user) is entry:
+                del self._entries[entry.user]
         self._release_if_empty()
 
     async def tick_once(self, user: str) -> WatchSpec:
@@ -209,6 +213,16 @@ class WatchManager:
         return entry.to_spec()
 
     async def _cancel_entry(self, entry: _Entry) -> None:
+        # Concurrent remove/stop paths must join one drain, not re-cancel a
+        # tick's cleanup or release the executor while another caller waits.
+        # Keep the entry registered until the shared drain has finished.
+        if entry.drain_task is None:
+            entry.drain_task = asyncio.create_task(
+                self._drain_entry(entry), name=f"insto-watch-drain:{entry.user}"
+            )
+        await asyncio.shield(entry.drain_task)
+
+    async def _drain_entry(self, entry: _Entry) -> None:
         tasks: list[asyncio.Task[None]] = []
         for task in (entry.task, entry.invoke_task):
             if task is not None and not task.done():

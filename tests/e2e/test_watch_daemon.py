@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import selectors
 import signal
 import sqlite3
 import subprocess
@@ -137,6 +138,14 @@ def _stop_daemon(process: subprocess.Popen[str]) -> tuple[str, str]:
         return process.communicate(timeout=5)
 
 
+def _readline_with_timeout(stream: Any, *, timeout: float = 5.0) -> str | None:
+    with selectors.DefaultSelector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
+        if not selector.select(timeout):
+            return None
+    return stream.readline()
+
+
 def _wait_until(predicate: Callable[[], bool], *, timeout: float = 10.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -249,6 +258,29 @@ def test_daemon_ticks_rejects_second_owner_and_restarts(
     finally:
         if second.poll() is None:
             _stop_daemon(second)
+
+
+def test_daemon_flushes_ready_output_before_exit_without_unbuffered_env(
+    insto_env: dict[str, str],
+) -> None:
+    daemon_env = dict(insto_env)
+    daemon_env.pop("PYTHONUNBUFFERED", None)
+    process = _start_daemon(daemon_env)
+    assert process.stdout is not None
+
+    try:
+        first_line = _readline_with_timeout(process.stdout)
+        assert first_line is not None, "daemon startup output remained buffered"
+        assert first_line.startswith("watch daemon started · database:")
+
+        process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, (
+            f"first_line={first_line!r}; stdout={stdout!r}; stderr={stderr!r}"
+        )
+    finally:
+        if process.poll() is None:
+            _stop_daemon(process)
 
 
 def test_daemon_delivers_changed_watch_webhook_without_leaking_secrets(

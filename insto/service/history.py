@@ -27,8 +27,8 @@ A `_meta(key, value)` table carries `schema_version`. Ordered entries in
 blocks on the SQLite write lock and then re-checks the version (no-op
 if already migrated).
 
-Retention `prune()` is dispatched as a background task on session start
-via `asyncio.to_thread(...)`; it never blocks the welcome screen.
+Retention `prune()` runs in a worker thread on REPL startup and at daemon
+startup plus hourly. The REPL's background task never blocks the welcome screen.
 """
 
 from __future__ import annotations

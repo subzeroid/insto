@@ -679,38 +679,43 @@ async def _run_watch_daemon(config: Config, log: logging.Logger) -> int:
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     installed_signals: list[signal.Signals] = []
+
+    def daemon_output(message: str) -> None:
+        print(message, flush=True)
+
     try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(signum, stop_event.set)
+            except (NotImplementedError, RuntimeError):
+                continue
+            installed_signals.append(signum)
+
         async with open_runtime(
             config,
             role="daemon",
             backend_factory=_build_backend,
-            watch_output=print,
+            watch_output=daemon_output,
         ) as runtime:
             coordinator = runtime.coordinator
             assert coordinator is not None
             specs = await runtime.history.list_watches_async()
             estimate = estimate_watch_load(specs)
 
-            print(f"watch daemon started · database: {config.db_path}")
-            print(f"recovered active watches: {len(runtime.manager)}")
-            print(
+            daemon_output(f"watch daemon started · database: {config.db_path}")
+            daemon_output(f"recovered active watches: {len(runtime.manager)}")
+            daemon_output(
                 "estimated load: "
                 f"{estimate.ticks_per_hour:g} ticks/hour · "
                 f"{estimate.backend_calls_per_hour_low:g} to "
                 f"{estimate.backend_calls_per_hour_high:g} backend calls/hour"
             )
             if config.backend == BACKEND_AIOGRAPI:
-                print("risk: polling can trigger rate limits or account restrictions")
+                daemon_output("risk: polling can trigger rate limits or account restrictions")
             else:
-                print("risk: polling consumes API quota and may incur provider cost")
-            print("press Ctrl-C to stop")
+                daemon_output("risk: polling consumes API quota and may incur provider cost")
+            daemon_output("press Ctrl-C to stop")
 
-            for signum in (signal.SIGINT, signal.SIGTERM):
-                try:
-                    loop.add_signal_handler(signum, stop_event.set)
-                except (NotImplementedError, RuntimeError):
-                    continue
-                installed_signals.append(signum)
             await coordinator.run(stop_event)
         return 0
     except WatchLockBusyError as exc:

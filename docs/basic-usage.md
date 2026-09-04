@@ -95,6 +95,13 @@ rate-limit/account (aiograpi) risk. At the minimum interval, three watches mean
 targets are staggered by two seconds, and each target uses fixed-delay polling,
 so slow calls never overlap or create catch-up bursts.
 
+The daemon applies retention on startup and hourly: command history older than
+90 days and snapshots older than 30 days are removed, keeping at most 100
+snapshots per target after each pass. Counts can exceed that cap between passes.
+A failed cleanup is retried at the next pass without stopping monitoring.
+Startup, watch results, and warnings are flushed immediately, including when
+stdout is redirected to a file or captured by a service manager.
+
 ### Watch webhook notifications
 
 Set `INSTO_WATCH_WEBHOOK_URL` in the environment of the REPL or watch daemon to

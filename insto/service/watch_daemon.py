@@ -71,6 +71,7 @@ class WatchDaemon:
         tick_factory: Callable[[str], TickFn],
         role: WatchExecutorRole,
         reconcile_seconds: float = 2.0,
+        prune_seconds: float = 3600.0,
         now: Callable[[], float] | None = None,
         state_output: Callable[[str], None] | None = None,
     ) -> None:
@@ -79,6 +80,7 @@ class WatchDaemon:
         self._tick_factory = tick_factory
         self._role = role
         self._reconcile_seconds = reconcile_seconds
+        self._prune_seconds = prune_seconds
         self._now = now if now is not None else time.time
         self._state_output = state_output
         self._wake = asyncio.Event()
@@ -97,6 +99,8 @@ class WatchDaemon:
             self._manager.acquire_executor()
         self._started = True
         try:
+            if self._role == "daemon":
+                await self._prune_best_effort()
             await self.reconcile_once(recovering=True)
         except BaseException:
             await self._manager.cancel_all()
@@ -155,6 +159,11 @@ class WatchDaemon:
         internal_stop_task = asyncio.create_task(
             self._internal_stop.wait(), name="insto-watch-internal-stop"
         )
+        prune_task = (
+            asyncio.create_task(self._prune_loop(), name="insto-watch-prune")
+            if self._role == "daemon"
+            else None
+        )
         try:
             waiters: set[asyncio.Future[Any]] = {
                 reconcile_task,
@@ -162,6 +171,8 @@ class WatchDaemon:
                 internal_stop_task,
                 self._manager.fatal_error,
             }
+            if prune_task is not None:
+                waiters.add(prune_task)
             done, _ = await asyncio.wait(
                 waiters,
                 return_when=asyncio.FIRST_COMPLETED,
@@ -170,14 +181,17 @@ class WatchDaemon:
                 raise self._manager.fatal_error.result()
             if reconcile_task in done:
                 await reconcile_task
+            if prune_task is not None and prune_task in done:
+                await prune_task
         finally:
-            for task in (reconcile_task, stop_task, internal_stop_task):
+            background_tasks = (reconcile_task, stop_task, internal_stop_task, prune_task)
+            for task in background_tasks:
+                if task is None:
+                    continue
                 if not task.done():
                     task.cancel()
             await asyncio.gather(
-                reconcile_task,
-                stop_task,
-                internal_stop_task,
+                *(task for task in background_tasks if task is not None),
                 return_exceptions=True,
             )
             await self._manager.cancel_all()
@@ -194,6 +208,29 @@ class WatchDaemon:
                 await asyncio.wait_for(self._wake.wait(), timeout=self._reconcile_seconds)
             self._wake.clear()
             await self.reconcile_once()
+
+    async def _prune_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._prune_seconds)
+            await self._prune_best_effort()
+
+    async def _prune_best_effort(self) -> None:
+        prune_task = asyncio.create_task(self._history.prune_async())
+        cancellation: asyncio.CancelledError | None = None
+        # Cancelling to_thread does not stop its worker. Keep shielding through
+        # repeated cancellation until SQLite work is done and can be closed.
+        while not prune_task.done():
+            try:
+                await asyncio.shield(prune_task)
+            except asyncio.CancelledError as exc:
+                cancellation = exc
+            except Exception:
+                break
+        # Retention errors are nonfatal; the periodic loop will retry later.
+        with contextlib.suppress(Exception):
+            prune_task.result()
+        if cancellation is not None:
+            raise cancellation
 
     async def _persist_state(self, spec: WatchSpec) -> bool:
         safe_error = redact_secrets(spec.last_error) if spec.last_error is not None else None

@@ -29,9 +29,11 @@
 | `scripts/runtime_manifest.py` | Снимок файлов нормализованного runtime и проверка изменений. |
 | `scripts/prepare_runtime.py` | Download/hash/extract, install locked wheels, metadata. |
 | `scripts/probe_runtime.py` | Read-only запуск перемещённого runtime без developer environment. |
+| `scripts/native_service_probe.py` | Ограниченный test supervisor с предварительным context, graceful interrupt и ownership-safe cleanup. |
 | `tests/test_runtime_manifest.py` | Traversal/symlink/type/change tests. |
 | `tests/test_prepare_runtime.py` | Archive budget/filter и upstream input checks. |
 | `tests/test_probe_runtime.py` | Subprocess recipe без реального Python payload. |
+| `tests/test_native_service_probe.py` | Timeout, interrupt, cleanup failure и сохранение evidence без настоящего launchd. |
 | `.build/` | Игнорируемые outputs: runtime, dependency export и evidence. |
 
 ## Task 1: Зафиксировать exact inputs и создать build-only проект
@@ -387,8 +389,12 @@ def build(core: Path, output: Path) -> None:
             requirements = output / "requirements.txt"
             run(["uv", "export", "--frozen", "--no-dev", "--no-default-groups",
                  "--no-emit-project", "--no-header", "--output-file", str(requirements)], cwd=core)
+            constraints = output / "build-constraints.txt"
+            run(["uv", "export", "--frozen", "--only-group", "dev",
+                 "--no-emit-project", "--no-header", "--output-file", str(constraints)], cwd=core)
             wheels = work / "wheels"
-            run(["uv", "build", "--wheel", "--out-dir", str(wheels)], cwd=core)
+            run(["uv", "build", "--wheel", "--build-constraints", str(constraints),
+                 "--require-hashes", "--out-dir", str(wheels)], cwd=core)
             candidates = list(wheels.glob("insto-*.whl"))
             if len(candidates) != 1:
                 raise ValueError("build must produce exactly one insto wheel")
@@ -402,6 +408,8 @@ def build(core: Path, output: Path) -> None:
             metadata = {"core_commit": commit, "core_wheel": wheel.name,
                         "core_wheel_sha256": sha256(wheel),
                         "requirements_sha256": sha256(requirements),
+                        "build_constraints_sha256": sha256(constraints),
+                        "uv_version": run(["uv", "--version"], cwd=core),
                         "architecture": architecture, "python_version": inputs["python_version"],
                         "upstream_url": target["url"], "upstream_sha256": target["sha256"]}
             manifest = {"manifest_version": 1, "inputs": metadata, "files": describe(runtime)}
@@ -430,6 +438,8 @@ if __name__ == "__main__":
 
 `run()` предназначен только для доверенных build commands, не подходит для secret-bearing production bridge или bounded app IPC. На build machine не задавать настоящий HikerAPI-токен; build stdout не публиковать как telemetry.
 
+Изолированный wheel builder тоже использует hashes: `pyproject.toml` содержит незакреплённый `hatchling`, поэтому одного runtime export недостаточно. Экспорт dev group здесь служит только constraints для build dependencies, не устанавливает dev group в runtime. `uv build --build-constraints ... --require-hashes` должен отказать при незакреплённой или изменённой зависимости, включая транзитивную. Семантика flags проверена по [официальному uv CLI reference](https://docs.astral.sh/uv/reference/cli/#uv-build). Сохранить constraints и версию uv в evidence; для повторного proof использовать ту же версию uv. Это фиксация входов, не обещание bit-for-bit одинакового подписанного артефакта.
+
 - [ ] **Step 4: Green unit suite.** `python3 -m unittest discover -s tests -v` → все manifest/archive tests pass.
 - [ ] **Step 5: Выполнить реальный build.** Проверить фактический C0 worktree путь перед командой:
 
@@ -443,7 +453,7 @@ python3 -m scripts.prepare_runtime --core-root <worktrees>/desktop-foundation --
 
 ## Task 5: Проверить настоящий runtime после перемещения
 
-**Create:** `scripts/probe_runtime.py`, `tests/test_probe_runtime.py`.
+**Create:** `scripts/probe_runtime.py`, `scripts/native_service_probe.py`, `tests/test_probe_runtime.py`, `tests/test_native_service_probe.py`.
 
 - [ ] **Step 1: Failing test на fixed invocation и environment.**
 
@@ -491,6 +501,7 @@ from pathlib import Path
 from typing import Any
 
 from scripts.runtime_manifest import verify
+from scripts.native_service_probe import run_native
 
 ENV = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8"}
 PROBE = """
@@ -534,6 +545,7 @@ def probe(payload: Path, native_core: Path | None = None) -> Path:
         raise ValueError("invalid proof manifest identifier")
     verify(payload / "python", manifest["files"])
     root = Path(tempfile.mkdtemp(prefix="relocated proof ", dir=payload.parent))
+    print(f"Proof artifacts retained at {root}", flush=True)
     relocated = root / "different path/python"
     shutil.copytree(payload / "python", relocated)
     python = relocated / "bin/python3"
@@ -557,15 +569,7 @@ def probe(payload: Path, native_core: Path | None = None) -> Path:
                                 "dependencies": details, "native": "not_run"}
     if native_core is not None:
         core = native_core.resolve(strict=True)
-        env = {**ENV, "INSTO_TEST_LAUNCHD": "1", "INSTO_TEST_NO_BYTECODE": "1",
-               "INSTO_TEST_PYTHON": str(python)}
-        result = subprocess.run([str(core / ".venv/bin/python"), "-m", "pytest",
-                                 str(core / "tests/e2e/test_watch_service.py"),
-                                 "--basetemp", str(root / "native-test"), "-q"],
-                                cwd=core, env=env, capture_output=True, text=True, timeout=180)
-        (root / "native-result.txt").write_text(result.stdout + result.stderr)
-        if result.returncode or "1 passed" not in result.stdout or "skipped" in result.stdout:
-            raise RuntimeError(f"native proof failed or skipped; preserve and inspect {root}")
+        run_native(core=core, python=python, root=root, environment=ENV)
         evidence["native"] = "passed"
     verify(relocated, manifest["files"])
     (root / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
@@ -587,6 +591,18 @@ if __name__ == "__main__":
 
 Relocated directory намеренно сохраняется даже при неудаче: если native cleanup не завершился, нельзя автоматически удалить interpreter работающей регистрации. `native-result.txt` содержит только isolated fake test output. Установленный app не использует этот test harness, argv `-c` или inherited build environment.
 
+- [ ] **Step 3a: Реализовать `scripts/native_service_probe.py` и unit tests до native запуска.** `run_native(*, core: Path, python: Path, root: Path, environment: dict[str, str]) -> None` — отдельный test supervisor, не production service controller. Приведённый выше `probe_runtime.py` зависит от этого шага; без helper Task 5 не завершён.
+
+Алгоритм helper:
+
+1. Проверить, что `root` — приватный настоящий каталог текущего пользователя, созданный данным probe; `native-test` и будущий home ещё отсутствуют. До запуска записать `native-context.json`: абсолютные runtime, `root/native-test/service home`, вычисленный из home label, ожидаемый plist, fake backend и фазу `starting`. Секретов там нет. stdout/stderr pytest направить в открытый `native-result.txt`, не собирать неограниченный вывод в память.
+2. Запустить через `Popen(start_new_session=True)` тот же единственный native test, `--basetemp root/native-test`, `INSTO_TEST_LAUNCHD=1`, `INSTO_TEST_NO_BYTECODE=1`, `INSTO_TEST_PYTHON=<python>` и `INSTO_TEST_HOME=<exact home>`. Изменение fixture описано в C0 Task 4. Запуск принимает только проверенные абсолютные пути; shell отсутствует.
+3. Общий бюджет pytest — 600 секунд: отдельные CLI могут занимать до 45 секунд, поэтому прежние 180 секунд не покрывали даже допустимую последовательность. При timeout или KeyboardInterrupt послать SIGINT созданной группе дочерних процессов и дать до 60 секунд на `finally`. Если группа не завершилась, прекратить только свою группу и дождаться её завершения. Не сигналить launchd PID по тексту status. Timeout остаётся провалом proof, даже если cleanup успешен.
+4. В `finally` проверить отсутствие своей регистрации. При оставшихся manifest/plist выполнить fallback через установленный `python -I -B -m insto watch-service uninstall`, с точным `INSTO_HOME` и очищенным environment. Перед этим проверить owner/type/приватность home, точное fake-содержимое config и совпадение context с вычисленными путями; production controller повторно проверяет manifest/plist ownership под своим management lock. Не удалять plist вручную. Fallback запускается лишь после завершения test process group; его таймаут 120 секунд, затем зафиксировать `cleanup_failed`, сохранив все пути и файлы. Не выдавать такой результат за pass.
+5. Подтвердить отсутствие manifest/plist и точного launchd label; неизвестный ответ launchctl — не подтверждение очистки. Сохранить итоговую фазу и exit code в context при любом исходе. Успех требует exit 0, ровно `1 passed`, без skip и подтверждённой очистки. Runtime/home/logs остаются для evidence; пользовательские LaunchAgents не перебираются и не изменяются.
+
+Unit tests через подменённые процессы проверяют success, skip, timeout→SIGINT→finally, escalation, Ctrl-C, fallback failure, чужой home/подменённый manifest, отсутствие записи label до запуска и сохранение evidence при каждом исключении. Последний случай должен выявлять ошибочный порядок: context обязан существовать прежде первого запуска. Timeout cleanup отдельно проверяется на безопасном дочернем процессе без launchd; настоящий native smoke разрешён только после этих green tests. Общий крайний бюджет helper — 600 + 60 + 120 секунд плюс ограниченные статус-проверки; ожидание в интерактивном агенте выполняется неблокирующими polling-вызовами.
+
 - [ ] **Step 4: Green unit tests и installed probe.**
 
 ```sh
@@ -604,7 +620,7 @@ python3 -m scripts.probe_runtime .build/runtime-host-01 --native-core <worktrees
 
 Ожидается `1 passed`, не skip. Native тест использует только временный home с fake backend и свой label, проверяет installed origin, новый tick, restart, clean exit и удаление собственной службы с сохранением данных. Он не меняет реальные watches и не расширяет production desktop capabilities. При cleanup failure сохранить конкретные runtime/home/label и исправить только эту тестовую регистрацию после ownership-проверки; не удалять все LaunchAgents.
 
-- [ ] **Step 6: Коммит.** `git add scripts/probe_runtime.py tests/test_probe_runtime.py`, `git commit -m "test: prove relocated runtime and isolated native service lifecycle"`.
+- [ ] **Step 6: Коммит.** `git add scripts/probe_runtime.py scripts/native_service_probe.py tests/test_probe_runtime.py tests/test_native_service_probe.py`, `git commit -m "test: prove relocated runtime and isolated native service lifecycle"`.
 
 ## Task 6: Зафиксировать evidence и границу следующего app proof
 
@@ -647,8 +663,25 @@ updates/recovery, signed/notarized quarantined DMG and both claimed architecture
 - [ ] **Step 2: Свести evidence по реально выполненной архитектуре.** Сохранённый `evidence.json` обязан указывать фактические Python/core versions, build id, installed module origin и `native: passed`. Записать macOS version и архитектуру рядом с результатом команд `sw_vers` и `uname -m` в handoff. Вторую архитектуру и downloaded-app проверку явно отметить как не выполненные, если соответствующего runner/app нет.
 - [ ] **Step 3: Финальная проверка.** `python3 -m unittest discover -s tests -v`, `git diff --check`, `git status --short`. `.build` не должна попасть в staged files. `git add packaging/README.md`, `git commit -m "docs: record runtime proof workflow and release gates"`.
 
-## Gate P0 → P1
+## Gate P0 → C1 → P1
 
 Успех P0 разрешает планировать минимальный **настоящий** Tauri app proof, но не означает, что установка GUI уже работает. P1 требует scoped Rust commands, bounded child I/O, canonical private root, cross-process publisher lock, trusted bundle manifest, no overwrite, interruption recovery и actual installed app test. Signing может требовать отдельной пользовательской авторизации; ad-hoc local proof не выдаётся за public release.
 
+До исполнения app proof C1 добавляет операции setup/service, которых нет в C0 `hello`. Production manifest вычисляется после подписи вложенного runtime и до подписи внешнего app; P0 unsigned manifest — только developer evidence. Обязательные дополнительные проверки C0/P0 и будущих фаз собраны в [test review](2026-09-05-insto-gui-engineering-review.md#test-review); примеры unit tests выше не заменяют эту матрицу.
+
 Если переносимость CPython/native dependencies не подтверждена, вернуть конкретный failing import/architecture/path и пересмотреть packaging в пределах согласованной архитектуры до создания полного UI. Не подменять portable runtime системным Python.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | Not run | Scope already approved |
+| Codex Review | `/codex review` | Cross-model opinion | 0 | Not run | Astra-only requirement |
+| Eng Review | `/plan-eng-review` | Architecture & tests | 1 | CLEAR (PLAN) | 8 findings folded; 0 critical gaps |
+| Outside voice | Astra read-only agent | Fresh-context check | 1 + recheck | Complete | 2 findings folded; no remaining blocker |
+| Design Review | `/plan-design-review` | UI/UX | 0 | Not run | Before full G1 implementation |
+| DX Review | `/plan-devex-review` | Developer experience | 0 | Not run | Not required for C0/P0 |
+
+**VERDICT:** ENG CLEARED — можно исполнять C0/P0. Полная спека проверена на архитектурную согласованность; последующие фазы требуют своих подробных планов и executable gates. GUI и релиз ещё не готовы.
+
+NO UNRESOLVED DECISIONS

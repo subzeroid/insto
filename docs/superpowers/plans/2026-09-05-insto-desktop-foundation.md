@@ -307,14 +307,16 @@ import httpx
 import pytest
 
 from insto.backends.hiker import HikerBackend
-from insto.exceptions import AuthInvalid, QuotaExhausted, RateLimited, SchemaDrift, Transient
+from insto.exceptions import AuthInvalid, BackendError, QuotaExhausted, RateLimited, SchemaDrift, Transient
 from tests.test_hiker_backend import _no_retry
 
 
 async def backend(handler: Callable[[httpx.Request], httpx.Response]) -> HikerBackend:
     sdk = hikerapi.AsyncClient(token="test-credential", timeout=1)
     await sdk._client.aclose()
-    sdk._client = httpx.AsyncClient(base_url=sdk._url, transport=httpx.MockTransport(handler))
+    sdk._client = httpx.AsyncClient(
+        base_url=sdk._url, headers=sdk._headers, transport=httpx.MockTransport(handler)
+    )
     return HikerBackend(client=sdk, retry_decorator=_no_retry())
 
 
@@ -323,6 +325,7 @@ async def test_valid_access_and_zero_quota(remaining: int) -> None:
     paths: list[str] = []
 
     def respond(request: httpx.Request) -> httpx.Response:
+        assert request.headers["x-access-key"] == "test-credential"
         paths.append(request.url.path)
         return httpx.Response(200, json={"requests": remaining})
 
@@ -370,6 +373,19 @@ async def test_network_error_is_not_invalid_token() -> None:
         await client.aclose()
 
 
+@pytest.mark.parametrize("status", [403, 404])
+async def test_balance_errors_do_not_use_profile_lookup_semantics(status: int) -> None:
+    client = await backend(lambda request: httpx.Response(status, json={"error": "sentinel"}))
+    try:
+        with pytest.raises(BackendError) as caught:
+            await client.validate_access()
+        assert type(caught.value) is BackendError
+        assert str(caught.value) == "HikerAPI access check could not confirm access"
+        assert client.get_last_error() is caught.value
+    finally:
+        await client.aclose()
+
+
 async def test_non_json_success_is_schema_drift() -> None:
     client = await backend(lambda request: httpx.Response(200, content=b"not json"))
     try:
@@ -385,7 +401,15 @@ async def test_non_json_success_is_schema_drift() -> None:
 ```python
 async def validate_access(self) -> Quota:
     """Validate access strictly; zero is a valid exhausted-balance result."""
-    response = await self._call(partial(self._client._client.get, "/sys/balance"))
+    async def request_balance() -> httpx.Response:
+        try:
+            return await self._client._client.get("/sys/balance")
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {403, 404}:
+                raise BackendError("HikerAPI access check could not confirm access") from None
+            raise
+
+    response = await self._call(request_balance)
     try:
         data = response.json()
     except ValueError:
@@ -397,7 +421,7 @@ async def validate_access(self) -> Quota:
     return self._quota
 ```
 
-Это метод внутри существующего класса; используемые `partial`, `Quota`, `SchemaDrift` уже импортированы. Метод намеренно не передаёт неизвестные optional SDK поля в DTO. C1 регистрирует token в redactor **до** создания клиента, ограничивает всю validation operation 30 секундами и закрывает backend в `finally`.
+Это метод внутри существующего класса; `httpx`, `BackendError`, `Quota`, `SchemaDrift` уже импортированы. Существующий response hook поднимает HTTP errors. Для `/sys/balance` 403/404 означают неподтверждённый доступ, а не запрет Instagram-профиля или внутренний not-found sentinel; общий lookup translator не меняется. Только подтверждённый 401 означает invalid token. Метод намеренно не передаёт неизвестные optional SDK поля в DTO. C1 регистрирует token в redactor **до** создания клиента, ограничивает всю validation operation 30 секундами и закрывает backend в `finally` ровно один раз, включая отмену.
 
 - [ ] **Step 4: Green.** `.venv/bin/ruff format insto/backends/hiker.py tests/test_hiker_access.py`; `.venv/bin/pytest tests/test_hiker_access.py tests/test_hiker_backend.py -q`; `.venv/bin/mypy insto/backends/hiker.py` → pass.
 - [ ] **Step 5: Коммит.** `git add insto/backends/hiker.py tests/test_hiker_access.py`, `git commit -m "feat: validate HikerAPI access without swallowing failures"`.
@@ -447,6 +471,7 @@ def test_owned_argv_match_rejects_additional_flags(
 ```
 
 - [ ] **Step 2: Red.** `.venv/bin/pytest tests/test_watch_service.py -k 'argv_variants or no_bytecode or additional_flags' -q` → отсутствующий keyword/helper.
+- [ ] **Step 2a: Дополнить regression matrix до изменения controller.** Параметризовать существующий install/idempotency test по `dont_write_bytecode=False/True`, явно устанавливать `sys.dont_write_bytecode` через monkeypatch и ожидать соответствующий точный argv. Добавить `stored_mode × requested_mode × loaded` (2×2×2): совпадающий режим допускает обычный install/no-op; несовпадающий отказывает и для loaded, и для unloaded регистрации. При отказе bytes manifest/plist неизменны, среди вызовов нет `enable`, `bootstrap`, `bootout`, `kickstart`. Не ограничиваться тестированием `_desired()` или uninstall: обе install-ветви имеют самостоятельную ownership-проверку.
 - [ ] **Step 3: Изменить только создание argv и точное сравнение.** В `_desired()` заменить строку создания `plist` на:
 
 ```python
@@ -515,7 +540,10 @@ expected_suffix = f" {' '.join(python_flags)} -m insto.service.watch_service_run
 
 PID/lock/ps ownership assertions и `finally` cleanup не ослаблять. Это test-only env, production backend его не читает.
 
+Для аварийного supervisor cleanup из P0 добавить optional `INSTO_TEST_HOME`. Без него home остаётся прежним `tmp_path / "service home"`. С ним разрешён только абсолютный новый путь `tmp_path.parent / "service home"` (непосредственно внутри заданного pytest basetemp), не symlink и не существующий каталог. Проверить приватность/владельца родителя, затем создать home через `mkdir(mode=0o700)` без `exist_ok`. Остальные label/manifest/config/ownership assertions не менять. Это позволяет внешнему supervisor записать точные home и label до запуска теста и восстановить только эту регистрацию после прерывания pytest. Unit tests выбора home не требуют launchd: default, допустимый explicit, относительный, существующий, symlink, чужой parent. Этот test-only выбор не добавляется в production config или protocol.
+
 - [ ] **Step 5: Green и regression.** `.venv/bin/ruff format insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`; `.venv/bin/pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Native test выполняется в P0 с wheel-installed runtime, не из checkout.
+- [ ] **Step 5a: Проверить независимость suite от запускающего Python.** Повторить `.venv/bin/python -B -m pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Обычный запуск и `-B` должны пройти одинаковую явно параметризованную матрицу.
 - [ ] **Step 6: Коммит.** `git add insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`, `git commit -m "feat: support bytecode-free managed service launches safely"`.
 
 ## Task 5: Документировать только работающий foundation и проверить wheel
@@ -587,3 +615,20 @@ git diff --check
 ## Самопроверка покрытия C0
 
 Task 1/2 покрывают handshake и границы protocol; Task 3 — strict access primitive; Task 4 — совместимость service argv; Task 5 — wheel и регрессии. C1, C2, P1 и GUI остаются следующими этапами delivery map. Наличие `hello` не считается выполнением token-only onboarding.
+
+Обязательные негативные случаи сверх начальных red-примеров перечислены в [engineering review, матрица тестов](2026-09-05-insto-gui-engineering-review.md#test-review). До выполнения всей соответствующей матрицы C0 не закрывать. Примеры в документе не являются уже выполненными тестами.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | Not run | Scope already approved |
+| Codex Review | `/codex review` | Cross-model opinion | 0 | Not run | Astra-only requirement |
+| Eng Review | `/plan-eng-review` | Architecture & tests | 1 | CLEAR (PLAN) | 8 findings folded; 0 critical gaps |
+| Outside voice | Astra read-only agent | Fresh-context check | 1 + recheck | Complete | 2 findings folded; no remaining blocker |
+| Design Review | `/plan-design-review` | UI/UX | 0 | Not run | Before full G1 implementation |
+| DX Review | `/plan-devex-review` | Developer experience | 0 | Not run | Not required for C0/P0 |
+
+**VERDICT:** ENG CLEARED — можно исполнять C0/P0. Полная спека проверена на архитектурную согласованность; последующие фазы требуют своих подробных планов и executable gates. GUI и релиз ещё не готовы.
+
+NO UNRESOLVED DECISIONS

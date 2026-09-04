@@ -20,9 +20,9 @@ C0: совместимый core foundation
   ↓
 P0: переносимый runtime и native service proof
   ↓
-P1: минимальный Tauri app → подготовка runtime → служба после выхода
-  ↓
 C1: setup / credential replacement / service recovery
+  ↓
+P1: минимальный Tauri app → подготовка runtime → служба после выхода
   ↓
 C2: readonly history / revision-safe watches
   ↓
@@ -43,6 +43,7 @@ R1: signed + notarized DMG, чистые Mac, релиз
 | Отсутствие сетевой установки у пользователя | P1: сеть заблокирована, runtime готовится из ресурсов приложения. Сетевые шаги P0 существуют только на build machine. |
 | Один экран токена | C0: строгий backend primitive; C1: безопасное сохранение и setup; G1: единственная обязательная форма. |
 | Invalid token / quota / network / unknown response | C0: typed errors; C1: безопасные protocol codes и сохранность прежнего токена; G1: различимые UI-состояния. |
+| Применение замены токена в работающем daemon | C1: проверка → остановка своей службы → atomic config → запуск, защищённый recovery record и rollback; stopped остаётся stopped, внешний CLI требует принятия управления. |
 | Никаких секретов в argv/logs/plist/frontend storage | C1 + P1 + G1: stdin transport, redaction до запроса, atomic 0600 config, deny-by-default IPC и sentinel tests. |
 | Отдельная служба, stop/start/repair, desired state | C1 + P1: настоящий launchd, остановка уважается, loaded-but-exited восстанавливается без guessed PID. |
 | 3 активных, 300 секунд, CAS revision и pause гонки | C2: транзакционные доменные операции и stale revision tests; G1: понятный conflict. |
@@ -53,6 +54,7 @@ R1: signed + notarized DMG, чистые Mac, релиз
 | Existing home, ownership transfer, aiograpi refusal | G2: дополнительные настройки, явное подтверждение, неизвестный владелец readonly. Onboarding не читает `~/.insto`. |
 | Удаление app не оставляет ложного обещания uninstall | G2: явное отключение службы, сохранение данных, понятная инструкция перед удалением app. |
 | arm64 / x86_64 / minimum OS / Developer ID | P0 определяет переносимость; P1 проверяет nested signing; R1 фиксирует фактически проверенную матрицу и скачанный quarantined DMG. |
+| Подписи и окончательный hash manifest | P1/R1: вложенная подпись → final manifest/build-id → внешняя подпись; проверяется уже подписанное скопированное дерево. Unsigned P0 manifest не переиспользуется после signing. |
 
 ## Инженерные решения, которые уже можно зафиксировать
 
@@ -67,10 +69,25 @@ R1: signed + notarized DMG, чистые Mac, релиз
 
 Исполнение рекомендуем inline на Astra, небольшими проверяемыми коммитами; Sol не используется. Для C0 создаётся отдельная implementation worktree от этой документационной ветки. P0 выполняется в новом отдельном `insto-gui`; существующий `insta-dl-gui` остаётся нетронутым.
 
-Перед исполнением — инженерное ревью этих двух планов и границ P1. Проверка собственной полноты документа не выдаётся за `plan-eng-review`.
+Инженерное ревью всей спеки, C0/P0 и границ последующих фаз выполнено: [решения, доказательства и обязательная матрица тестов](2026-09-05-insto-gui-engineering-review.md). C1 предшествует P1: `hello` из C0 недостаточно для запуска службы через desktop protocol. P0 по-прежнему проверяет переносимость до расширения контрактов и создания app. Это исправление зависимости, не перенос полного UI перед packaging proof.
 
 Локальные коммиты разрешены обычным implementation workflow. Публикация, merge, signing credentials, реальный HikerAPI-токен и установка службы на пользовательские живые наблюдения не следуют автоматически из согласования спеки. Native proof работает только со своим временным fake home и проверяемой очисткой одной регистрации.
 
 ## Источники упаковки
 
 Механизм вложенных ресурсов описан в [Tauri resources](https://v2.tauri.app/develop/resources/). Формат переносимой Python installation — в [python-build-standalone distributions](https://gregoryszorc.com/docs/python-build-standalone/main/distributions.html). Выбранные P0 assets и digest взяты из [release 20260901](https://github.com/astral-sh/python-build-standalone/releases/tag/20260901); это входы proof, не заявление о проверенной совместимости.
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+| --- | --- | --- | --- | --- | --- |
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | Not run | Scope already approved |
+| Codex Review | `/codex review` | Cross-model opinion | 0 | Not run | Astra-only requirement |
+| Eng Review | `/plan-eng-review` | Architecture & tests | 1 | CLEAR (PLAN) | 8 findings folded; 0 critical gaps |
+| Outside voice | Astra read-only agent | Fresh-context check | 1 + recheck | Complete | 2 findings folded; no remaining blocker |
+| Design Review | `/plan-design-review` | UI/UX | 0 | Not run | Before full G1 implementation |
+| DX Review | `/plan-devex-review` | Developer experience | 0 | Not run | Not required for C0/P0 |
+
+**VERDICT:** ENG CLEARED — можно исполнять C0/P0. Полная спека проверена на архитектурную согласованность; последующие фазы требуют своих подробных планов и executable gates. GUI и релиз ещё не готовы.
+
+NO UNRESOLVED DECISIONS

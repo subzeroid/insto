@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from insto._redact import register_secret
 from insto.models import WatchSpec
 from insto.service.history import HistoryStore
 from insto.service.watch import TickFn, WatchManager
@@ -225,6 +226,41 @@ async def test_due_tick_persists_success_and_stale_callback_stops(history: Histo
     assert replacement is not None
     assert history.update_watch_state(original, last_error="stale") is False
     assert history.get_watch("alice") == replacement
+    await daemon.stop()
+    manager.release_executor()
+
+
+async def test_failed_tick_is_redacted_in_state_and_executor_output(
+    history: HistoryStore,
+) -> None:
+    secret = "watch-secret-123456"
+    register_secret(secret)
+    assert history.register_watch("alice", 300).spec is not None
+    messages: list[str] = []
+
+    def failing_tick_factory(user: str) -> TickFn:
+        async def tick() -> None:
+            raise RuntimeError(f"backend token={secret}")
+
+        return tick
+
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=failing_tick_factory,
+        role="daemon",
+        state_output=messages.append,
+    )
+    await daemon.start()
+
+    state = await manager.tick_once("alice")
+
+    assert state.consecutive_errors == 1
+    persisted = history.get_watch("alice")
+    assert persisted is not None
+    assert persisted.last_error == "backend token=***"
+    assert messages == ["@alice: watch error (1/2) · active · backend token=***"]
     await daemon.stop()
     manager.release_executor()
 

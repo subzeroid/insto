@@ -100,6 +100,7 @@ async def open_runtime(
                 manager=manager,
                 tick_factory=build_tick,
                 role=role,
+                state_output=watch_output,
             )
             facade.watch_daemon = coordinator
 

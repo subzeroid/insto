@@ -72,6 +72,7 @@ class WatchDaemon:
         role: WatchExecutorRole,
         reconcile_seconds: float = 2.0,
         now: Callable[[], float] | None = None,
+        state_output: Callable[[str], None] | None = None,
     ) -> None:
         self._history = history
         self._manager = manager
@@ -79,6 +80,7 @@ class WatchDaemon:
         self._role = role
         self._reconcile_seconds = reconcile_seconds
         self._now = now if now is not None else time.time
+        self._state_output = state_output
         self._wake = asyncio.Event()
         self._internal_stop = asyncio.Event()
         self._started = False
@@ -195,13 +197,19 @@ class WatchDaemon:
 
     async def _persist_state(self, spec: WatchSpec) -> bool:
         safe_error = redact_secrets(spec.last_error) if spec.last_error is not None else None
-        return await self._history.update_watch_state_async(
+        updated = await self._history.update_watch_state_async(
             spec,
             last_ok=spec.last_ok,
             last_error=safe_error,
             consecutive_errors=spec.consecutive_errors,
             status=spec.status,
         )
+        if updated and safe_error is not None and self._state_output is not None:
+            self._state_output(
+                f"@{spec.user}: watch error ({spec.consecutive_errors}/2) "
+                f"· {spec.status} · {safe_error}"
+            )
+        return updated
 
 
 __all__ = [

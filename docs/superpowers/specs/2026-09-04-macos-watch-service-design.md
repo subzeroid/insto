@@ -2,7 +2,7 @@
 
 Date: 2026-09-04
 
-Status: draft for user confirmation and `plan-eng-review`; no service implementation or installation yet.
+Status: approved by user; engineering review complete. Implementation follows in the paired plan.
 
 ## Goal and approved boundary
 
@@ -43,7 +43,7 @@ Install registers the service and starts it in the current GUI login session. Re
 
 Uninstall removes only this installation's service registration and generated control files after successful unload. It preserves watches, snapshots, configuration, user-supplied environment files, and logs. It never kills an unrelated REPL/daemon by PID, deletes the shared executor lock, or uses a recursive cleanup.
 
-## Configuration and the decision requiring confirmation
+## Approved configuration policy
 
 **Recommended policy: no automatic capture of the invoking shell's secrets.** The service uses the existing protected configuration file. If environment-only settings are needed, the operator explicitly supplies a private, data-only TOML environment file via `--env-file`. Insto stores its absolute path, never copies its contents into its manifest or plist, never creates this secret file, and never displays its values.
 
@@ -58,7 +58,7 @@ The `[env]` allowlist is `HIKERAPI_TOKEN`, `HIKERAPI_PROXY`, `AIOGRAPI_USERNAME`
 
 Backend choice and non-secret config/database/output/session locations are resolved and pinned at installation. Do not resolve relative paths against launchd's working directory later. Credentials are loaded afresh from the protected config and optional explicit env file on each start. The runner clears inherited insto/provider settings before applying these sources, so a launchd-global environment cannot silently switch accounts, stores, or notification endpoints. Service management commands do not call providers or persist credentials.
 
-The explicit env file is a **new service-only way to inject the existing environment variable**, and therefore needs a documented clarification to the earlier environment-only webhook design. It does not add a webhook URL field to `config.toml` or SQLite. If this policy is not approved, the alternative is to ship the service without managed environment-only webhook configuration and document external injection separately.
+The explicit env file is an approved **service-only way to inject the existing environment variable**. This clarifies the earlier environment-only webhook design without adding a webhook URL field to `config.toml` or SQLite.
 
 Install validates the configuration that the service will actually use, not merely the environment that made the interactive command work. Missing credentials, insecure files, or invalid webhook settings fail before registration and do not print values. Credential flags or shell-only overrides that are not durable service configuration must not be silently treated as configured.
 
@@ -104,7 +104,7 @@ Report separate observations:
 - observed process state/PID/last exit where the platform exposes recognizable diagnostics, otherwise `unknown`;
 - pinned database and log paths, interpreter availability;
 - persisted watch usernames, active/paused state, interval, and last successful tick in UTC;
-- any watch last-error strings through central redaction.
+- whether each watch has a recorded error, without returning its arbitrary error text. Credential-free status cannot safely redact historical secret values that it deliberately does not load; detailed diagnostics remain in protected service logs.
 
 `launchctl print` is documented as unstable diagnostic text. Its parser, if used for optional fields, is best-effort and must return unknown on unrecognized output; parsed PID/state must never drive deletion, signaling, ownership, or a health-success claim. Registration alone is not proof of a healthy watcher. Missing/paused/stale watches remain visible even when the service process is running.
 
@@ -175,12 +175,35 @@ Parallel work is useful for the first two lanes with explicit file ownership. CL
 - Guaranteed webhook delivery or external endpoint provisioning: existing notification semantics remain.
 - Installing a live service for the user during development, merging, or releasing this feature without the corresponding handoff/authorization.
 
-## Review state
+## Engineering refinements
 
-This is the proposed review target, not an engineering-review verdict. `plan-eng-review` must run against this document after confirmation. Its scope challenge must explicitly consider the controller/runner split and anticipated test/docs/CI file count. The credential-file policy above is the sole product/security decision flagged for confirmation before implementation.
+Six findings are accepted under the user's standing instruction to take recommended technical decisions:
+
+1. Read both service credential sources using descriptor-checked, bounded, no-follow reads. Reuse the existing config resolution through an optional pre-read TOML mapping rather than changing default foreground file semantics.
+2. Manifest fields explicitly pin `config_home`, `backend`, `db_path`, `output_dir`, and `aiograpi_session_path`, plus `python`, `env_file`, `label`, format/ownership marker and uid. Apply pins after configuration resolution; subsequent TOML edits can rotate credentials but cannot retarget the service.
+3. Clear inherited insto/provider settings, standard upper/lowercase HTTP proxy variables, and HTTP client CA-bundle environment overrides before resolving and running the service. Launch Python with `-I` to avoid inherited import-path control.
+4. Service logging uses the existing formatter/rotation constants but a descriptor-safe rotating handler; validate its private directory and rotated siblings rather than relying on foreground setup's permissive fallback.
+5. Reject NUL-containing environment values with a value-free error. Empty values follow existing semantics: no override/fallback for provider config and disabled webhook.
+6. Credential-free status exposes `has_error`, never arbitrary historical `last_error` content. Keep stdout/JSON safe without trying to load potentially broken credentials solely for redaction.
+
+The scope challenge accepts the file count: four production integration areas plus focused tests/docs/CI, not eight independent subsystems. Two implementation lanes can proceed with disjoint ownership; main integrates CLI/status and performs spec compliance followed by independent quality review. No new TODO is proposed beyond the explicitly deferred platform/GUI work.
 
 ## Platform evidence
 
 - Apple's [Creating Launch Daemons and Agents](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingLaunchdJobs.html): per-user agents, login/logout lifecycle, foreground execution, ownership, and restart behavior.
 - Locally inspected macOS 26.6.2 `launchctl(1)`: `gui/<uid>`, `bootstrap`, `bootout`, persistent `enable`/`disable`, and the warning that `print` output is not an API.
 - Locally inspected `launchd.plist(5)`: `ProgramArguments`, `SuccessfulExit`, implicit `RunAtLoad`, restart throttling, absolute program paths, and working-directory semantics.
+
+## GSTACK REVIEW REPORT
+
+| Review | Runs | Status | Findings |
+| --- | --- | --- | --- |
+| Eng Review | 1 | CLEAR (PLAN) | 6 refinements accepted; no critical uncovered failure paths |
+| Independent outside voice | 1 | COMPLETE | Five concrete security/configuration refinements included |
+| CEO / UI design | 0 | Not required | Bounded local service feature; no GUI |
+
+Scope accepted; architecture, code quality, tests, and performance evaluated. Test/failure map above covers all planned entrypoints; coverage is required implementation work, not claimed passing coverage. Performance is bounded by launchctl timeouts, 64 KiB inputs, rotating logs, and one read-only watch query. No provider calls on management paths. Baseline: 1175 tests pass on Python 3.12.11.
+
+VERDICT: ENG CLEARED for implementation within this spec. No actual user service installation, merge, or release is authorized by this review.
+
+NO UNRESOLVED DECISIONS

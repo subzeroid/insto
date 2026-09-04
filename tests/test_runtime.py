@@ -140,3 +140,36 @@ async def test_partial_construction_failure_closes_backend(tmp_path: Path) -> No
     assert events == ["backend"]
     reopened = HistoryStore(config.db_path)
     reopened.close()
+
+
+async def test_cleanup_continues_after_coordinator_stop_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path)
+    events: list[str] = []
+    backend = ClosingBackend(events)
+    client = ClosingClient(events)
+    history: HistoryStore | None = None
+    manager = None
+
+    async with open_runtime(
+        config,
+        role="daemon",
+        backend_factory=lambda _: backend,
+        cdn_client_factory=lambda _: client,
+    ) as runtime:
+        history = runtime.history
+        manager = runtime.manager
+        assert runtime.coordinator is not None
+
+        async def broken_stop() -> None:
+            raise RuntimeError("coordinator stop failed")
+
+        monkeypatch.setattr(runtime.coordinator, "stop", broken_stop)
+
+    assert events == ["cdn", "backend"]
+    assert history is not None
+    with pytest.raises(sqlite3.ProgrammingError):
+        history.schema_version()
+    assert manager is not None and manager.executor_acquired is False

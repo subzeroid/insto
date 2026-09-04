@@ -128,6 +128,17 @@ async def test_watch_uses_session_target_when_no_arg(
     assert facade.history.get_watch("alice") is not None
 
 
+async def test_watch_treats_single_numeric_arg_as_interval_for_session_target(
+    facade: OsintFacade, session: Session, console: Console
+) -> None:
+    session.set_target("alice")
+
+    payload = await dispatch("/watch 600", facade=facade, session=session, console=console)
+
+    assert payload["user"] == "alice"
+    assert payload["interval_seconds"] == 600
+
+
 # ---------------------------------------------------------------------------
 # /unwatch and /watching
 # ---------------------------------------------------------------------------

@@ -72,9 +72,23 @@ _MIGRATIONS: dict[int, tuple[str, ...]] = {
             user, registration_id, interval_seconds, last_ok, last_error,
             consecutive_errors, status
         )
-        SELECT lower(ltrim(user, '@')), lower(hex(randomblob(16))),
-               interval_seconds, last_ok, last_error, 0, status
-        FROM watches_v1
+        SELECT canonical_user, lower(hex(randomblob(16))), interval_seconds,
+               last_ok, last_error, 0, status
+        FROM (
+            SELECT lower(ltrim(user, '@')) AS canonical_user,
+                   max(interval_seconds, 300) AS interval_seconds,
+                   last_ok,
+                   last_error,
+                   CASE WHEN status IN ('active', 'paused') THEN status ELSE 'active' END AS status,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY lower(ltrim(user, '@'))
+                       ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END,
+                                COALESCE(last_ok, -1) DESC,
+                                user ASC
+                   ) AS canonical_rank
+            FROM watches_v1
+        )
+        WHERE canonical_rank = 1
         """,
         "DROP TABLE watches_v1",
     )
@@ -469,21 +483,27 @@ class HistoryStore:
                     if row is not None and row["status"] == "active":
                         result = WatchRegistration("already_active", _row_to_watchspec(row))
                     elif row is not None:
-                        registration_id = uuid.uuid4().hex
-                        cur.execute(
-                            """
-                            UPDATE watches
-                            SET registration_id = ?, interval_seconds = ?, last_error = NULL,
-                                consecutive_errors = 0, status = 'active'
-                            WHERE user = ?
-                            """,
-                            (registration_id, interval_seconds, canonical),
-                        )
-                        updated = cur.execute(
-                            _WATCH_SELECT + " WHERE user = ?", (canonical,)
-                        ).fetchone()
-                        assert updated is not None
-                        result = WatchRegistration("reactivated", _row_to_watchspec(updated))
+                        active_count = cur.execute(
+                            "SELECT COUNT(*) FROM watches WHERE status = 'active'"
+                        ).fetchone()[0]
+                        if active_count >= 3:
+                            result = WatchRegistration("full", None)
+                        else:
+                            registration_id = uuid.uuid4().hex
+                            cur.execute(
+                                """
+                                UPDATE watches
+                                SET registration_id = ?, interval_seconds = ?, last_error = NULL,
+                                    consecutive_errors = 0, status = 'active'
+                                WHERE user = ?
+                                """,
+                                (registration_id, interval_seconds, canonical),
+                            )
+                            updated = cur.execute(
+                                _WATCH_SELECT + " WHERE user = ?", (canonical,)
+                            ).fetchone()
+                            assert updated is not None
+                            result = WatchRegistration("reactivated", _row_to_watchspec(updated))
                     else:
                         active_count = cur.execute(
                             "SELECT COUNT(*) FROM watches WHERE status = 'active'"

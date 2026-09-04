@@ -264,6 +264,25 @@ def test_migrates_schema_v1_atomically_and_preserves_watch(tmp_path: Path) -> No
         reopened.close()
 
 
+def test_schema_v1_migration_deduplicates_canonical_usernames(tmp_path: Path) -> None:
+    db = tmp_path / "duplicate-v1.db"
+    _create_schema_v1(db, user="@Alice")
+    with sqlite3.connect(db) as raw:
+        raw.execute("INSERT INTO watches VALUES('alice', 900, 456, NULL, 'active')")
+
+    migrated = HistoryStore(db)
+    try:
+        assert migrated.schema_version() == 2
+        watches = migrated.list_watches()
+        assert len(watches) == 1
+        assert watches[0].user == "alice"
+        assert watches[0].status == "active"
+        assert watches[0].interval_seconds == 900
+        assert watches[0].last_ok == 456
+    finally:
+        migrated.close()
+
+
 def test_failed_schema_v2_migration_rolls_back_all_changes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -331,6 +350,23 @@ def test_reactivate_uses_new_id_and_stale_state_update_is_ignored(store: History
     assert current is not None
     assert current.last_ok == 5678
     assert current.last_error is None
+
+
+def test_reactivation_respects_global_active_limit(store: HistoryStore) -> None:
+    alice = store.register_watch("alice", 300).spec
+    assert alice is not None
+    assert store.update_watch_state(alice, status="paused")
+    for user in ("bob", "carol", "dave"):
+        assert store.register_watch(user, 300).kind == "created"
+
+    result = store.register_watch("alice", 600)
+
+    assert result.kind == "full"
+    assert result.spec is None
+    current = store.get_watch("alice")
+    assert current is not None
+    assert current.status == "paused"
+    assert len([watch for watch in store.list_watches() if watch.status == "active"]) == 3
 
 
 def test_watch_registry_validates_inputs_and_deletes_canonically(store: HistoryStore) -> None:

@@ -76,19 +76,29 @@ def watch_public_dict(spec: WatchSpec) -> dict[str, object]:
 )
 async def watch_cmd(ctx: CommandContext) -> dict[str, Any]:
     raw = getattr(ctx.args, "target", None)
-    if raw:
+    raw_interval = getattr(ctx.args, "interval", None)
+    interval_only = (
+        raw is not None
+        and raw_interval is None
+        and ctx.session.target is not None
+        and str(raw).isdigit()
+    )
+    if interval_only:
+        assert raw is not None
+        username = ctx.session.target or ""
+        interval = int(raw)
+    elif raw:
         username = str(raw).lstrip("@").strip()
+        interval = int(raw_interval) if raw_interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
     elif ctx.session.target:
         username = ctx.session.target
+        interval = int(raw_interval) if raw_interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
     else:
         raise CommandUsageError("no target set — pass a username or run /target <user> first")
     if not username:
         raise CommandUsageError("usage: /watch <username> [interval-seconds]")
     username = _validate_username(username).lower()
 
-    interval = (
-        int(ctx.args.interval) if ctx.args.interval is not None else DEFAULT_WATCH_INTERVAL_SECONDS
-    )
     if interval < MIN_WATCH_INTERVAL_SECONDS:
         raise CommandUsageError(
             f"interval must be at least {MIN_WATCH_INTERVAL_SECONDS} seconds (got {interval})"
@@ -159,7 +169,7 @@ async def unwatch_cmd(ctx: CommandContext) -> bool:
 # ---------------------------------------------------------------------------
 
 
-@command("watching", "List active watches for this session")
+@command("watching", "List persisted watches and their state")
 async def watching_cmd(ctx: CommandContext) -> list[dict[str, Any]]:
     specs = await ctx.facade.history.list_watches_async()
     rows = [watch_public_dict(spec) for spec in specs]

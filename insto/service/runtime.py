@@ -114,22 +114,25 @@ async def open_runtime(
             )
         yield runtime
     finally:
+        coordinator_stop_failed = False
         if runtime is not None and runtime.coordinator is not None:
-            await runtime.coordinator.stop()
+            try:
+                await runtime.coordinator.stop()
+            except Exception:
+                coordinator_stop_failed = True
             if runtime.coordinator_task is not None:
+                if coordinator_stop_failed and not runtime.coordinator_task.done():
+                    runtime.coordinator_task.cancel()
                 await asyncio.gather(runtime.coordinator_task, return_exceptions=True)
-        if facade is not None:
+        if manager is not None:
             with contextlib.suppress(Exception):
-                await facade.aclose()
-            backend = None
-            cdn_client = None
-        else:
-            if cdn_client is not None:
-                with contextlib.suppress(Exception):
-                    await cdn_client.aclose()
-            if backend is not None:
-                with contextlib.suppress(Exception):
-                    await backend.aclose()
+                await manager.cancel_all()
+        if cdn_client is not None:
+            with contextlib.suppress(Exception):
+                await cdn_client.aclose()
+        if backend is not None:
+            with contextlib.suppress(Exception):
+                await backend.aclose()
         with contextlib.suppress(Exception):
             history.close()
         if manager is not None and manager.executor_acquired:

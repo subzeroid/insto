@@ -78,7 +78,7 @@ registration is still saved and that owner discovers it within about two
 seconds. One-shot registration also persists without keeping the command alive:
 
 ```sh
-insto @nasa -c watch       # save with the default 300-second interval
+insto @nasa -c watch 600   # save a 10-minute watch, then exit
 insto watch-daemon         # foreground executor; Ctrl+C or SIGTERM stops it
 ```
 

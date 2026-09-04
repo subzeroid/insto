@@ -171,7 +171,7 @@ Saved commands are aiograpi-only, read-only, and support JSON/CSV export. They i
 One-shot registration exits after writing the row; it never becomes an executor:
 
 ```sh
-insto @nasa -c watch
+insto @nasa -c watch 600
 insto watch-daemon
 ```
 

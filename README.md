@@ -110,6 +110,7 @@ supported.
 | `HIKERAPI_PROXY`  | Proxy URL (overrides `[hikerapi].proxy`)                            |
 | `INSTO_HOME`      | Override the default `~/.insto/` config root                        |
 | `INSTO_BACKEND`   | `hikerapi` (default) / `aiograpi` / `fake` (e2e suite). Same as `--backend` and `[backend]` in `config.toml`; legacy `hiker` is still accepted |
+| `INSTO_WATCH_WEBHOOK_URL` | Environment-only endpoint for watch-change JSON; empty or unset disables delivery |
 
 ## How insto compares to other Instagram OSINT tools
 
@@ -200,6 +201,13 @@ paused state, and `/watch` explicitly reactivates a paused target. The daemon
 prints its recovered-watch count, estimated backend load, and backend-specific
 quota/cost or account-risk reminder at startup. Stop it with `Ctrl+C` or
 `SIGTERM`; a later start resumes due watches without overlapping ticks.
+
+Set `INSTO_WATCH_WEBHOOK_URL` to send best-effort JSON notifications from the
+REPL or watch daemon after persisted profile changes. One-shot commands never
+send them. The URL is not persisted, and `/config` reports only `configured` or
+`disabled`, never the value. Use a trusted HTTPS receiver; HTTP is accepted only
+for localhost or a loopback address. See [Basic usage](docs/basic-usage.md#watch-webhook-notifications)
+for the payload and delivery contract.
 
 `-c <cmd>` consumes the rest of `argv` as the slash-command's arguments,
 so `-c batch targets.txt info` runs `batch targets.txt info` (one `-c`

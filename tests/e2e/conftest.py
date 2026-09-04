@@ -39,6 +39,7 @@ def insto_env(tmp_path: Path) -> dict[str, str]:
     output.mkdir(parents=True, exist_ok=True)
     db = tmp_path / "store.db"
     env = dict(os.environ)
+    env.pop("INSTO_WATCH_WEBHOOK_URL", None)
     env.update(
         {
             "INSTO_BACKEND": "fake",
@@ -58,6 +59,7 @@ def in_process_env(
     insto_env: dict[str, str], monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[dict[str, str]]:
     """Apply `insto_env` to the current process via monkeypatch."""
+    monkeypatch.delenv("INSTO_WATCH_WEBHOOK_URL", raising=False)
     for key, value in insto_env.items():
         monkeypatch.setenv(key, value)
     yield insto_env

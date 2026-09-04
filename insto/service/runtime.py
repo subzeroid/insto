@@ -7,7 +7,9 @@ import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Literal
+from datetime import UTC, datetime
+from typing import Any, Literal, Protocol
+from uuid import uuid4
 
 import httpx
 
@@ -20,11 +22,32 @@ from insto.service.history import HistoryStore
 from insto.service.watch import TickFn, WatchManager, format_watch_diff
 from insto.service.watch_daemon import WatchDaemon
 from insto.service.watch_lock import WatchProcessLock
+from insto.service.watch_webhook import (
+    WebhookDeliveryError,
+    WebhookNotifier,
+    build_watch_event,
+    validate_webhook_url,
+)
 
 RuntimeRole = Literal["oneshot", "repl", "daemon"]
 BackendFactory = Callable[[Config], OSINTBackend]
 CdnClientFactory = Callable[[Config], httpx.AsyncClient]
 WatchOutput = Callable[[str], None]
+
+
+class WatchWebhookNotifier(Protocol):
+    """Minimal notifier contract owned by the runtime."""
+
+    async def send(self, payload: dict[str, Any]) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
+WebhookNotifierFactory = Callable[[str], WatchWebhookNotifier]
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 @dataclass(slots=True)
@@ -36,6 +59,7 @@ class Runtime:
     manager: WatchManager
     coordinator: WatchDaemon | None
     coordinator_task: asyncio.Task[None] | None = None
+    webhook_notifier: WatchWebhookNotifier | None = None
 
 
 def _default_cdn_client(config: Config) -> httpx.AsyncClient:
@@ -56,6 +80,7 @@ async def open_runtime(
     backend_factory: BackendFactory,
     cdn_client_factory: CdnClientFactory | None = None,
     watch_output: WatchOutput | None = None,
+    webhook_notifier_factory: WebhookNotifierFactory = WebhookNotifier,
 ) -> AsyncIterator[Runtime]:
     """Construct and tear down every shared resource exactly once."""
     history = HistoryStore(config.db_path)
@@ -63,6 +88,7 @@ async def open_runtime(
     cdn_client: httpx.AsyncClient | None = None
     facade: OsintFacade | None = None
     manager: WatchManager | None = None
+    webhook_notifier: WatchWebhookNotifier | None = None
     runtime: Runtime | None = None
     try:
         backend = backend_factory(config)
@@ -81,6 +107,10 @@ async def open_runtime(
             watch_role=role,
         )
 
+        if role != "oneshot" and config.watch_webhook_url is not None:
+            endpoint = validate_webhook_url(config.watch_webhook_url)
+            webhook_notifier = webhook_notifier_factory(endpoint)
+
         coordinator: WatchDaemon | None = None
         if role != "oneshot":
 
@@ -92,6 +122,12 @@ async def open_runtime(
                     # tick into a retry or paused watch.
                     with contextlib.suppress(Exception):
                         watch_output(format_watch_diff(user, diff))
+                await _deliver_watch_event(
+                    user,
+                    diff,
+                    notifier=webhook_notifier,
+                    watch_output=watch_output,
+                )
 
             def build_tick(user: str) -> TickFn:
                 async def run_tick() -> None:
@@ -108,7 +144,15 @@ async def open_runtime(
             )
             facade.watch_daemon = coordinator
 
-        runtime = Runtime(config, role, history, facade, manager, coordinator)
+        runtime = Runtime(
+            config=config,
+            role=role,
+            history=history,
+            facade=facade,
+            manager=manager,
+            coordinator=coordinator,
+            webhook_notifier=webhook_notifier,
+        )
         if coordinator is not None and role == "daemon":
             await coordinator.start()
         elif coordinator is not None:
@@ -118,30 +162,80 @@ async def open_runtime(
             )
         yield runtime
     finally:
-        coordinator_stop_failed = False
-        if runtime is not None and runtime.coordinator is not None:
+
+        async def cleanup() -> None:
+            coordinator_stop_failed = False
+            if runtime is not None and runtime.coordinator is not None:
+                try:
+                    await runtime.coordinator.stop()
+                except Exception:
+                    coordinator_stop_failed = True
+                if runtime.coordinator_task is not None:
+                    if coordinator_stop_failed and not runtime.coordinator_task.done():
+                        runtime.coordinator_task.cancel()
+                    await asyncio.gather(runtime.coordinator_task, return_exceptions=True)
+            if manager is not None:
+                with contextlib.suppress(Exception):
+                    await manager.cancel_all()
+            if webhook_notifier is not None:
+                with contextlib.suppress(Exception):
+                    await webhook_notifier.aclose()
+            if cdn_client is not None:
+                with contextlib.suppress(Exception):
+                    await cdn_client.aclose()
+            if backend is not None:
+                with contextlib.suppress(Exception):
+                    await backend.aclose()
+            with contextlib.suppress(Exception):
+                history.close()
+            if manager is not None and manager.executor_acquired:
+                with contextlib.suppress(Exception):
+                    manager.release_executor()
+
+        cleanup_task = asyncio.create_task(cleanup(), name="insto-runtime-cleanup")
+        caller_cancellation: asyncio.CancelledError | None = None
+        while True:
             try:
-                await runtime.coordinator.stop()
-            except Exception:
-                coordinator_stop_failed = True
-            if runtime.coordinator_task is not None:
-                if coordinator_stop_failed and not runtime.coordinator_task.done():
-                    runtime.coordinator_task.cancel()
-                await asyncio.gather(runtime.coordinator_task, return_exceptions=True)
-        if manager is not None:
-            with contextlib.suppress(Exception):
-                await manager.cancel_all()
-        if cdn_client is not None:
-            with contextlib.suppress(Exception):
-                await cdn_client.aclose()
-        if backend is not None:
-            with contextlib.suppress(Exception):
-                await backend.aclose()
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as exc:
+                caller_cancellation = exc
+                if cleanup_task.done():
+                    cleanup_task.result()
+                    break
+            else:
+                break
+        if caller_cancellation is not None:
+            raise caller_cancellation
+
+
+async def _deliver_watch_event(
+    user: str,
+    diff: dict[str, Any],
+    *,
+    notifier: WatchWebhookNotifier | None,
+    watch_output: WatchOutput | None,
+) -> None:
+    if notifier is None or diff.get("first_seen") or not diff.get("changes"):
+        return
+    try:
+        event = build_watch_event(
+            user,
+            diff,
+            event_id=str(uuid4()),
+            observed_at=_utc_now(),
+        )
+        if event is not None:
+            await notifier.send(event)
+    except WebhookDeliveryError as exc:
+        warning = f"@{user}: watch webhook warning: {redact_secrets(str(exc))}"
+    except Exception:
+        warning = f"@{user}: watch webhook warning: unexpected delivery error"
+    else:
+        return
+
+    if watch_output is not None:
         with contextlib.suppress(Exception):
-            history.close()
-        if manager is not None and manager.executor_acquired:
-            with contextlib.suppress(Exception):
-                manager.release_executor()
+            watch_output(warning)
 
 
 async def _run_repl_coordinator(coordinator: WatchDaemon, watch_output: WatchOutput | None) -> None:
@@ -152,4 +246,10 @@ async def _run_repl_coordinator(coordinator: WatchDaemon, watch_output: WatchOut
             watch_output(redact_secrets(f"watch executor stopped: {exc}"))
 
 
-__all__ = ["Runtime", "RuntimeRole", "open_runtime"]
+__all__ = [
+    "Runtime",
+    "RuntimeRole",
+    "WatchWebhookNotifier",
+    "WebhookNotifierFactory",
+    "open_runtime",
+]

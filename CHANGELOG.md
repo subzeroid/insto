@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.18](https://github.com/subzeroid/insto/compare/v0.7.17...v0.7.18) (2026-09-04)
+
+
+### Added
+
+* add persistent watch daemon ([#52](https://github.com/subzeroid/insto/issues/52)) ([41c9616](https://github.com/subzeroid/insto/commit/41c9616191c7efcea528c033975f5a4faceef1b2))
+
 ## [0.7.17](https://github.com/subzeroid/insto/compare/v0.7.16...v0.7.17) (2026-06-20)
 
 

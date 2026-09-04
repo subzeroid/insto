@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import stat
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -24,7 +27,7 @@ from insto.cli import (
     setup_logging,
 )
 from insto.commands import COMMANDS, CommandUsageError
-from insto.config import config_file_path, load_config
+from insto.config import Config, config_file_path, load_config
 from insto.exceptions import (
     AuthInvalid,
     BackendError,
@@ -40,6 +43,8 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
+from insto.models import WatchSpec
+from insto.service.watch_lock import WatchLockBusyError
 
 
 @pytest.fixture(autouse=True)
@@ -86,6 +91,12 @@ def test_parser_defaults_no_args() -> None:
 def test_parser_setup_positional() -> None:
     args = build_parser().parse_args(["setup"])
     assert args.target == "setup"
+    assert args.cmd_argv is None
+
+
+def test_parser_watch_daemon_positional() -> None:
+    args = build_parser().parse_args(["watch-daemon"])
+    assert args.target == "watch-daemon"
     assert args.cmd_argv is None
 
 
@@ -551,6 +562,137 @@ def test_main_setup_invokes_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
     assert rc == 0
     assert called.get("yes") is True
     assert called.get("non_interactive") is False
+
+
+def test_main_routes_bare_watch_daemon_before_repl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import insto.repl as repl_mod
+
+    monkeypatch.setenv("HIKERAPI_TOKEN", "tok-daemon-1234567890")
+    captured: dict[str, Any] = {}
+
+    async def fake_run_watch_daemon(config: Any, log: logging.Logger) -> int:
+        captured["backend"] = config.backend
+        captured["logger"] = log.name
+        return 7
+
+    def unexpected_repl(*args: object, **kwargs: object) -> None:
+        pytest.fail("bare watch-daemon was routed to the REPL")
+
+    monkeypatch.setattr(cli_mod, "_run_watch_daemon", fake_run_watch_daemon)
+    monkeypatch.setattr(repl_mod, "run_repl", unexpected_repl)
+
+    assert cli_mod.main(["watch-daemon"]) == 7
+    assert captured == {"backend": "hikerapi", "logger": "insto.cli"}
+
+
+def test_main_keeps_at_watch_daemon_as_oneshot_username(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def fake_run_oneshot(
+        cmd_argv: list[str],
+        target: str | None,
+        proxy: str | None,
+        hiker_token: str | None,
+        log: logging.Logger,
+    ) -> int:
+        captured.update(cmd=cmd_argv, target=target)
+        return 0
+
+    async def unexpected_daemon(config: Any, log: logging.Logger) -> int:
+        pytest.fail("@watch-daemon was treated as the reserved daemon command")
+
+    monkeypatch.setattr(cli_mod, "_run_oneshot", fake_run_oneshot)
+    monkeypatch.setattr(cli_mod, "_run_watch_daemon", unexpected_daemon)
+
+    assert cli_mod.main(["@watch-daemon", "-c", "info"]) == 0
+    assert captured == {"cmd": ["info"], "target": "@watch-daemon"}
+
+
+def test_run_watch_daemon_reports_load_and_stops_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from insto.service import runtime as runtime_mod
+
+    class Coordinator:
+        async def run(self, stop_event: asyncio.Event) -> None:
+            stop_event.set()
+
+    class Manager:
+        def __len__(self) -> int:
+            return 1
+
+    spec = WatchSpec("alice", "reg-1", 300)
+    history = SimpleNamespace(list_watches_async=lambda: asyncio.sleep(0, result=[spec]))
+    runtime = SimpleNamespace(coordinator=Coordinator(), history=history, manager=Manager())
+
+    @asynccontextmanager
+    async def fake_open_runtime(*args: object, **kwargs: object) -> AsyncIterator[Any]:
+        yield runtime
+
+    monkeypatch.setattr(runtime_mod, "open_runtime", fake_open_runtime)
+    config = Config(
+        hiker_token="tok-daemon-1234567890",
+        output_dir=tmp_path / "out",
+        db_path=tmp_path / "store.db",
+    )
+
+    rc = asyncio.run(cli_mod._run_watch_daemon(config, logging.getLogger("test")))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert str(config.db_path) in out
+    assert "recovered active watches: 1" in out
+    assert "12 ticks/hour" in out
+    assert "24 to 36 backend calls/hour" in out
+    assert "quota" in out and "cost" in out
+
+
+def test_run_watch_daemon_maps_lock_contention_to_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from insto.service import runtime as runtime_mod
+
+    @asynccontextmanager
+    async def busy_runtime(*args: object, **kwargs: object) -> AsyncIterator[Any]:
+        raise WatchLockBusyError("watch executor already active")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(runtime_mod, "open_runtime", busy_runtime)
+    config = Config(hiker_token="token", db_path=tmp_path / "store.db")
+
+    rc = asyncio.run(cli_mod._run_watch_daemon(config, logging.getLogger("test")))
+
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == "watch executor already active"
+
+
+def test_run_watch_daemon_maps_runtime_failure_to_nonzero(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from insto.service import runtime as runtime_mod
+
+    @asynccontextmanager
+    async def broken_runtime(*args: object, **kwargs: object) -> AsyncIterator[Any]:
+        raise RuntimeError("registry unavailable")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(runtime_mod, "open_runtime", broken_runtime)
+    config = Config(hiker_token="token", db_path=tmp_path / "store.db")
+
+    rc = asyncio.run(cli_mod._run_watch_daemon(config, logging.getLogger("test")))
+
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == "RuntimeError: registry unavailable"
 
 
 def test_main_setup_non_interactive_flag(monkeypatch: pytest.MonkeyPatch) -> None:

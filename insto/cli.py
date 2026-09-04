@@ -31,6 +31,7 @@ import importlib.util
 import logging
 import os
 import shlex
+import signal
 import sys
 from collections.abc import Callable
 from logging.handlers import RotatingFileHandler
@@ -71,6 +72,7 @@ from insto.exceptions import (
     SchemaDrift,
     Transient,
 )
+from insto.service.watch_lock import WatchLockBusyError
 
 LOG_FILENAME = "insto.log"
 LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -178,6 +180,8 @@ def _format_error(exc: BaseException) -> str:
         msg = str(exc)
     elif isinstance(exc, BackendError):
         msg = f"backend error: {exc}"
+    elif isinstance(exc, WatchLockBusyError):
+        msg = str(exc)
     elif isinstance(exc, CommandUsageError):
         msg = f"usage: {exc}"
     else:
@@ -265,7 +269,10 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default=None,
         metavar="TARGET",
-        help="username (e.g. @ferrari) or the literal `setup` to run the wizard",
+        help=(
+            "username (e.g. @ferrari), `setup` to run the wizard, "
+            "or `watch-daemon` to execute persisted watches"
+        ),
     )
     parser.add_argument(
         "-c",
@@ -612,6 +619,7 @@ async def _run_oneshot(
         # instead of letting a raw traceback escape from `asyncio.run`.
         print(redact_secrets(f"config error: {exc}"), file=sys.stderr)
         return 1
+
     if config.backend == BACKEND_HIKERAPI and not config.hiker_token:
         print(SETUP_HINT, file=sys.stderr)
         return 1
@@ -659,6 +667,67 @@ async def _run_oneshot(
 
 
 # ---------------------------------------------------------------------------
+# Foreground watcher daemon
+# ---------------------------------------------------------------------------
+
+
+async def _run_watch_daemon(config: Config, log: logging.Logger) -> int:
+    """Execute persisted watches in the foreground until SIGINT/SIGTERM."""
+    from insto.service.runtime import open_runtime
+    from insto.service.watch_daemon import estimate_watch_load
+
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    installed_signals: list[signal.Signals] = []
+    try:
+        async with open_runtime(
+            config,
+            role="daemon",
+            backend_factory=_build_backend,
+            watch_output=print,
+        ) as runtime:
+            coordinator = runtime.coordinator
+            assert coordinator is not None
+            specs = await runtime.history.list_watches_async()
+            estimate = estimate_watch_load(specs)
+
+            print(f"watch daemon started · database: {config.db_path}")
+            print(f"recovered active watches: {len(runtime.manager)}")
+            print(
+                "estimated load: "
+                f"{estimate.ticks_per_hour:g} ticks/hour · "
+                f"{estimate.backend_calls_per_hour_low:g} to "
+                f"{estimate.backend_calls_per_hour_high:g} backend calls/hour"
+            )
+            if config.backend == BACKEND_AIOGRAPI:
+                print("risk: polling can trigger rate limits or account restrictions")
+            else:
+                print("risk: polling consumes API quota and may incur provider cost")
+            print("press Ctrl-C to stop")
+
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                try:
+                    loop.add_signal_handler(signum, stop_event.set)
+                except (NotImplementedError, RuntimeError):
+                    continue
+                installed_signals.append(signum)
+            await coordinator.run(stop_event)
+        return 0
+    except WatchLockBusyError as exc:
+        log.warning("watch daemon lock contention: %s", redact_secrets(str(exc)))
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+    except Exception as exc:
+        log.exception("watch daemon failed")
+        print(_format_error(exc), file=sys.stderr)
+        return 1
+    finally:
+        for signum in installed_signals:
+            with contextlib.suppress(Exception):
+                loop.remove_signal_handler(signum)
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -688,6 +757,22 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.target == "setup":
         return _run_setup(non_interactive=args.non_interactive)
+
+    if args.target == "watch-daemon" and args.cmd_argv is None:
+        config = _safe_load_config(args.hiker_token, args.proxy, args.backend)
+        if config is None or (config.backend == BACKEND_HIKERAPI and not config.hiker_token):
+            print(SETUP_HINT, file=sys.stderr)
+            return 1
+        if config.backend == BACKEND_AIOGRAPI and not (
+            config.aiograpi_username and config.aiograpi_password
+        ):
+            print(
+                "no aiograpi credentials configured. "
+                "Run `insto setup` and pick the aiograpi backend.",
+                file=sys.stderr,
+            )
+            return 1
+        return asyncio.run(_run_watch_daemon(config, log))
 
     if args.cmd_argv:
         return asyncio.run(
@@ -744,6 +829,7 @@ __all__ = [
     "SETUP_HINT",
     "RedactingFormatter",
     "_format_error",
+    "_run_watch_daemon",
     "build_parser",
     "main",
     "setup_logging",

@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from insto.config import Config
+from insto.models import Profile
 from insto.service.history import HistoryStore
 from insto.service.runtime import open_runtime
 from insto.service.watch_lock import WatchProcessLock
@@ -173,3 +174,34 @@ async def test_cleanup_continues_after_coordinator_stop_failure(
     with pytest.raises(sqlite3.ProgrammingError):
         history.schema_version()
     assert manager is not None and manager.executor_acquired is False
+
+
+async def test_watch_output_failure_does_not_turn_successful_tick_into_error(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path)
+    seed = HistoryStore(config.db_path)
+    try:
+        assert seed.register_watch("alice", 300).spec is not None
+    finally:
+        seed.close()
+
+    backend = ClosingBackend([])
+    backend.profiles["1"] = Profile(pk="1", username="alice", access="public")
+
+    def broken_output(_: str) -> None:
+        raise RuntimeError("terminal unavailable")
+
+    async with open_runtime(
+        config,
+        role="daemon",
+        backend_factory=lambda _: backend,
+        cdn_client_factory=lambda _: ClosingClient([]),
+        watch_output=broken_output,
+    ) as runtime:
+        state = await runtime.manager.tick_once("alice")
+
+        assert state.status == "active"
+        assert state.consecutive_errors == 0
+        assert state.last_error is None
+        assert state.last_ok is not None

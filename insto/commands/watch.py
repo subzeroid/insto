@@ -143,7 +143,7 @@ def _add_unwatch_args(parser: argparse.ArgumentParser) -> None:
 
 @command(
     "unwatch",
-    "Cancel a running /watch task",
+    "Delete a persisted watch registration",
     add_args=_add_unwatch_args,
 )
 async def unwatch_cmd(ctx: CommandContext) -> bool:

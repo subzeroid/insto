@@ -12,17 +12,17 @@ Three tables hold session state:
 - `cli_history(cmd, target, ts)` — every command issued in REPL or CLI
   mode, used by the welcome screen ("recent targets") and the `/history`
   command. Pruned to 90 days.
-- `watches(user, interval_seconds, last_ok, last_error, status)` — every
-  registered `/watch <user>`; mirror of `WatchSpec`. CRUD only — the watch
-  scheduler itself lives in `service/facade.py`.
+- `watches(user, registration_id, interval_seconds, last_ok, last_error,
+  consecutive_errors, status)` — every registered `/watch <user>`; mirror of
+  `WatchSpec`. CRUD only — execution and SQLite reconciliation live in
+  `service/watch.py` and `service/watch_daemon.py`.
 - `snapshots(target_pk, captured_at, profile_fields_json, last_post_pks_json,
   avatar_url_hash, banner_url_hash)` — periodic copies of profile state for
   diffing renames / bio edits / pfp swaps. Pruned to 30 days *and* a max of
   100 rows per target_pk.
 
-A `_meta(key, value)` table carries `schema_version`. v0.1 is version 1
-with an empty migration list; future versions add entries to
-`_MIGRATIONS` and bump `_SCHEMA_VERSION`. Migration runs under
+A `_meta(key, value)` table carries `schema_version`. Ordered entries in
+`_MIGRATIONS` advance older stores to `_SCHEMA_VERSION`. Migration runs under
 `BEGIN IMMEDIATE` so a second insto process attempting the same migration
 blocks on the SQLite write lock and then re-checks the version (no-op
 if already migrated).
@@ -163,9 +163,8 @@ class HistoryStore:
     Construct once per session and reuse. `close()` releases the underlying
     connection; the instance becomes unusable afterwards. The store is
     thread-safe in the sense that all calls serialise through a single
-    `threading.Lock`, but it is not designed for cross-process concurrent
-    *writes* — sqlite locking and the `_with_lock_retry` helper are the
-    line of defence against that.
+    `threading.Lock`. Modest cross-process writes are coordinated by SQLite
+    transactions plus the `_with_lock_retry` backoff.
     """
 
     def __init__(self, db_path: Path) -> None:

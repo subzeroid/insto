@@ -205,10 +205,13 @@ class WatchDaemon:
             status=spec.status,
         )
         if updated and safe_error is not None and self._state_output is not None:
-            self._state_output(
-                f"@{spec.user}: watch error ({spec.consecutive_errors}/2) "
-                f"· {spec.status} · {safe_error}"
-            )
+            # State is already durable. Terminal/log delivery is best-effort
+            # and must not stop the executor or rewrite the tick outcome.
+            with contextlib.suppress(Exception):
+                self._state_output(
+                    f"@{spec.user}: watch error ({spec.consecutive_errors}/2) "
+                    f"· {spec.status} · {safe_error}"
+                )
         return updated
 
 

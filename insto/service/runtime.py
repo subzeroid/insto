@@ -87,7 +87,11 @@ async def open_runtime(
             async def tick(user: str) -> None:
                 diff = await facade.diff_and_snapshot(user)
                 if watch_output is not None:
-                    watch_output(format_watch_diff(user, diff))
+                    # Rendering is observational: a closed pipe or unavailable
+                    # REPL output surface must not turn a successful backend
+                    # tick into a retry or paused watch.
+                    with contextlib.suppress(Exception):
+                        watch_output(format_watch_diff(user, diff))
 
             def build_tick(user: str) -> TickFn:
                 async def run_tick() -> None:

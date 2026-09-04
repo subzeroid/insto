@@ -265,6 +265,39 @@ async def test_failed_tick_is_redacted_in_state_and_executor_output(
     manager.release_executor()
 
 
+async def test_state_output_failure_does_not_stop_executor(history: HistoryStore) -> None:
+    assert history.register_watch("alice", 300).spec is not None
+
+    def failing_tick_factory(user: str) -> TickFn:
+        async def tick() -> None:
+            raise RuntimeError(f"temporary failure for {user}")
+
+        return tick
+
+    def broken_output(_: str) -> None:
+        raise RuntimeError("terminal unavailable")
+
+    manager = _manager(history)
+    daemon = WatchDaemon(
+        history=history,
+        manager=manager,
+        tick_factory=failing_tick_factory,
+        role="daemon",
+        state_output=broken_output,
+    )
+    await daemon.start()
+
+    state = await manager.tick_once("alice")
+
+    assert state.status == "active"
+    assert state.consecutive_errors == 1
+    assert manager.fatal_error.done() is False
+    persisted = history.get_watch("alice")
+    assert persisted is not None and persisted.consecutive_errors == 1
+    await daemon.stop()
+    manager.release_executor()
+
+
 async def test_run_propagates_reconcile_failure_and_drains(
     history: HistoryStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:

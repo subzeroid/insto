@@ -44,6 +44,7 @@ def history(tmp_path: Path) -> Generator[HistoryStore, None, None]:
 def config(tmp_path: Path) -> Config:
     cfg = Config(
         hiker_token="abcd1234",
+        watch_webhook_url="https://hooks.example.test/watch-secret-path",
         output_dir=tmp_path / "output",
         db_path=tmp_path / "store.db",
         cli_history_path=tmp_path / "cli_history",
@@ -54,6 +55,7 @@ def config(tmp_path: Path) -> Config:
         "output_dir": "default",
         "db_path": "default",
         "cli_history_path": "default",
+        "watch.webhook_url": "env",
     }
     return cfg
 
@@ -207,6 +209,13 @@ async def test_config_reports_each_key_with_origin(
     assert "abcd1234" not in (by_key["hikerapi.token"]["value"] or "")
     text = console.export_text()
     assert "abcd1234" not in text
+    assert by_key["watch.webhook_url"] == {
+        "key": "watch.webhook_url",
+        "value": "configured",
+        "origin": "env",
+    }
+    assert "hooks.example.test" not in repr(rows)
+    assert "hooks.example.test" not in text
 
 
 async def test_config_json_export_round_trip(
@@ -218,6 +227,13 @@ async def test_config_json_export_round_trip(
     assert body["command"] == "config"
     assert isinstance(body["data"], list)
     assert all({"key", "value", "origin"} <= set(row) for row in body["data"])
+    by_key = {row["key"]: row for row in body["data"]}
+    assert by_key["watch.webhook_url"] == {
+        "key": "watch.webhook_url",
+        "value": "configured",
+        "origin": "env",
+    }
+    assert "hooks.example.test" not in dest.read_text()
 
 
 # ---------------------------------------------------------------------------

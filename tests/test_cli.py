@@ -59,6 +59,7 @@ def _isolated_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[
         cfgmod.ENV_AIOGRAPI_USERNAME,
         cfgmod.ENV_AIOGRAPI_PASSWORD,
         cfgmod.ENV_AIOGRAPI_TOTP,
+        "INSTO_WATCH_WEBHOOK_URL",
     ):
         monkeypatch.delenv(var, raising=False)
     yield tmp_path
@@ -134,6 +135,13 @@ def test_parser_hiker_token_flag() -> None:
     assert args.hiker_token == "abc123"
     args = build_parser().parse_args([])
     assert args.hiker_token is None
+
+
+def test_parser_rejects_watch_webhook_url_flag() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["--watch-webhook-url", "https://hooks.example.test/secret-hook"]
+        )
 
 
 def test_parser_backend_prefers_hikerapi_and_keeps_legacy_hiker_alias() -> None:

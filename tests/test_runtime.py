@@ -366,6 +366,49 @@ async def test_partial_daemon_start_failure_closes_notifier_and_existing_resourc
     assert notifier.close_calls == 1
 
 
+async def test_notifier_factory_failure_closes_existing_resources_without_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config(tmp_path, webhook_url="https://receiver.example/endpoint-secret")
+    events: list[str] = []
+    backend = ClosingBackend(events)
+    client = ClosingClient(events)
+    history_instances: list[HistoryStore] = []
+    factory_calls = 0
+    history_type = HistoryStore
+
+    def history_factory(path: Path) -> HistoryStore:
+        history = history_type(path)
+        history_instances.append(history)
+        return history
+
+    def broken_notifier_factory(_: str) -> RecordingNotifier:
+        nonlocal factory_calls
+        factory_calls += 1
+        raise RuntimeError("notifier init failed")
+
+    monkeypatch.setattr(runtime_service, "HistoryStore", history_factory)
+    with pytest.raises(RuntimeError, match="notifier init failed"):
+        async with open_runtime(
+            config,
+            role="daemon",
+            backend_factory=lambda _: backend,
+            cdn_client_factory=lambda _: client,
+            webhook_notifier_factory=broken_notifier_factory,
+        ):
+            pytest.fail("runtime yielded after notifier construction failure")
+
+    assert factory_calls == 1
+    assert events == ["cdn", "backend"]
+    assert len(history_instances) == 1
+    with pytest.raises(sqlite3.ProgrammingError):
+        history_instances[0].schema_version()
+    probe = WatchProcessLock(config.db_path)
+    probe.acquire()
+    probe.release()
+
+
 async def test_cleanup_continues_after_coordinator_stop_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -884,23 +927,40 @@ async def test_task_cancellation_propagates_after_all_runtime_cleanup(tmp_path: 
         history_holder[0].schema_version()
 
 
-async def test_cancellation_during_teardown_waits_for_all_cleanup(tmp_path: Path) -> None:
+async def test_repeated_cancellation_during_teardown_waits_for_all_cleanup(
+    tmp_path: Path,
+) -> None:
     config = _config(tmp_path, webhook_url="https://receiver.example/endpoint-secret")
     events: list[str] = []
     notifier = BlockingCloseNotifier(events)
+    history_holder: list[HistoryStore] = []
+    manager_holder: list[Any] = []
+    release_calls = 0
 
     async def run() -> None:
         async with open_runtime(
             config,
-            role="repl",
+            role="daemon",
             backend_factory=lambda _: ClosingBackend(events),
             cdn_client_factory=lambda _: ClosingClient(events),
             webhook_notifier_factory=lambda _: notifier,
-        ):
-            pass
+        ) as runtime:
+            nonlocal release_calls
+            history_holder.append(runtime.history)
+            manager_holder.append(runtime.manager)
+            original_release = runtime.manager.release_executor
+
+            def record_release() -> None:
+                nonlocal release_calls
+                release_calls += 1
+                original_release()
+
+            runtime.manager.release_executor = record_release  # type: ignore[method-assign]
 
     task = asyncio.create_task(run())
     await asyncio.wait_for(notifier.close_started.wait(), timeout=1.0)
+    task.cancel()
+    await asyncio.sleep(0)
     task.cancel()
     await asyncio.sleep(0)
     assert task.done() is False
@@ -911,3 +971,10 @@ async def test_cancellation_during_teardown_waits_for_all_cleanup(tmp_path: Path
 
     assert events == ["webhook", "cdn", "backend"]
     assert notifier.close_calls == 1
+    assert release_calls == 1
+    assert manager_holder[0].executor_acquired is False
+    with pytest.raises(sqlite3.ProgrammingError):
+        history_holder[0].schema_version()
+    probe = WatchProcessLock(config.db_path)
+    probe.acquire()
+    probe.release()

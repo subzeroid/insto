@@ -193,11 +193,19 @@ async def open_runtime(
                     manager.release_executor()
 
         cleanup_task = asyncio.create_task(cleanup(), name="insto-runtime-cleanup")
-        try:
-            await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError:
-            await cleanup_task
-            raise
+        caller_cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await asyncio.shield(cleanup_task)
+            except asyncio.CancelledError as exc:
+                caller_cancellation = exc
+                if cleanup_task.done():
+                    cleanup_task.result()
+                    break
+            else:
+                break
+        if caller_cancellation is not None:
+            raise caller_cancellation
 
 
 async def _deliver_watch_event(

@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.19](https://github.com/subzeroid/insto/compare/v0.7.18...v0.7.19) (2026-09-04)
+
+
+### Added
+
+* add watch webhook notifications ([#54](https://github.com/subzeroid/insto/issues/54)) ([328fe9f](https://github.com/subzeroid/insto/commit/328fe9f37a1580888122263454a40d06e292ef8c))
+
 ## [0.7.18](https://github.com/subzeroid/insto/compare/v0.7.17...v0.7.18) (2026-09-04)
 
 

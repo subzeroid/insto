@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from insto import config as cfgmod
+from insto._redact import clear_registered_secrets, redact_secrets
 from insto.config import (
     Config,
     config_dir,
@@ -120,13 +121,17 @@ def test_watch_webhook_url_is_registered_as_secret(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     webhook_url = "https://hooks.example.test/watch-secret-path"
-    registered: list[str | None] = []
     monkeypatch.setenv(cfgmod.ENV_WATCH_WEBHOOK_URL, webhook_url)
-    monkeypatch.setattr(cfgmod, "register_secret", registered.append)
+    clear_registered_secrets()
+    try:
+        load_config()
 
-    load_config()
+        redacted = redact_secrets(f"delivery failed for {webhook_url}")
 
-    assert registered == [webhook_url]
+        assert webhook_url not in redacted
+        assert "***" in redacted
+    finally:
+        clear_registered_secrets()
 
 
 def test_load_config_reads_toml() -> None:

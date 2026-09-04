@@ -40,7 +40,7 @@ class WebhookNotifier:
         )
         self._sleep = sleep
         self._closed = False
-        self._close_lock = asyncio.Lock()
+        self._client_close_task: asyncio.Task[None] | None = None
         self._response_close_tasks: set[asyncio.Task[None]] = set()
 
     async def send(self, payload: dict[str, Any]) -> None:
@@ -82,12 +82,21 @@ class WebhookNotifier:
 
     async def aclose(self) -> None:
         """Close the reusable client once."""
-        async with self._close_lock:
-            if self._closed:
-                return
-            await self._drain_response_closes()
-            await self._client.aclose()
-            self._closed = True
+        if self._closed:
+            return
+        close_task = self._client_close_task
+        if close_task is None:
+            close_task = asyncio.create_task(
+                self._close_client(),
+                name="insto-webhook-client-close",
+            )
+            self._client_close_task = close_task
+        await asyncio.shield(close_task)
+
+    async def _close_client(self) -> None:
+        await self._drain_response_closes()
+        await self._client.aclose()
+        self._closed = True
 
     async def _close_response(self, response: httpx.Response) -> None:
         close_task = asyncio.create_task(
@@ -107,11 +116,13 @@ class WebhookNotifier:
         tasks = set(self._response_close_tasks)
         if not tasks:
             return
-        _, pending = await asyncio.wait(tasks, timeout=ATTEMPT_TIMEOUT_SECONDS)
+        done, pending = await asyncio.wait(tasks, timeout=ATTEMPT_TIMEOUT_SECONDS)
+        self._response_close_tasks.difference_update(done)
         for task in pending:
             task.cancel()
         if pending:
-            await asyncio.sleep(0)
+            cancelled, _ = await asyncio.wait(pending, timeout=ATTEMPT_TIMEOUT_SECONDS)
+            self._response_close_tasks.difference_update(cancelled)
 
 
 def validate_webhook_url(value: str) -> str:

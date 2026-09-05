@@ -44,6 +44,7 @@ async def reconcile(profile: Profile, service: ManagedService, deadline: float) 
             if backup != profile.read_config():
                 raise DesktopError("recovery_required")
             profile.remove_backup()
+            return True
         return False
     if journal["phase"] in {"committed", "rolled_back"}:
         cleanup(profile, deadline)

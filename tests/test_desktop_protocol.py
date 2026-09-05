@@ -150,6 +150,13 @@ async def test_hello() -> None:
                 "service.start",
                 "service.stop",
                 "service.repair",
+                "overview",
+                "watches.list",
+                "watches.add",
+                "watches.update",
+                "watches.pause",
+                "watches.resume",
+                "watches.remove",
             ],
         },
     }

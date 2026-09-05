@@ -174,3 +174,49 @@ interpreter's bytecode setting; other ownership checks remain in force.
 
 This foundation neither bundles Python nor installs an app. Portable-runtime
 and installed-app verification are separate delivery stages.
+
+## C2a local watch operations
+
+The original eight C1 capabilities remain supported. New capabilities are
+overview, watches.list, watches.add, watches.update, watches.pause,
+watches.resume and watches.remove. They never validate a token or contact HikerAPI.
+
+overview takes empty params and returns configured, desired_service,
+service_state (running/stopped/unknown), quota_remaining, quota_checked_at,
+watches and next_cursor. The quota fields are the saved balance and its saved
+check time (UTC Unix epoch seconds), not a live provider balance. Both are null
+before configuration. Display them as the last confirmed balance; a local
+overview refresh does not update either value or call the provider.
+It reads at most one watch page and inspects the owned service after closing the
+SQLite transaction. Unknown service state is not treated as stopped or healthy.
+
+watches.list accepts optional limit (integer1..50, default50) and cursor. It returns
+items and next_cursor. Three is the active-watch cap, not the total-list limit.
+Following cursors does not promise a database snapshot across requests.
+
+watches.add accepts user and optional interval_seconds (default300) and only
+creates an absent watch. Existing paused watches require explicit resume.
+update requires user/revision/interval_seconds. pause, resume and remove require
+user/revision. Input usernames are canonicalized and bounded to255 ASCII
+characters; intervals are integer seconds300..2147483647, never booleans/floats.
+
+A watch DTO contains user, status, interval_seconds, last_ok (UTC epoch seconds or
+null), waiting_first_check, has_error, consecutive_errors and an opaque revision.
+It contains neither the internal generation identifier nor raw historical errors.
+Mutation returns watch, except remove returns removed_user and preserves snapshots.
+
+Stale revisions fail as watch_conflict. A missing row gives watch_not_found,
+duplicate add watch_exists, and exceeding three active rows watch_limit.
+No-op state/interval commands keep revision. Real state/interval changes rotate
+generation and fence late daemon status writes in the same SQLite transaction.
+Pausing cannot undo a snapshot already committed by a running tick.
+
+Read operations never initialize profiles, take a profile lease, change config,
+migrate schema, copy all history or invoke service mutations. SQLite may maintain
+normal private WAL/SHM files. WAL can contain committed data and is never manually
+deleted or ignored by the reader. C1 check_database retains its stricter
+source-file behavior. Busy/recovery/ownership/schema failures remain explicit.
+
+Local read and mutation budgets are10seconds, including validation, SQLite and DTO
+work. Busy waits are at most1second. Timeout or transport loss after a mutation
+requires reading current state; do not automatically retry a non-idempotent add.

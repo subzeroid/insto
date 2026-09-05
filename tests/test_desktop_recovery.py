@@ -107,12 +107,15 @@ async def test_rollback_idle_failure_keeps_candidate_and_journal(configured):
 async def test_orphan_backup_requires_exact_current_bytes(configured, matches):
     from insto.desktop import operations
 
-    profile, _ = configured
+    profile, service = configured
+    service.running = False
     with profile.locked():
         profile.write_backup(profile.read_config() if matches else b"offline-foreign")
     if matches:
         await operations.change_service(profile, "repair")
         assert profile.read_backup() is None
+        assert not service.events
+        assert not service.running
     else:
         with pytest.raises(DesktopError, match="recovery_required"):
             await operations.change_service(profile, "repair")

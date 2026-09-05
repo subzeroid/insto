@@ -9,6 +9,16 @@ from pathlib import Path
 import pytest
 
 HELLO = b'{"protocol_version":1,"request_id":"child","operation":"hello","params":{}}\n'
+C1_CAPABILITIES = [
+    "hello",
+    "setup.inspect",
+    "setup.configure",
+    "settings.inspect",
+    "credentials.replace",
+    "service.start",
+    "service.stop",
+    "service.repair",
+]
 
 
 @pytest.mark.parametrize(
@@ -34,7 +44,7 @@ def test_isolated_process(raw: bytes, code: str | None, tmp_path: Path) -> None:
         assert response["error"]["code"] == code
         assert response["request_id"] is None
     else:
-        assert response["result"]["capabilities"] == ["hello"]
+        assert response["result"]["capabilities"] == C1_CAPABILITIES
     assert not state.exists()
 
 
@@ -52,7 +62,7 @@ def test_hello_never_imports_sdks(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == b""
-    assert json.loads(result.stdout)["result"]["capabilities"] == ["hello"]
+    assert json.loads(result.stdout)["result"]["capabilities"] == C1_CAPABILITIES
 
 
 def test_hello_never_opens_config_runtime_or_database(tmp_path: Path) -> None:
@@ -94,7 +104,7 @@ assert not calls, "a forbidden call was attempted, even if its exception was cau
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == b""
-    assert json.loads(result.stdout)["result"]["capabilities"] == ["hello"]
+    assert json.loads(result.stdout)["result"]["capabilities"] == C1_CAPABILITIES
     assert not state.exists()
 
 
@@ -116,3 +126,80 @@ def test_parent_must_close_stdin_and_can_cancel(tmp_path: Path) -> None:
             child.kill()
         stdout, stderr = child.communicate(timeout=10)
         assert stdout == b"" and stderr == b""
+
+
+@pytest.mark.parametrize("operation", ["setup.inspect", "settings.inspect", "setup.configure"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_inspect_child_has_no_provider_or_profile_side_effects(tmp_path, operation, pending):
+    from insto.desktop.profile import Profile
+
+    profile = Profile(tmp_path / "desktop")
+    if pending:
+        with profile.locked(initialize=True):
+            profile.write_journal(
+                profile.new_journal(
+                    kind="setup",
+                    previous_state=None,
+                    previous_running=False,
+                    remaining=0,
+                )
+            )
+
+    def snapshot():
+        return {
+            str(path.relative_to(tmp_path)): (path.stat().st_mode, path.read_bytes())
+            for path in tmp_path.rglob("*")
+            if path.is_file()
+        }
+
+    before = snapshot()
+    script = """
+import runpy, sys
+runpy.run_module('insto.desktop', run_name='__main__')
+assert not any(name.split('.')[0] in {'hikerapi', 'aiograpi'} for name in sys.modules)
+"""
+    raw = (
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "request_id": "inspect-child",
+                "operation": operation,
+                "params": {"token": "offline-sentinel", "home": "/foreign"}
+                if operation == "setup.configure"
+                else {},
+            }
+        )
+        + "\n"
+    ).encode()
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": "C.UTF-8",
+        "INSTO_DESKTOP_ROOT": str(profile.root),
+        "INSTO_HOME": str(tmp_path / "foreign"),
+        "HIKERAPI_HOST": "must-not-connect.invalid",
+        "HIKERAPI_TOKEN": "ambient-secret-not-used",
+    }
+    for _ in range(2):
+        result = subprocess.run(
+            [sys.executable, "-I", "-B", "-c", script],
+            input=raw,
+            capture_output=True,
+            cwd=tmp_path,
+            env=environment,
+            timeout=10,
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == b"" and result.stdout.count(b"\n") == 1
+        response = json.loads(result.stdout)
+        assert response["request_id"] == "inspect-child"
+        if operation == "setup.configure":
+            assert response["error"]["code"] == "invalid_params"
+            assert b"offline-sentinel" not in result.stdout
+        else:
+            assert response["result"]["status"] == (
+                "recovery_required" if pending else "unconfigured"
+            )
+    assert snapshot() == before
+    assert not (tmp_path / "foreign").exists()
+    if not pending:
+        assert not profile.root.exists()

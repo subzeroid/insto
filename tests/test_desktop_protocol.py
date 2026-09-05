@@ -141,7 +141,16 @@ async def test_hello() -> None:
         "result": {
             "core_version": __version__,
             "schema_version_supported": _SCHEMA_VERSION,
-            "capabilities": ["hello"],
+            "capabilities": [
+                "hello",
+                "setup.inspect",
+                "setup.configure",
+                "settings.inspect",
+                "credentials.replace",
+                "service.start",
+                "service.stop",
+                "service.repair",
+            ],
         },
     }
 

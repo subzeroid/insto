@@ -482,3 +482,20 @@ def test_page_is_one_wal_snapshot_and_reader_releases_it(monitoring_profile, mon
     assert [item["snapshot"]["id"] for item in next_page["items"]] == [inserted[0], first]
     with closing(sqlite3.connect(p.home / "store.db", timeout=0.1)) as writer:
         assert writer.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone() == (0, 0, 0)
+
+
+def test_sqlite_busy_is_bounded_and_explicit(monitoring_profile):
+    p = monitoring_profile
+    insert(p)
+    writer = sqlite3.connect(p.home / "store.db", isolation_level=None)
+    try:
+        assert writer.execute("PRAGMA journal_mode=DELETE").fetchone()[0] == "delete"
+        writer.execute("BEGIN EXCLUSIVE")
+        assert not (p.home / "store.db-journal").exists()
+        started = time.monotonic()
+        with pytest.raises(DesktopError, match="profile_busy"):
+            request(p, "snapshots.list", {"target_pk": "7"})
+        assert time.monotonic() - started < 1.6
+    finally:
+        writer.rollback()
+        writer.close()

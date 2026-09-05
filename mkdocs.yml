@@ -52,6 +52,7 @@ nav:
   - Backends: backends.md
   - Roadmap: roadmap.md
   - Architecture: architecture.md
+  - Desktop protocol: desktop-protocol.md
   - Troubleshooting: troubleshooting.md
   - Contributing: contributing.md
   - Changelog: changelog.md

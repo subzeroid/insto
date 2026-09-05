@@ -1,5 +1,7 @@
 # insto Desktop Foundation Implementation Plan
 
+**Execution status, 2026-09-05:** C0 выполнен в `feat/desktop-foundation`, только Astra. [Результаты, проверки и handoff](2026-09-05-insto-desktop-foundation-results.md). Чекбоксы ниже относятся к этому исполнению; C1/P0/P1 и GUI не объявляются готовыми. Task 1/2 реализованы одним связанным коммитом после test-first проверки и двух независимых ревью.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Добавить проверяемый desktop handshake и строгую проверку HikerAPI credential, сохранив совместимость текущего CLI и macOS-сервиса.
@@ -40,7 +42,7 @@ Baseline: `uv sync --frozen --extra docs`, затем `.venv/bin/pytest -q`. О�
 **Create:** `insto/desktop/__init__.py`, `insto/desktop/protocol.py`.
 **Test:** `tests/test_desktop_protocol.py`.
 
-- [ ] **Step 1: Добавить failing tests.** Полное начальное содержимое тестового файла:
+- [x] **Step 1: Добавить failing tests.** Полное начальное содержимое тестового файла:
 
 ```python
 import json
@@ -92,8 +94,8 @@ def test_encode_enforces_output_limit() -> None:
         encode({"value": "x" * MAX_OUTPUT_BYTES})
 ```
 
-- [ ] **Step 2: Запустить red.** `.venv/bin/pytest tests/test_desktop_protocol.py -q` → collection error: `insto.desktop` отсутствует. Ошибка зависимостей или syntax error не считается ожидаемым red.
-- [ ] **Step 3: Создать package и реализацию.** `__init__.py` содержит только `"""Private desktop bridge; capabilities are negotiated through hello."""`. Полный `protocol.py`:
+- [x] **Step 2: Запустить red.** `.venv/bin/pytest tests/test_desktop_protocol.py -q` → collection error: `insto.desktop` отсутствует. Ошибка зависимостей или syntax error не считается ожидаемым red.
+- [x] **Step 3: Создать package и реализацию.** `__init__.py` содержит только `"""Private desktop bridge; capabilities are negotiated through hello."""`. Полный `protocol.py`:
 
 ```python
 from __future__ import annotations
@@ -165,14 +167,14 @@ def encode(value: dict[str, Any]) -> bytes:
     return raw
 ```
 
-- [ ] **Step 4: Запустить green и форматирование.** `.venv/bin/ruff format insto/desktop tests/test_desktop_protocol.py`, затем `.venv/bin/pytest tests/test_desktop_protocol.py -q` → все cases проходят.
-- [ ] **Step 5: Коммит.** `git add insto/desktop tests/test_desktop_protocol.py`, `git commit -m "feat: define bounded desktop protocol envelope"`.
+- [x] **Step 4: Запустить green и форматирование.** `.venv/bin/ruff format insto/desktop tests/test_desktop_protocol.py`, затем `.venv/bin/pytest tests/test_desktop_protocol.py -q` → все cases проходят.
+- [x] **Step 5: Коммит.** `git add insto/desktop tests/test_desktop_protocol.py`, `git commit -m "feat: define bounded desktop protocol envelope"`.
 
 ## Task 2: Только hello, без config/database/provider
 
 **Create:** `insto/desktop/dispatch.py`, `insto/desktop/__main__.py`, `tests/test_desktop_entrypoint.py`.
 
-- [ ] **Step 1: Добавить failing subprocess и dispatch tests.**
+- [x] **Step 1: Добавить failing subprocess и dispatch tests.**
 
 ```python
 import asyncio
@@ -220,8 +222,8 @@ def test_module_is_one_shot_without_sdk_or_home(tmp_path: Path) -> None:
     assert not home.exists()
 ```
 
-- [ ] **Step 2: Red.** `.venv/bin/pytest tests/test_desktop_entrypoint.py -q` → отсутствует `insto.desktop.dispatch`.
-- [ ] **Step 3: Реализовать `dispatch.py`.** Ошибки не содержат exception repr или входные значения; malformed request ID возвращается как `null`.
+- [x] **Step 2: Red.** `.venv/bin/pytest tests/test_desktop_entrypoint.py -q` → отсутствует `insto.desktop.dispatch`.
+- [x] **Step 3: Реализовать `dispatch.py`.** Ошибки не содержат exception repr или входные значения; malformed request ID возвращается как `null`.
 
 ```python
 from __future__ import annotations
@@ -289,15 +291,15 @@ if __name__ == "__main__":
 
 Parent обязан закрыть stdin после единственной строки. До EOF этот entrypoint может ждать; внешний 10-second process deadline будет ответственностью P1. Семантический error — корректный JSON response с exit 0; transport/nonzero exit не считается доменной ошибкой.
 
-- [ ] **Step 4: Green.** `.venv/bin/ruff format insto/desktop tests/test_desktop_entrypoint.py`; `.venv/bin/pytest tests/test_desktop_protocol.py tests/test_desktop_entrypoint.py -q`; `.venv/bin/mypy insto/desktop` → pass.
-- [ ] **Step 5: Коммит.** `git add insto/desktop tests/test_desktop_entrypoint.py`, `git commit -m "feat: expose side-effect-free desktop handshake"`.
+- [x] **Step 4: Green.** `.venv/bin/ruff format insto/desktop tests/test_desktop_entrypoint.py`; `.venv/bin/pytest tests/test_desktop_protocol.py tests/test_desktop_entrypoint.py -q`; `.venv/bin/mypy insto/desktop` → pass.
+- [x] **Step 5: Коммит.** `git add insto/desktop tests/test_desktop_entrypoint.py`, `git commit -m "feat: expose side-effect-free desktop handshake"`.
 
 ## Task 3: Строгая проверка доступа HikerAPI без изменения REPL
 
 **Modify:** `insto/backends/hiker.py`, рядом с `refresh_quota()`.
 **Create:** `tests/test_hiker_access.py`.
 
-- [ ] **Step 1: Добавить failing tests.** `validate_access()` возвращает `Quota`, ноль — действительный ответ о нулевом остатке, не зелёное состояние мониторинга. Маппинг в UI выполняется в C1.
+- [x] **Step 1: Добавить failing tests.** `validate_access()` возвращает `Quota`, ноль — действительный ответ о нулевом остатке, не зелёное состояние мониторинга. Маппинг в UI выполняется в C1.
 
 ```python
 from collections.abc import Callable
@@ -395,15 +397,17 @@ async def test_non_json_success_is_schema_drift() -> None:
         await client.aclose()
 ```
 
-- [ ] **Step 2: Red.** `.venv/bin/pytest tests/test_hiker_access.py -q` → `HikerBackend` has no `validate_access`.
-- [ ] **Step 3: Добавить метод в `HikerBackend`.** `_call` уже отвечает за retry/HTTP taxonomy; второй retry loop не создаётся. Не изменять существующий `refresh_quota()`.
+- [x] **Step 2: Red.** `.venv/bin/pytest tests/test_hiker_access.py -q` → `HikerBackend` has no `validate_access`.
+- [x] **Step 3: Добавить метод в `HikerBackend`.** `_call` уже отвечает за retry/HTTP taxonomy; второй retry loop не создаётся. Не изменять существующий `refresh_quota()`.
 
 ```python
 async def validate_access(self) -> Quota:
     """Validate access strictly; zero is a valid exhausted-balance result."""
     async def request_balance() -> httpx.Response:
         try:
-            return await self._client._client.get("/sys/balance")
+            response = await self._client._client.get("/sys/balance")
+            response.raise_for_status()
+            return response
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code in {403, 404}:
                 raise BackendError("HikerAPI access check could not confirm access") from None
@@ -423,14 +427,15 @@ async def validate_access(self) -> Quota:
 
 Это метод внутри существующего класса; `httpx`, `BackendError`, `Quota`, `SchemaDrift` уже импортированы. Существующий response hook поднимает HTTP errors. Для `/sys/balance` 403/404 означают неподтверждённый доступ, а не запрет Instagram-профиля или внутренний not-found sentinel; общий lookup translator не меняется. Только подтверждённый 401 означает invalid token. Метод намеренно не передаёт неизвестные optional SDK поля в DTO. C1 регистрирует token в redactor **до** создания клиента, ограничивает всю validation operation 30 секундами и закрывает backend в `finally` ровно один раз, включая отмену.
 
-- [ ] **Step 4: Green.** `.venv/bin/ruff format insto/backends/hiker.py tests/test_hiker_access.py`; `.venv/bin/pytest tests/test_hiker_access.py tests/test_hiker_backend.py -q`; `.venv/bin/mypy insto/backends/hiker.py` → pass.
-- [ ] **Step 5: Коммит.** `git add insto/backends/hiker.py tests/test_hiker_access.py`, `git commit -m "feat: validate HikerAPI access without swallowing failures"`.
+- [x] **Step 4: Green.** `.venv/bin/ruff format insto/backends/hiker.py tests/test_hiker_access.py`; `.venv/bin/pytest tests/test_hiker_access.py tests/test_hiker_backend.py -q`; `.venv/bin/mypy insto/backends/hiker.py` → pass.
+- Regression из implementation review: balance-shaped JSON в HTTP 301/302/307/308 не подтверждает доступ. Явный `raise_for_status()` нужен и после response hook: hook обрабатывает только 4xx/5xx. Четыре негативных случая добавлены в `tests/test_hiker_access.py`.
+- [x] **Step 5: Коммит.** `git add insto/backends/hiker.py tests/test_hiker_access.py`, `git commit -m "feat: validate HikerAPI access without swallowing failures"`.
 
 ## Task 4: Bytecode-free service без поломки legacy ownership
 
 **Modify:** `insto/service/watch_service.py`, `tests/test_watch_service.py`, `tests/e2e/test_watch_service.py`.
 
-- [ ] **Step 1: Добавить failing regression tests в `tests/test_watch_service.py`.** Здесь `_owned_artifacts` и `_result` — существующие helpers этого файла, не новые зависимости.
+- [x] **Step 1: Добавить failing regression tests в `tests/test_watch_service.py`.** Здесь `_owned_artifacts` и `_result` — существующие helpers этого файла, не новые зависимости.
 
 ```python
 @pytest.mark.parametrize("no_bytecode", [False, True])
@@ -470,9 +475,9 @@ def test_owned_argv_match_rejects_additional_flags(
     assert not watch_service._matches_owned_plist(paths, manifest, document)
 ```
 
-- [ ] **Step 2: Red.** `.venv/bin/pytest tests/test_watch_service.py -k 'argv_variants or no_bytecode or additional_flags' -q` → отсутствующий keyword/helper.
-- [ ] **Step 2a: Дополнить regression matrix до изменения controller.** Параметризовать существующий install/idempotency test по `dont_write_bytecode=False/True`, явно устанавливать `sys.dont_write_bytecode` через monkeypatch и ожидать соответствующий точный argv. Добавить `stored_mode × requested_mode × loaded` (2×2×2): совпадающий режим допускает обычный install/no-op; несовпадающий отказывает и для loaded, и для unloaded регистрации. При отказе bytes manifest/plist неизменны, среди вызовов нет `enable`, `bootstrap`, `bootout`, `kickstart`. Не ограничиваться тестированием `_desired()` или uninstall: обе install-ветви имеют самостоятельную ownership-проверку.
-- [ ] **Step 3: Изменить только создание argv и точное сравнение.** В `_desired()` заменить строку создания `plist` на:
+- [x] **Step 2: Red.** `.venv/bin/pytest tests/test_watch_service.py -k 'argv_variants or no_bytecode or additional_flags' -q` → отсутствующий keyword/helper.
+- [x] **Step 2a: Дополнить regression matrix до изменения controller.** Параметризовать существующий install/idempotency test по `dont_write_bytecode=False/True`, явно устанавливать `sys.dont_write_bytecode` через monkeypatch и ожидать соответствующий точный argv. Добавить `stored_mode × requested_mode × loaded` (2×2×2): совпадающий режим допускает обычный install/no-op; несовпадающий отказывает и для loaded, и для unloaded регистрации. При отказе bytes manifest/plist неизменны, среди вызовов нет `enable`, `bootstrap`, `bootout`, `kickstart`. Не ограничиваться тестированием `_desired()` или uninstall: обе install-ветви имеют самостоятельную ownership-проверку.
+- [x] **Step 3: Изменить только создание argv и точное сравнение.** В `_desired()` заменить строку создания `plist` на:
 
 ```python
 plist = _plist_document(paths, manifest, dont_write_bytecode=sys.dont_write_bytecode)
@@ -524,7 +529,7 @@ if not _matches_owned_plist(paths, manifest, actual_plist):
 
 Manifest schema, management lock и остальные plist поля не меняются. Повторная установка legacy обычным CLI остаётся byte-exact no-op. Если явная установка запрошена из другого режима `-B`, существующее несовпадение всё ещё даёт отказ, а не неявную миграцию. GUI production bridge всегда запускается с `-I -B`.
 
-- [ ] **Step 4: Расширить существующий opt-in native test на режим proof.** В `test_installed_launchagent_lifecycle` после выбора `python` определить:
+- [x] **Step 4: Расширить существующий opt-in native test на режим proof.** В `test_installed_launchagent_lifecycle` после выбора `python` определить:
 
 ```python
 python_flags = ["-I"]
@@ -542,15 +547,15 @@ PID/lock/ps ownership assertions и `finally` cleanup не ослаблять. �
 
 Для аварийного supervisor cleanup из P0 добавить optional `INSTO_TEST_HOME`. Без него home остаётся прежним `tmp_path / "service home"`. С ним разрешён только абсолютный новый путь `tmp_path.parent / "service home"` (непосредственно внутри заданного pytest basetemp), не symlink и не существующий каталог. Проверить приватность/владельца родителя, затем создать home через `mkdir(mode=0o700)` без `exist_ok`. Остальные label/manifest/config/ownership assertions не менять. Это позволяет внешнему supervisor записать точные home и label до запуска теста и восстановить только эту регистрацию после прерывания pytest. Unit tests выбора home не требуют launchd: default, допустимый explicit, относительный, существующий, symlink, чужой parent. Этот test-only выбор не добавляется в production config или protocol.
 
-- [ ] **Step 5: Green и regression.** `.venv/bin/ruff format insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`; `.venv/bin/pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Native test выполняется в P0 с wheel-installed runtime, не из checkout.
-- [ ] **Step 5a: Проверить независимость suite от запускающего Python.** Повторить `.venv/bin/python -B -m pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Обычный запуск и `-B` должны пройти одинаковую явно параметризованную матрицу.
-- [ ] **Step 6: Коммит.** `git add insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`, `git commit -m "feat: support bytecode-free managed service launches safely"`.
+- [x] **Step 5: Green и regression.** `.venv/bin/ruff format insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`; `.venv/bin/pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Native test выполняется в P0 с wheel-installed runtime, не из checkout.
+- [x] **Step 5a: Проверить независимость suite от запускающего Python.** Повторить `.venv/bin/python -B -m pytest tests/test_watch_service.py tests/test_watch_service_runner.py tests/test_watch_service_cli.py -q` → pass. Обычный запуск и `-B` должны пройти одинаковую явно параметризованную матрицу.
+- [x] **Step 6: Коммит.** `git add insto/service/watch_service.py tests/test_watch_service.py tests/e2e/test_watch_service.py`, `git commit -m "feat: support bytecode-free managed service launches safely"`.
 
 ## Task 5: Документировать только работающий foundation и проверить wheel
 
 **Create:** `docs/desktop-protocol.md`. **Modify:** `mkdocs.yml`.
 
-- [ ] **Step 1: Добавить документ следующего содержания.**
+- [x] **Step 1: Добавить документ следующего содержания.**
 
 ```markdown
 # Desktop protocol foundation
@@ -582,13 +587,13 @@ preserve that setting in their LaunchAgent. Legacy registrations retain
 their existing form. Removal accepts only either exact owned form.
 ```
 
-- [ ] **Step 2: Включить страницу в nav.** В `mkdocs.yml` непосредственно после существующего `Architecture: architecture.md` добавить одну запись, сохранив остальной nav:
+- [x] **Step 2: Включить страницу в nav.** В `mkdocs.yml` непосредственно после существующего `Architecture: architecture.md` добавить одну запись, сохранив остальной nav:
 
 ```yaml
   - Desktop protocol: desktop-protocol.md
 ```
 
-- [ ] **Step 3: Запустить полный offline gate.**
+- [x] **Step 3: Запустить полный offline gate.**
 
 ```sh
 .venv/bin/ruff check
@@ -602,7 +607,7 @@ git diff --check
 
 Ожидается exit 0 у каждой команды; opt-in native skip допустим только до P0. Не выключать strict docs при ошибке.
 
-- [ ] **Step 4: Проверить содержимое wheel без установки.**
+- [x] **Step 4: Проверить содержимое wheel без установки.**
 
 ```sh
 .venv/bin/python -c 'from pathlib import Path; from zipfile import ZipFile; wheels=list(Path("dist").glob("insto-*.whl")); assert len(wheels)==1; names=ZipFile(wheels[0]).namelist(); assert "insto/desktop/__main__.py" in names; assert "insto/desktop/protocol.py" in names; print(wheels[0])'
@@ -610,7 +615,7 @@ git diff --check
 
 Если `dist` уже содержит несколько версий, использовать новый build output directory и повторить проверку, не удалять чужие артефакты.
 
-- [ ] **Step 5: Коммит документа и handoff в P0.** `git add docs/desktop-protocol.md mkdocs.yml`, `git commit -m "docs: describe implemented desktop foundation"`. Зафиксировать SHA core commit и wheel SHA-256 в P0 build evidence. Не bump version, push, merge или release в рамках C0.
+- [x] **Step 5: Коммит документа и handoff в P0.** `git add docs/desktop-protocol.md mkdocs.yml`, `git commit -m "docs: describe implemented desktop foundation"`. Зафиксировать SHA core commit и wheel SHA-256 в P0 build evidence. Не bump version, push, merge или release в рамках C0.
 
 ## Самопроверка покрытия C0
 

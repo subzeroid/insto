@@ -82,8 +82,10 @@ def test_key_scan_plans_use_index_ranges_and_never_sort_payloads(query_db):
         row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + target_sql, target_args)
     ]
     assert any("USE TEMP B-TREE FOR ORDER BY" in step for step in global_plan), global_plan
+    # SQLite renders the row-value range as "captured_at<?" (3.49) or as
+    # "(captured_at,rowid)<(?,?)" (other releases); both prove the index range.
     assert any(
-        "idx_snapshots_target_ts" in step and "captured_at<" in step for step in target_plan
+        "idx_snapshots_target_ts" in step and "captured_at" in step for step in target_plan
     ), target_plan
     batch_plan = [
         row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + batch_sql(3), (1, 2, 3))

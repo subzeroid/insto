@@ -1,0 +1,128 @@
+import os
+import sqlite3
+
+import pytest
+
+from insto.desktop.errors import DesktopError
+from insto.desktop.profile import Profile
+
+
+def test_explicit_configuration_ignores_environment(tmp_path, monkeypatch):
+    from insto.desktop.configuration import config_bytes, parse_config
+
+    profile = Profile(tmp_path / "desktop")
+    monkeypatch.setenv("INSTO_HOME", "/foreign")
+    monkeypatch.setenv("HIKERAPI_TOKEN", "foreign-secret")
+    monkeypatch.setenv("HIKERAPI_PROXY", "https://foreign")
+    config = parse_config(profile, config_bytes(profile, "offline-token"))
+    assert config.hiker_token == "offline-token"
+    assert config.hiker_proxy is None
+    assert config.db_path == profile.home / "store.db"
+    assert config.output_dir == profile.home / "output"
+    assert config.aiograpi_session_path == profile.home / "aiograpi.session.json"
+    assert config.cli_history_path == profile.home / "cli_history"
+
+
+def test_configuration_rejects_redirected_paths(tmp_path):
+    from insto.desktop.configuration import config_bytes, parse_config
+
+    profile = Profile(tmp_path / "desktop")
+    payload = config_bytes(profile, "offline-token").replace(b"store.db", b"foreign.db")
+    with pytest.raises(DesktopError, match="profile_ownership"):
+        parse_config(profile, payload)
+
+
+def test_database_missing_read_has_no_effect(tmp_path):
+    from insto.desktop.configuration import check_database
+
+    path = tmp_path / "missing.db"
+    assert check_database(path) is False
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("kind", ["symlink", "directory", "public", "old", "forged"])
+def test_database_refuses_unsafe_or_incompatible_files(tmp_path, kind):
+    from insto.desktop.configuration import check_database
+
+    path = tmp_path / "store.db"
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "symlink":
+        path.symlink_to(tmp_path / "missing")
+    else:
+        with sqlite3.connect(path) as connection:
+            connection.execute("CREATE TABLE _meta(key TEXT, value TEXT)")
+            connection.execute(
+                "INSERT INTO _meta VALUES ('schema_version', ?)",
+                ("2" if kind == "forged" else "1",),
+            )
+        path.chmod(0o644 if kind == "public" else 0o600)
+    before = path.lstat()
+    with pytest.raises(DesktopError):
+        check_database(path)
+    assert path.lstat().st_mode == before.st_mode
+
+
+def test_valid_database_check_preserves_bytes_and_permissions(tmp_path):
+    from insto.desktop.configuration import check_database, initialize_database
+
+    path = tmp_path / "store.db"
+    initialize_database(path)
+    before = path.read_bytes()
+    assert check_database(path)
+    assert path.read_bytes() == before
+    assert os.stat(path).st_mode & 0o777 == 0o600
+
+
+def test_future_schema_in_uncheckpointed_wal_is_rejected_without_source_changes(tmp_path):
+    from insto.desktop.configuration import check_database, initialize_database
+
+    path = tmp_path / "store.db"
+    initialize_database(path)
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute("UPDATE _meta SET value='999' WHERE key='schema_version'")
+        connection.commit()
+        before = {p.name: (p.read_bytes(), p.stat().st_mode) for p in tmp_path.iterdir()}
+        with pytest.raises(DesktopError, match="schema_mismatch"):
+            check_database(path)
+        assert {p.name: (p.read_bytes(), p.stat().st_mode) for p in tmp_path.iterdir()} == before
+    finally:
+        connection.close()
+
+
+def test_large_database_is_allowed(tmp_path):
+    from insto.desktop.configuration import check_database, initialize_database
+
+    path = tmp_path / "store.db"
+    initialize_database(path)
+    with sqlite3.connect(path) as connection:
+        connection.execute("INSERT INTO cli_history(cmd, ts) VALUES (?, 1)", ("x" * 100000,))
+    assert check_database(path)
+
+
+def test_interrupted_database_initialization_leaves_final_database_missing(tmp_path, monkeypatch):
+    from insto.desktop import configuration
+
+    path = tmp_path / "store.db"
+
+    def fail(path):
+        path.touch(mode=0o600)
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr(configuration, "HistoryStore", fail)
+    with pytest.raises(RuntimeError):
+        configuration.initialize_database(path)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("leaf", ["output", "aiograpi.session.json", "cli_history"])
+def test_fixed_auxiliary_paths_cannot_redirect_outside_profile(tmp_path, leaf):
+    from insto.desktop.configuration import config_bytes, parse_config
+
+    profile = Profile(tmp_path / "desktop")
+    with profile.locked(initialize=True):
+        (profile.home / leaf).symlink_to(tmp_path / "elsewhere")
+        with pytest.raises(DesktopError, match="profile_ownership"):
+            parse_config(profile, config_bytes(profile, "offline-token"))

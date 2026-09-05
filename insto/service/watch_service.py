@@ -303,16 +303,19 @@ def _desired(paths: ServicePaths, config: Config, env_file: Path | None) -> tupl
         "env_file": canonical_env,
     }
     manifest_bytes = (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
-    plist = _plist_document(paths, manifest)
+    plist = _plist_document(paths, manifest, dont_write_bytecode=sys.dont_write_bytecode)
     return manifest_bytes, plistlib.dumps(plist, fmt=plistlib.FMT_XML, sort_keys=True)
 
 
-def _plist_document(paths: ServicePaths, manifest: dict[str, Any]) -> dict[str, Any]:
+def _plist_document(
+    paths: ServicePaths, manifest: dict[str, Any], *, dont_write_bytecode: bool = False
+) -> dict[str, Any]:
     return {
         "Label": paths.label,
         "ProgramArguments": [
             manifest["python"],
             "-I",
+            *(["-B"] if dont_write_bytecode else []),
             "-m",
             "insto.service.watch_service_runner",
             str(paths.manifest),
@@ -418,6 +421,15 @@ async def install_service(
         )
 
 
+def _matches_owned_plist(paths: ServicePaths, manifest: dict[str, Any], document: object) -> bool:
+    # Removal can be initiated by either interpreter mode. Installation still
+    # requires an exact byte match and never silently migrates a registration.
+    return any(
+        document == _plist_document(paths, manifest, dont_write_bytecode=flag)
+        for flag in (False, True)
+    )
+
+
 async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
     _require_macos()
     paths = service_paths(home)
@@ -456,7 +468,7 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
                 actual_plist = plistlib.loads(read_private_file(paths.plist))
             except plistlib.InvalidFileException as exc:
                 raise BackendError("invalid LaunchAgent plist") from exc
-            if actual_plist != _plist_document(paths, manifest):
+            if not _matches_owned_plist(paths, manifest, actual_plist):
                 raise BackendError("LaunchAgent plist ownership mismatch")
         target = f"gui/{os.getuid()}/{paths.label}"
         current = await _launchctl(["print", target])

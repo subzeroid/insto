@@ -54,12 +54,14 @@ def test_read_private_file_rejects_permissions_symlinks_and_fifo(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("no_bytecode", [False, True])
 async def test_install_writes_exact_artifacts_and_repeated_install_is_noop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_bytecode: bool
 ) -> None:
     home = tmp_path / "config"
     user_home = tmp_path / "user"
     monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", no_bytecode)
     monkeypatch.setattr(watch_service.Path, "home", lambda: user_home)
     config = SimpleNamespace(
         backend="hikerapi",
@@ -105,6 +107,7 @@ async def test_install_writes_exact_artifacts_and_repeated_install_is_noop(
     assert plist["ProgramArguments"] == [
         os.path.abspath(watch_service.sys.executable),
         "-I",
+        *(["-B"] if no_bytecode else []),
         "-m",
         "insto.service.watch_service_runner",
         str(paths.manifest),
@@ -413,6 +416,125 @@ async def test_uninstall_owned_artifacts_preserves_user_data_and_lock_inode(
     assert not paths.manifest.exists() and not paths.plist.exists()
     assert [path.read_text() for path in (config.db_path, log, env_file)] == ["keep"] * 3
     assert lock.stat().st_ino == inode
+
+
+@pytest.mark.parametrize("stored_mode", [False, True])
+@pytest.mark.parametrize("requested_mode", [False, True])
+@pytest.mark.parametrize("loaded", [False, True])
+async def test_install_argv_compatibility_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stored_mode: bool,
+    requested_mode: bool,
+    loaded: bool,
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", False)
+    home, paths, config = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    # Construct the stored fixture independently from the new argv builder.
+    document = plistlib.loads(paths.plist.read_bytes())
+    if stored_mode:
+        document["ProgramArguments"].insert(2, "-B")
+    paths.plist.write_bytes(plistlib.dumps(document))
+    before = (paths.manifest.read_bytes(), paths.plist.read_bytes())
+    mtimes = (paths.manifest.stat().st_mtime_ns, paths.plist.stat().st_mtime_ns)
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", requested_mode)
+    monkeypatch.setattr(watch_service, "_resolve_config", lambda *args: config)
+    calls: list[list[str]] = []
+    registered = loaded
+
+    def fake_run(args: list[str], **kwargs: object) -> SimpleNamespace:
+        nonlocal registered
+        calls.append(args)
+        if args[1:] == ["print", f"gui/{os.getuid()}"]:
+            return _result(0)
+        if args[1] == "bootstrap":
+            registered = True
+        if args[1] == "print" and not registered:
+            return _result(1, err=b"Could not find service")
+        return _result(0, out=b"state = running\n")
+
+    monkeypatch.setattr(watch_service.subprocess, "run", fake_run)
+    if stored_mode != requested_mode:
+        with pytest.raises(BackendError, match="refusing"):
+            await watch_service.install_service(home=home)
+        assert all(call[1] == "print" for call in calls)
+    else:
+        result = await watch_service.install_service(home=home)
+        assert result["changed"] is (not loaded)
+        assert result["registration"] == "loaded"
+        assert [call[1] for call in calls if call[1] != "print"] == (
+            [] if loaded else ["enable", "bootstrap"]
+        )
+    assert (paths.manifest.read_bytes(), paths.plist.read_bytes()) == before
+    assert (paths.manifest.stat().st_mtime_ns, paths.plist.stat().st_mtime_ns) == mtimes
+
+
+@pytest.mark.parametrize("stored_mode", [False, True])
+@pytest.mark.parametrize("caller_mode", [False, True])
+async def test_uninstall_accepts_only_exact_owned_argv_variants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stored_mode: bool, caller_mode: bool
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", False)
+    home, paths, _ = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    document = plistlib.loads(paths.plist.read_bytes())
+    if stored_mode:
+        document["ProgramArguments"].insert(2, "-B")
+    paths.plist.write_bytes(plistlib.dumps(document))
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", caller_mode)
+    monkeypatch.setattr(
+        watch_service.subprocess,
+        "run",
+        lambda *args, **kwargs: _result(1, err=b"Could not find service"),
+    )
+    assert (await watch_service.uninstall_service(home=home))["installation"] == "not_installed"
+    assert not paths.plist.exists() and not paths.manifest.exists()
+
+
+@pytest.mark.parametrize("no_bytecode", [False, True])
+@pytest.mark.parametrize("change", ["extra_flag", "duplicate_flag", "module", "cwd", "extra_key"])
+async def test_uninstall_rejects_other_plist_changes_without_native_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, no_bytecode: bool, change: str
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", False)
+    home, paths, _ = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    document = plistlib.loads(paths.plist.read_bytes())
+    if no_bytecode:
+        document["ProgramArguments"].insert(2, "-B")
+    if change == "extra_flag":
+        document["ProgramArguments"].insert(1, "-X")
+    elif change == "duplicate_flag":
+        document["ProgramArguments"].insert(1, "-I")
+    elif change == "module":
+        document["ProgramArguments"][-2] = "insto.other"
+    elif change == "cwd":
+        document["WorkingDirectory"] = str(tmp_path)
+    else:
+        document["EnvironmentVariables"] = {"PYTHONPATH": "untrusted"}
+    paths.plist.write_bytes(plistlib.dumps(document))
+    before = paths.plist.read_bytes()
+    monkeypatch.setattr(
+        watch_service.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("unexpected native call"),
+    )
+    with pytest.raises(BackendError, match="ownership mismatch"):
+        await watch_service.uninstall_service(home=home)
+    assert paths.plist.read_bytes() == before and paths.manifest.exists()
+
+
+def test_no_bytecode_follows_installing_interpreter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, paths, config = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", True)
+    _, raw = watch_service._desired(paths, config, None)
+    assert plistlib.loads(raw)["ProgramArguments"][1:4] == ["-I", "-B", "-m"]
+    monkeypatch.setattr(watch_service.sys, "dont_write_bytecode", False)
+    _, raw = watch_service._desired(paths, config, None)
+    assert plistlib.loads(raw)["ProgramArguments"][1:3] == ["-I", "-m"]
 
 
 def test_management_lock_rejects_fifo_and_competing_holder(

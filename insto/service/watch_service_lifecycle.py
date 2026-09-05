@@ -243,8 +243,14 @@ class ManagedService:
         until = min(self.deadline, time.monotonic() + _READINESS_SECONDS)
         while True:
             report = await self._inspect(deadline=until)
-            self._check_executor(report)
-            if report["process"]["state"] == "running" and report["executor"]["state"] == "busy":
+            # A new runner owns the flock before it publishes its PID. Poll
+            # that intermediate state, but never declare readiness until the
+            # native job and stable executor inode identify the same process.
+            if (
+                report["process"]["state"] == "running"
+                and report["executor"]["state"] == "busy"
+                and report["executor"]["pid"] == report["process"]["pid"]
+            ):
                 return report
             remaining = min(until, self.deadline) - time.monotonic()
             if remaining <= 0:

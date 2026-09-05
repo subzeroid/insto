@@ -149,6 +149,17 @@ def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
     try:
         cli("@alice", "-c", "watch", "600")
         force_due()
+        desktop = subprocess.run(
+            [python, "-I", "-B", str(Path(__file__).with_name("desktop_lifecycle.py")), str(home)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert desktop.returncode == 0, desktop.stderr
+        assert (home / "desktop-lifecycle.json").is_file()
+        force_due()
         cli("watch-service", "install", "--env-file", str(env_file))
         assert secret not in plist.read_text()
         assert secret not in manifest.read_text()

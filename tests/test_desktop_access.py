@@ -167,3 +167,86 @@ async def test_close_itself_is_inside_validation_budget(monkeypatch):
     with pytest.raises(DesktopError, match="operation_timeout"):
         await asyncio.wait_for(access.validate_candidate("candidate-secret"), timeout=1)
     backend.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_cancel_cleanup_cannot_extend_validation_wait(monkeypatch):
+    backend = AsyncMock()
+    backend.validate_access.return_value = Quota.with_remaining(10)
+    release, done = asyncio.Event(), asyncio.Event()
+
+    async def close():
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            await release.wait()
+        finally:
+            done.set()
+
+    backend.aclose.side_effect = close
+    monkeypatch.setattr(access, "make_backend", lambda token: backend)
+    monkeypatch.setattr(access, "VALIDATION_SECONDS", 0.02)
+    task = asyncio.create_task(access.validate_candidate("candidate-secret"))
+    try:
+        finished, _ = await asyncio.wait({task}, timeout=0.1)
+        assert task in finished, "close cancellation cleanup exceeded validation budget"
+        with pytest.raises(DesktopError, match="operation_timeout"):
+            task.result()
+    finally:
+        release.set()
+        await done.wait()
+        with pytest.raises(DesktopError):
+            await task
+
+
+@pytest.mark.asyncio
+async def test_cancellation_wins_over_subsequent_close_failure(monkeypatch):
+    backend = AsyncMock()
+    backend.validate_access.return_value = Quota.with_remaining(10)
+    closing, release = asyncio.Event(), asyncio.Event()
+
+    async def close():
+        closing.set()
+        await release.wait()
+        raise RuntimeError("candidate-secret")
+
+    backend.aclose.side_effect = close
+    monkeypatch.setattr(access, "make_backend", lambda token: backend)
+    task = asyncio.create_task(access.validate_candidate("candidate-secret"))
+    await closing.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_request_cancellation_cleanup_is_also_bounded(monkeypatch):
+    backend = AsyncMock()
+    release, done = asyncio.Event(), asyncio.Event()
+
+    async def validate():
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            await release.wait()
+        finally:
+            done.set()
+        return Quota.with_remaining(10)
+
+    backend.validate_access.side_effect = validate
+    monkeypatch.setattr(access, "make_backend", lambda token: backend)
+    monkeypatch.setattr(access, "VALIDATION_SECONDS", 0.02)
+    task = asyncio.create_task(access.validate_candidate("candidate-secret"))
+    try:
+        finished, _ = await asyncio.wait({task}, timeout=0.1)
+        assert task in finished, "request cleanup exceeded validation deadline"
+        with pytest.raises(DesktopError, match="operation_timeout"):
+            task.result()
+    finally:
+        release.set()
+        await done.wait()
+        with pytest.raises(DesktopError):
+            await task
+    backend.aclose.assert_awaited_once()

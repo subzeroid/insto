@@ -2,6 +2,57 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.21](https://github.com/subzeroid/insto/compare/v0.7.20...v0.7.21) (2026-09-05)
+
+
+### Added
+
+* add bounded owned watch service lifecycle lease ([9f2962c](https://github.com/subzeroid/insto/commit/9f2962c09073e158edfc95f171c50bdc2b0f81b9))
+* add bounded side-effect-free desktop handshake ([544137a](https://github.com/subzeroid/insto/commit/544137a2458b1dbb045294db87bfccb5d039b06b))
+* add macOS watcher service lifecycle ([604c680](https://github.com/subzeroid/insto/commit/604c6806706dde481e2257f83e957a5b3900ab6f))
+* bound and validate saved snapshot records ([e62cf8f](https://github.com/subzeroid/insto/commit/e62cf8fb814c3a97341d1d37d1f024a4ddf9947f))
+* **desktop:** add bounded managed database transactions ([bab03e5](https://github.com/subzeroid/insto/commit/bab03e59b810dd58ed03686bef827ca2e7a90840))
+* **desktop:** add durable setup and credential recovery transactions ([06c4424](https://github.com/subzeroid/insto/commit/06c442433cbc8866f981eb060a5d8fabee0aee9b))
+* **desktop:** add private crash-safe profile storage ([6d4802d](https://github.com/subzeroid/insto/commit/6d4802d73dcf736e2b659c029f82d275be190bc5))
+* **desktop:** add safe watch commands and bounded overview ([b0bf64b](https://github.com/subzeroid/insto/commit/b0bf64b50882e29831c841193611b703eb6f81bb))
+* **desktop:** expose revision-safe watch protocol ([85a8a98](https://github.com/subzeroid/insto/commit/85a8a988d046eb3d181e006eeba9e8a8379278cd))
+* **desktop:** expose strict setup and service operations ([4a8b452](https://github.com/subzeroid/insto/commit/4a8b45237d799c037a9820a975e52003ad1403ef))
+* expose bounded saved history desktop operations ([cf294cb](https://github.com/subzeroid/insto/commit/cf294cb1ebbe25bc7be03770554dfabe1846fe07))
+* route saved history desktop capabilities ([94b9acc](https://github.com/subzeroid/insto/commit/94b9acc0a208d939d8e0b7db6a34e0599225a545))
+* stream saved snapshot keyset queries ([7f89a1f](https://github.com/subzeroid/insto/commit/7f89a1fb0cc380cdb5ec615a8852ce9fcb636b4a))
+* support bytecode-free managed service launches safely ([b66cf5e](https://github.com/subzeroid/insto/commit/b66cf5e9f2085b0a69b2bafa125a3bf2cf56fef5))
+* validate desktop credentials with isolated transport ([e266f6e](https://github.com/subzeroid/insto/commit/e266f6ee61fe9da9b18762f4ad7035c08ca0d10f))
+* validate desktop saved history parameters ([049523d](https://github.com/subzeroid/insto/commit/049523d5af714035c94673647273f2529f974e0b))
+* validate HikerAPI access without swallowing failures ([709619c](https://github.com/subzeroid/insto/commit/709619c979409db4352f17e11f4b63abd20443f1))
+* **watch:** share registration transactions and fence desktop mutations ([2a535a3](https://github.com/subzeroid/insto/commit/2a535a3b691f44e52531bba9746fbc25fbaa83d8))
+
+
+### Fixed
+
+* **desktop:** bind resumed setup quota to validated candidate ([6c1687c](https://github.com/subzeroid/insto/commit/6c1687c06ecf74be83030691bbcd1691bc43a64e))
+* **desktop:** bound request and client cancellation waits ([deeb682](https://github.com/subzeroid/insto/commit/deeb682528334869ac2fdddb2c558bbdffc86e49))
+* **desktop:** preserve service disposition after orphan cleanup ([0c9682a](https://github.com/subzeroid/insto/commit/0c9682ad290c2a8d124b4ce36442c76e7ed54faf))
+* **desktop:** reject orphan SQLite sidecars before setup ([ce57522](https://github.com/subzeroid/insto/commit/ce57522af438695f3fbce74ca8166eb158432e54))
+* observe owned readiness after kickstart timeout ([ec2d5dc](https://github.com/subzeroid/insto/commit/ec2d5dcf4da87680f5c5cdf2a5b83db682809109))
+* parse only unambiguous outer launchctl job fields ([89ea23b](https://github.com/subzeroid/insto/commit/89ea23bde9a77e1a7cd70078e819a5f7d0fba3e9))
+* **service:** recognize verified native startup transitions ([aedab74](https://github.com/subzeroid/insto/commit/aedab744ea0123c8e01ab63fec9b9ca7be93a0a7))
+* **service:** wait for executor PID publication at startup ([44c268b](https://github.com/subzeroid/insto/commit/44c268b35af51fc94c4de6d84b1e3dc5a72de2e7))
+* **service:** wait through native termination transition ([7fdb54c](https://github.com/subzeroid/insto/commit/7fdb54ca34fc70d0168a83b2b2bd8af84af904fa))
+
+
+### Documentation
+
+* approve and review macOS service implementation plan ([8879c9a](https://github.com/subzeroid/insto/commit/8879c9af31e0785002d93ca742b92abe95109fbf))
+* complete engineering review of insto-gui plans ([b573ddf](https://github.com/subzeroid/insto/commit/b573ddf46775780c3cc6c69c50a41da7f841dfcd))
+* **desktop:** record the approved C2 read-only contract ([e38a923](https://github.com/subzeroid/insto/commit/e38a9231cbda614a37add5f58aaa57832aa0e62b))
+* **desktop:** record verified C1 setup and native recovery ([ac099be](https://github.com/subzeroid/insto/commit/ac099be78520573dc0581c47a330b9ff8cab34ff))
+* document bounded desktop saved history ([36d69b6](https://github.com/subzeroid/insto/commit/36d69b6cbf61e7250e1db8af402930662a3b1f4a))
+* draft macOS watch service design ([51e6b8d](https://github.com/subzeroid/insto/commit/51e6b8daba21c538f5cbb852c545abc53ccdc8ab))
+* plan desktop foundation and standalone runtime proof ([059d5e9](https://github.com/subzeroid/insto/commit/059d5e98611eebd82e6fb638e7a4260ef19b8284))
+* plan desktop setup and credential recovery ([5fc1d92](https://github.com/subzeroid/insto/commit/5fc1d92a475d8f7e240a0d295d498c32993527cd))
+* record verified desktop foundation and packaging handoff ([d0c727a](https://github.com/subzeroid/insto/commit/d0c727a2bf11c9a0c0c9d1719b7c0003514d287b))
+* specify self-contained insto GUI onboarding ([5f7ab08](https://github.com/subzeroid/insto/commit/5f7ab087f6b4896704accc005ba9ac12d98e6a11))
+
 ## [0.7.20](https://github.com/subzeroid/insto/compare/v0.7.19...v0.7.20) (2026-09-04)
 
 

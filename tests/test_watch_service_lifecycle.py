@@ -398,3 +398,43 @@ def test_missing_lock_requires_private_initialized_database(setup: Any, fault: s
         with pytest.raises(BackendError), service.idle_executor():
             pass
         assert not Path(f"{config.db_path}.watch.lock").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra", ["nested", "duplicate_pid", "duplicate_exit", "bad_pid", "bad_exit"]
+)
+async def test_native_outer_fields_are_unambiguous(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, extra: str
+) -> None:
+    module, config, home = setup
+    calls, _ = native(monkeypatch, "running")
+    original = legacy._run_launchctl
+    additions = {
+        "nested": "resource coalition = {\nstate = active\npid = 456\nprogram = /nested\n}\n",
+        "duplicate_pid": "pid = 456\n",
+        "duplicate_exit": "last exit code = 0\nlast exit code = 1\n",
+        "bad_pid": "pid = garbage\n",
+        "bad_exit": "last exit code = garbage\n",
+    }
+
+    def run(args: list[str], *, timeout: float) -> subprocess.CompletedProcess[bytes]:
+        result = original(args, timeout=timeout)
+        result.stdout = b"gui/501/test = {\n" + result.stdout + additions[extra].encode() + b"}\n"
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", run)
+    with module.managed_service(home=home, config=config, deadline=time.monotonic() + 1) as service:
+        artifacts(home, config)
+        fd = os.open(f"{config.db_path}.watch.lock", os.O_CREAT | os.O_RDWR, 0o600)
+        os.write(fd, b"123\n")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            if extra == "nested":
+                assert (await service.ensure_running())["process"]["pid"] == 123
+            else:
+                with pytest.raises(BackendError):
+                    await service.ensure_running()
+            assert all(call[0] == "print" for call in calls)
+        finally:
+            os.close(fd)

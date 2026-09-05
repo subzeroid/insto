@@ -191,3 +191,116 @@ def comparison(old: SavedSnapshot, new: SavedSnapshot, check: Check) -> dict[str
     check()
     return {"kind": "comparison", "older": old.meta.dto(), "newer": new.meta.dto(),
             "changes": changes, "unknown_fields": unknown}
+
+
+def scan_sql(
+    ceiling: int, frontier: tuple[int, int] | None, target_pk: str | None, limit: int,
+) -> tuple[str, tuple[Any, ...]]:
+    """Key-only keyset scan: ordered (id, captured_at) pairs, never JSON payloads.
+
+    A global scan still sorts through a temporary B-tree, but it now holds two
+    integers per row instead of the projected record (review gate G4). The row-value
+    comparison lets idx_snapshots_target_ts bound the range for target scans and
+    same-PK predecessors instead of walking every newer entry.
+    """
+    predicates = ["snapshots.id <= ?"]
+    arguments: list[Any] = [ceiling]
+    if target_pk is not None:
+        predicates.append("snapshots.target_pk = ?")
+        arguments.append(target_pk)
+    if frontier is not None:
+        predicates.append("(snapshots.captured_at, snapshots.id) < (?, ?)")
+        arguments.extend(frontier)
+    sql = (
+        "SELECT snapshots.id, snapshots.captured_at FROM snapshots WHERE "
+        + " AND ".join(predicates)
+        + " ORDER BY snapshots.captured_at DESC, snapshots.id DESC LIMIT ?"
+    )
+    arguments.append(limit)
+    return sql, tuple(arguments)
+
+
+def batch_sql(count: int) -> str:
+    """Projection for one key batch by primary key; callers restore key order."""
+    return "SELECT " + PROJECTION + " FROM snapshots WHERE id IN (" + ",".join("?" * count) + ")"
+
+
+class Reader:
+    def __init__(self, connection: sqlite3.Connection, check: Check) -> None:
+        self.connection = connection
+        self.check = check
+
+    def ceiling(self) -> int:
+        self.check()
+        cursor = self.connection.execute("SELECT MAX(id) FROM snapshots")
+        try:
+            value = cursor.fetchone()[0]
+        finally:
+            cursor.close()
+        self.check()
+        if value is None:
+            return 0
+        if type(value) is not int or not 1 <= value <= MAX_ID:
+            raise HistoryReadError()
+        return value
+
+    def selected(self, identifier: int) -> sqlite3.Row | None:
+        self.check()
+        cursor = self.connection.execute(
+            "SELECT " + PROJECTION + " FROM snapshots WHERE id=?", (identifier,),
+        )
+        try:
+            row: sqlite3.Row | None = cursor.fetchone()
+        finally:
+            cursor.close()
+        self.check()
+        return row
+
+    def rows(
+        self, ceiling: int, frontier: tuple[int, int] | None,
+        target_pk: str | None, limit: int,
+    ) -> Generator[sqlite3.Row, None, None]:
+        self.check()
+        sql, arguments = scan_sql(ceiling, frontier, target_pk, limit)
+        keys = self.connection.execute(sql, arguments)
+        remaining = limit
+        try:
+            while remaining:
+                self.check()
+                batch = keys.fetchmany(min(16, remaining))
+                self.check()
+                if not batch:
+                    return
+                remaining -= len(batch)
+                yield from self._projected([int(key[0]) for key in batch])
+        finally:
+            keys.close()
+
+    def _projected(self, identifiers: list[int]) -> Generator[sqlite3.Row, None, None]:
+        cursor = self.connection.execute(batch_sql(len(identifiers)), identifiers)
+        try:
+            found = {row["snapshot_id"]: row for row in cursor.fetchall()}
+        finally:
+            cursor.close()
+        self.check()
+        for identifier in identifiers:
+            row = found.get(identifier)
+            if row is None:
+                # Keys and payloads come from one read transaction, so a missing
+                # payload means the id column itself is unreadable, not a delete.
+                raise HistoryReadError()
+            self.check()
+            yield row
+
+    def predecessor(self, current: Metadata, ceiling: int) -> sqlite3.Row | None:
+        self.check()
+        sql, arguments = scan_sql(ceiling, current.key, current.target_pk, 1)
+        cursor = self.connection.execute(sql, arguments)
+        try:
+            key = cursor.fetchone()
+        finally:
+            cursor.close()
+        self.check()
+        if key is None:
+            return None
+        return self.selected(int(key[0]))

@@ -47,20 +47,51 @@ async def run(home: Path) -> None:
     evidence = {}
     with managed_service(home=home, config=config, deadline=time.monotonic() + 90) as lease:
         original_process = lease._process
+        original_native = lease._native
 
-        def observe_process(output: bytes):
-            fields, _ = _outer_fields(output)
-            record = {key: fields.get(key) for key in ("state", "pid", "last exit code")}
+        def record_event(record):
             descriptor = os.open(
                 home / "desktop-native-states.jsonl",
                 os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
                 0o600,
             )
             with os.fdopen(descriptor, "w") as stream:
-                stream.write(json.dumps(record) + "\n")
+                stream.write(json.dumps({"time": time.time(), **record}) + "\n")
+
+        def observe_process(output: bytes):
+            fields, _ = _outer_fields(output)
+            record_event({key: fields.get(key) for key in ("state", "pid", "last exit code")})
             return original_process(output)
 
+        async def observe_native(arguments, **kwargs):
+            if arguments[0] == "print":
+                return await original_native(arguments, **kwargs)
+            started = time.monotonic()
+            try:
+                result = await original_native(arguments, **kwargs)
+            except BaseException as error:
+                record_event(
+                    {
+                        "command": arguments[0],
+                        "elapsed": time.monotonic() - started,
+                        "outcome": "timeout"
+                        if isinstance(error.__cause__, subprocess.TimeoutExpired)
+                        else "error",
+                    }
+                )
+                raise
+            record_event(
+                {
+                    "command": arguments[0],
+                    "elapsed": time.monotonic() - started,
+                    "outcome": "completed",
+                    "returncode": result.returncode,
+                }
+            )
+            return result
+
         lease._process = observe_process
+        lease._native = observe_native
         first = await lease.ensure_running()
         evidence["started"] = first
         second = await lease.ensure_running()

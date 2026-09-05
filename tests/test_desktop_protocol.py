@@ -157,6 +157,10 @@ async def test_hello() -> None:
                 "watches.pause",
                 "watches.resume",
                 "watches.remove",
+                "snapshots.targets",
+                "snapshots.list",
+                "snapshots.compare",
+                "changes.list",
             ],
         },
     }

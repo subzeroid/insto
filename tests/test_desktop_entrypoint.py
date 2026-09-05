@@ -25,6 +25,10 @@ EXACT_CAPABILITIES = [
     "watches.pause",
     "watches.resume",
     "watches.remove",
+    "snapshots.targets",
+    "snapshots.list",
+    "snapshots.compare",
+    "changes.list",
 ]
 
 

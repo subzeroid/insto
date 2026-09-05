@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import time
@@ -35,10 +36,30 @@ def _wait_for(check: Callable[[], bool], seconds: float = 30) -> None:
     assert check(), "timed out waiting for isolated LaunchAgent transition"
 
 
+def _python_flags() -> list[str]:
+    return ["-I", *(["-B"] if os.environ.get("INSTO_TEST_NO_BYTECODE") == "1" else [])]
+
+
+def _create_test_home(tmp_path: Path) -> Path:
+    requested = os.environ.get("INSTO_TEST_HOME")
+    parent = tmp_path if requested is None else tmp_path.parent
+    info = parent.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError("native test home parent must be a private owned directory")
+    home = parent.resolve() / "service home"
+    if requested is not None and (not Path(requested).is_absolute() or Path(requested) != home):
+        raise ValueError("native test home must be the exact new child of basetemp")
+    # mkdir without exist_ok rejects existing data and symlink leaves. A
+    # supervisor can predict this path before pytest starts any LaunchAgent.
+    home.mkdir(mode=0o700)
+    return home
+
+
 def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
     python = os.environ.get("INSTO_TEST_PYTHON")
     if not python:
         pytest.skip("set INSTO_TEST_PYTHON to a wheel-installed interpreter")
+    python_flags = _python_flags()
     domain = f"gui/{os.getuid()}"
     probe = subprocess.run(
         ["/bin/launchctl", "print", domain],
@@ -48,8 +69,7 @@ def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
     )
     if probe.returncode:
         pytest.skip("macOS GUI launchd domain is unavailable")
-    home = (tmp_path / "service home").resolve()
-    home.mkdir(mode=0o700)
+    home = _create_test_home(tmp_path)
     db = home / "store.db"
     config = home / "config.toml"
     config.write_text('backend = "fake"\n', encoding="utf-8")
@@ -74,7 +94,7 @@ def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
 
     def cli(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            [python, "-I", "-m", "insto", *args],
+            [python, *python_flags, "-m", "insto", *args],
             cwd=tmp_path,
             env=env,
             capture_output=True,
@@ -86,7 +106,7 @@ def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
         return result
 
     origin = subprocess.run(
-        [python, "-I", "-c", "import insto; print(insto.__file__)"],
+        [python, *python_flags, "-c", "import insto; print(insto.__file__)"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
@@ -120,7 +140,9 @@ def test_installed_launchagent_lifecycle(tmp_path: Path) -> None:
             check=True,
             timeout=5,
         ).stdout
-        expected_suffix = f" -I -m insto.service.watch_service_runner {manifest}"
+        expected_suffix = (
+            f" {' '.join(python_flags)} -m insto.service.watch_service_runner {manifest}"
+        )
         assert command.rstrip().endswith(expected_suffix), "refusing to signal unrelated process"
         return pid
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Protocol
+from typing import Any, Protocol, TypeVar
 
 from insto._redact import register_secret
 from insto.desktop.errors import DesktopError
@@ -12,6 +12,8 @@ from insto.exceptions import AuthInvalid, QuotaExhausted, RateLimited, Transient
 from insto.models import Quota
 
 VALIDATION_SECONDS = 30.0
+_PENDING_WORKERS: set[asyncio.Task[Any]] = set()
+_T = TypeVar("_T")
 
 
 class AccessBackend(Protocol):
@@ -58,30 +60,44 @@ def make_backend(token: str) -> AccessBackend:
     return HikerBackend(client=DesktopClient())
 
 
-async def _close(backend: AccessBackend, deadline: float) -> None:
-    worker = asyncio.create_task(backend.aclose())
+async def _await_worker(
+    worker: asyncio.Task[_T], deadline: float, *, cancel_on_interrupt: bool = False
+) -> _T:
     cancellation: asyncio.CancelledError | None = None
     while not worker.done():
-        try:
-            async with asyncio.timeout_at(deadline):
-                await asyncio.shield(worker)
-        except asyncio.CancelledError as exc:
-            cancellation = exc
-        except TimeoutError:
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            # Cancellation cleanup cannot extend credential validation. Retain
+            # the cancelled worker until it finishes and consume its exception;
+            # the one-shot process owner's deadline is the final hard bound if
+            # a third-party close ignores cancellation. No config is committed.
+            _PENDING_WORKERS.add(worker)
+
+            def finished(task: asyncio.Task[_T]) -> None:
+                _PENDING_WORKERS.discard(task)
+                with contextlib.suppress(BaseException):
+                    task.result()
+
+            worker.add_done_callback(finished)
             worker.cancel()
-            while not worker.done():
-                try:
-                    await asyncio.shield(worker)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
-            with contextlib.suppress(BaseException):
-                worker.result()
-            raise DesktopError("operation_timeout") from None
-    worker.result()
+            if cancellation is not None:
+                raise cancellation
+            raise DesktopError("operation_timeout")
+        try:
+            await asyncio.wait({worker}, timeout=remaining)
+        except asyncio.CancelledError as exc:
+            if cancellation is None and cancel_on_interrupt:
+                worker.cancel()
+            cancellation = exc
     if cancellation is not None:
+        with contextlib.suppress(BaseException):
+            worker.result()
         raise cancellation
+    return worker.result()
+
+
+async def _close(backend: AccessBackend, deadline: float) -> None:
+    await _await_worker(asyncio.create_task(backend.aclose()), deadline)
 
 
 async def validate_candidate(token: str) -> int:
@@ -95,12 +111,15 @@ async def validate_candidate(token: str) -> int:
     try:
         # Reserve a small part of the same budget for closing the HTTP client.
         request_deadline = deadline - min(2.0, VALIDATION_SECONDS / 2)
-        async with asyncio.timeout_at(request_deadline):
-            backend = make_backend(token)
-            quota = await backend.validate_access()
-            remaining = quota.remaining
-            if type(remaining) is not int or remaining < 0:
-                raise DesktopError("access_unconfirmed")
+        backend = make_backend(token)
+        quota = await _await_worker(
+            asyncio.create_task(backend.validate_access()),
+            request_deadline,
+            cancel_on_interrupt=True,
+        )
+        remaining = quota.remaining
+        if type(remaining) is not int or remaining < 0:
+            raise DesktopError("access_unconfirmed")
     except BaseException as exc:
         failure = exc
     finally:

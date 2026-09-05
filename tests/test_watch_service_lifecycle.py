@@ -17,6 +17,165 @@ from insto.exceptions import BackendError
 from insto.service import watch_service as legacy
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        "immediate",
+        "delayed",
+        "stopped",
+        "no_executor",
+        "foreign_pid",
+        "foreign_program",
+        "expired",
+        "oserror",
+        "nonzero",
+    ],
+)
+async def test_kickstart_timeout_observes_without_retry(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, outcome: str
+) -> None:
+    module, config, home = setup
+    calls, job = native(monkeypatch, "exited")
+    original = legacy._run_launchctl
+    monkeypatch.setattr(module, "_READINESS_SECONDS", 0.08)
+    after_kickstart = False
+    observations = 0
+    lease: Any = None
+
+    def run(args: list[str], *, timeout: float) -> subprocess.CompletedProcess[bytes]:
+        nonlocal after_kickstart, observations
+        if args[0] == "kickstart":
+            after_kickstart = True
+            result = original(args, timeout=timeout)
+            if outcome == "nonzero":
+                result.returncode = 1
+                return result
+            if outcome == "oserror":
+                raise BackendError("native failed") from OSError("test")
+            if outcome == "stopped":
+                job["state"] = "exited"
+            if outcome == "expired":
+                lease.deadline = time.monotonic() - 1
+            raise BackendError("native timed out") from subprocess.TimeoutExpired(args, timeout)
+        if args[0] == "print" and after_kickstart:
+            observations += 1
+            if (
+                outcome in {"immediate", "delayed", "foreign_pid", "foreign_program"}
+                and job["fd"] is None
+                and (outcome != "delayed" or observations >= 2)
+            ):
+                fd = os.open(f"{config.db_path}.watch.lock", os.O_RDWR)
+                os.write(fd, b"456\n" if outcome == "foreign_pid" else b"123\n")
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                job["fd"] = fd
+        result = original(args, timeout=timeout)
+        if outcome == "foreign_program" and after_kickstart:
+            result.stdout = result.stdout.replace(b"program = ", b"program = /foreign")
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", run)
+    try:
+        with module.managed_service(
+            home=home, config=config, deadline=time.monotonic() + 2
+        ) as lease:
+            artifacts(home, config)
+            if outcome in {"immediate", "delayed"}:
+                assert (await lease.ensure_running())["executor"]["pid"] == 123
+            else:
+                with pytest.raises(BackendError):
+                    await lease.ensure_running()
+        assert [call[0] for call in calls if call[0] != "print"] == ["enable", "kickstart"]
+        if outcome in {"nonzero", "oserror", "expired"}:
+            assert observations == 0
+        if outcome == "delayed":
+            assert observations >= 2
+    finally:
+        if job["fd"] is not None:
+            os.close(job["fd"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["kickstart", "observation"])
+async def test_kickstart_timeout_cancellation_drains_under_lease(
+    setup: Any, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    module, config, home = setup
+    calls, _ = native(monkeypatch, "exited")
+    original = legacy._run_launchctl
+    entered, release = threading.Event(), threading.Event()
+    after_kickstart = False
+
+    def run(args: list[str], *, timeout: float) -> subprocess.CompletedProcess[bytes]:
+        nonlocal after_kickstart
+        if args[0] == "kickstart":
+            after_kickstart = True
+            original(args, timeout=timeout)
+            if stage == "kickstart":
+                entered.set()
+                release.wait(3)
+            raise BackendError("native timed out") from subprocess.TimeoutExpired(args, timeout)
+        if args[0] == "print" and after_kickstart and stage == "observation":
+            entered.set()
+            release.wait(3)
+        return original(args, timeout=timeout)
+
+    monkeypatch.setattr(legacy, "_run_launchctl", run)
+
+    async def operation() -> None:
+        with module.managed_service(
+            home=home, config=config, deadline=time.monotonic() + 3
+        ) as lease:
+            artifacts(home, config)
+            await lease.ensure_running()
+
+    task = asyncio.create_task(operation())
+    try:
+        for _ in range(1000):
+            if entered.is_set() or task.done():
+                break
+            await asyncio.sleep(0.001)
+        assert entered.is_set()
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not task.done()
+        with pytest.raises(BackendError, match="already in progress"):
+            await legacy.install_service(home=home)
+        with pytest.raises(BackendError, match="already in progress"):
+            await legacy.uninstall_service(home=home)
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    with legacy._management_lock(legacy.service_paths(home)):
+        pass
+    assert [call[0] for call in calls if call[0] != "print"] == ["enable", "kickstart"]
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_timeout_still_propagates(
+    setup: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module, config, home = setup
+    calls, _ = native(monkeypatch)
+    original = legacy._run_launchctl
+
+    def run(args: list[str], *, timeout: float) -> subprocess.CompletedProcess[bytes]:
+        result = original(args, timeout=timeout)
+        if args[0] == "bootstrap":
+            raise BackendError("native timed out") from subprocess.TimeoutExpired(args, timeout)
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", run)
+    with module.managed_service(home=home, config=config, deadline=time.monotonic() + 1) as lease:
+        with pytest.raises(BackendError) as error:
+            await lease.ensure_running()
+        assert isinstance(error.value.__cause__, subprocess.TimeoutExpired)
+    assert calls[-1][0] == "bootstrap"
+
+
 @pytest.fixture
 def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Config, Path]:
     monkeypatch.setattr(legacy.sys, "platform", "darwin")

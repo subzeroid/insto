@@ -998,6 +998,31 @@ class HikerBackend(OSINTBackend):
     def get_quota(self) -> Quota:
         return self._quota
 
+    async def validate_access(self) -> Quota:
+        """Confirm access using a strictly validated `/sys/balance` response."""
+
+        async def request_balance() -> httpx.Response:
+            try:
+                response = cast(httpx.Response, await self._client._client.get("/sys/balance"))
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code in (403, 404):
+                    # Balance failures are not Instagram profile lookup errors.
+                    raise BackendError("HikerAPI access check could not confirm access") from None
+                raise
+
+        response = await self._call(request_balance)
+        try:
+            data = response.json()
+        except ValueError:
+            raise self._record_drift(SchemaDrift("/sys/balance", "valid JSON object")) from None
+        remaining = data.get("requests") if isinstance(data, dict) else None
+        if type(remaining) is not int or remaining < 0:
+            raise self._record_drift(SchemaDrift("/sys/balance", "nonnegative integer requests"))
+        self._quota = Quota.with_remaining(remaining)
+        return self._quota
+
     async def refresh_quota(self) -> Quota:
         """Pull the current balance from `/sys/balance` and update `_quota`.
 

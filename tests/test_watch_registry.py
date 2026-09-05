@@ -5,8 +5,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from insto.desktop.database import read_database, write_database
 
+from insto.desktop.database import read_database, write_database
 from insto.service.history import HistoryStore
 
 
@@ -110,5 +110,37 @@ def test_existing_cli_semantics_preserved(monitoring_profile):
         assert resumed.kind == "reactivated"
         assert resumed.spec.last_ok == 123
         assert resumed.spec.registration_id != created.spec.registration_id
+    finally:
+        store.close()
+
+
+def test_readd_does_not_accept_old_revision(monitoring_profile):
+    from insto.service.watch_registry import RegistryError, mutate
+
+    before = create(monitoring_profile)
+    with write_database(monitoring_profile, deadline=time.monotonic() + 10) as connection:
+        mutate(connection, "remove", "alice", before["revision"])
+    after = create(monitoring_profile)
+    assert before["revision"] != after["revision"]
+    with (
+        pytest.raises(RegistryError, match="conflict"),
+        write_database(monitoring_profile, deadline=time.monotonic() + 10) as connection,
+    ):
+        mutate(connection, "pause", "alice", before["revision"])
+
+
+def test_interval_noop_preserves_generation_and_tick_eligibility(monitoring_profile):
+    from insto.service.watch_registry import mutate, public_row
+
+    before = create(monitoring_profile)
+    store = HistoryStore(monitoring_profile.home / "store.db")
+    try:
+        spec = store.get_watch("alice")
+        with write_database(monitoring_profile, deadline=time.monotonic() + 10) as connection:
+            after = public_row(
+                mutate(connection, "update", "alice", before["revision"], interval=300)
+            )
+        assert after["revision"] == before["revision"]
+        assert store.update_watch_state(spec, last_ok=123)
     finally:
         store.close()

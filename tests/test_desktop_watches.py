@@ -355,9 +355,9 @@ async def test_dispatch_real_resume_clears_errors_and_fences_old_generation(
         assert response["request_id"] == "resume-contract"
         return response
 
-    added = (
-        await send("watches.add", {"user": "alice", "interval_seconds": 600})
-    )["result"]["watch"]
+    added = (await send("watches.add", {"user": "alice", "interval_seconds": 600}))["result"][
+        "watch"
+    ]
     store = HistoryStore(monitoring_profile.home / "store.db")
     try:
         original_spec = store.get_watch("alice")
@@ -365,18 +365,18 @@ async def test_dispatch_real_resume_clears_errors_and_fences_old_generation(
         assert store.update_watch_state(
             original_spec, last_ok=123, last_error="stored-resume-secret", consecutive_errors=2
         )
-        paused = (
-            await send("watches.pause", {"user": "alice", "revision": added["revision"]})
-        )["result"]["watch"]
+        paused = (await send("watches.pause", {"user": "alice", "revision": added["revision"]}))[
+            "result"
+        ]["watch"]
         assert paused["status"] == "paused"
         assert paused["last_ok"] == 123
         assert paused["has_error"] is True and paused["consecutive_errors"] == 2
         paused_spec = store.get_watch("alice")
         assert paused_spec is not None
 
-        resumed = (
-            await send("watches.resume", {"user": "alice", "revision": paused["revision"]})
-        )["result"]["watch"]
+        resumed = (await send("watches.resume", {"user": "alice", "revision": paused["revision"]}))[
+            "result"
+        ]["watch"]
         assert resumed == {
             **paused,
             "status": "active",
@@ -392,9 +392,7 @@ async def test_dispatch_real_resume_clears_errors_and_fences_old_generation(
         assert resumed_spec.status == "active" and resumed_spec.last_ok == 123
         assert resumed_spec.interval_seconds == 600
         assert resumed_spec.last_error is None and resumed_spec.consecutive_errors == 0
-        assert len(
-            {s.registration_id for s in (original_spec, paused_spec, resumed_spec)}
-        ) == 3
+        assert len({s.registration_id for s in (original_spec, paused_spec, resumed_spec)}) == 3
 
         repeated = (
             await send("watches.resume", {"user": "alice", "revision": resumed["revision"]})
@@ -419,8 +417,255 @@ async def test_dispatch_real_resume_clears_errors_and_fences_old_generation(
         with contextlib.closing(
             sqlite3.connect(monitoring_profile.home / "store.db")
         ) as connection:
-            assert connection.execute(
-                "SELECT COUNT(*) FROM watches WHERE status='active'"
-            ).fetchone()[0] == 1
+            assert (
+                connection.execute("SELECT COUNT(*) FROM watches WHERE status='active'").fetchone()[
+                    0
+                ]
+                == 1
+            )
     finally:
         store.close()
+
+
+def test_huge_stored_error_is_not_loaded_into_dto(monitoring_profile):
+    import tracemalloc
+
+    from insto.desktop.protocol import encode
+
+    command(monitoring_profile, "watches.add", {"user": "alice"})
+    with store(monitoring_profile) as connection, connection:
+        connection.execute("UPDATE watches SET last_error=CAST(zeroblob(10485760) AS TEXT)")
+    tracemalloc.start()
+    try:
+        result = command(monitoring_profile, "watches.list", {})
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    raw = encode({"protocol_version": 1, "request_id": "x" * 64, "result": result})
+    assert result["items"][0]["has_error"] is True
+    assert len(raw) < 65536 and peak < 2 * 1024 * 1024
+
+
+@pytest.mark.parametrize("column", ["interval_seconds", "last_ok", "consecutive_errors", "status"])
+def test_huge_numeric_or_status_cell_is_rejected_before_materialization(monitoring_profile, column):
+    # Review gate G3: SQLite stores TEXT in INTEGER columns and the CHECK constraints
+    # do not stop it. Three 10 MiB cells must be rejected in SQL, never fetched.
+    import tracemalloc
+
+    for user in ("alice", "bob", "carol"):
+        command(monitoring_profile, "watches.add", {"user": user})
+    with store(monitoring_profile) as connection, connection:
+        connection.execute("PRAGMA ignore_check_constraints=ON")
+        connection.execute(f"UPDATE watches SET {column}=CAST(zeroblob(10485760) AS TEXT)")
+    tracemalloc.start()
+    try:
+        with pytest.raises(DesktopError, match="storage_error"):
+            command(monitoring_profile, "watches.list", {})
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 2 * 1024 * 1024
+
+
+def test_watch_pagination_walks_the_primary_key_index_without_a_temp_sort(monitoring_profile):
+    # Review gate G3: `ORDER BY user` would resolve to the CASE alias and sort a
+    # temporary B-tree; the qualified column must use sqlite_autoindex_watches_1.
+    from insto.service.watch_registry import _LIST_SQL
+
+    with store(monitoring_profile) as connection, connection:
+        connection.executemany(
+            "INSERT INTO watches VALUES (?,?,300,NULL,NULL,0,'paused')",
+            [(f"user{i:04}", f"generation{i}") for i in range(500)],
+        )
+        plan = [row[3] for row in connection.execute("EXPLAIN QUERY PLAN " + _LIST_SQL, ("", 51))]
+    assert not any("TEMP B-TREE" in step for step in plan), plan
+    assert any("sqlite_autoindex_watches_1" in step for step in plan), plan
+    seen = []
+    cursor = None
+    while True:
+        page = command(monitoring_profile, "watches.list", {"cursor": cursor} if cursor else {})
+        seen.extend(item["user"] for item in page["items"])
+        cursor = page["next_cursor"]
+        if cursor is None:
+            break
+    assert len(seen) == 500 and seen == sorted(seen) and len(set(seen)) == 500
+
+
+def test_malformed_watch_is_explicit_not_coerced_active(monitoring_profile):
+    with store(monitoring_profile) as connection, connection:
+        connection.execute("PRAGMA ignore_check_constraints=ON")
+        connection.execute(
+            "INSERT INTO watches VALUES ('alice','generation',300,NULL,NULL,0,'broken')"
+        )
+    with pytest.raises(DesktopError, match="storage_error"):
+        command(monitoring_profile, "watches.list", {})
+
+
+async def test_overview_queries_no_snapshot_content(monitoring_profile, monkeypatch):
+    from insto.desktop import database, operations, watches
+
+    statements = []
+    original = sqlite3.connect
+
+    def observed(*args, **kwargs):
+        connection = original(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(database.sqlite3, "connect", observed)
+    service = type("Service", (), {})()
+    service.inspect_owned = AsyncMock(
+        return_value={
+            "registration": "unloaded",
+            "process": {"state": None, "pid": None},
+            "executor": {"state": "idle", "pid": None},
+        }
+    )
+    monkeypatch.setattr(operations, "read_service", lambda *a: service)
+    await watches.overview(monitoring_profile, deadline=time.monotonic() + 10)
+    snapshot_sql = [s for s in statements if "snapshots" in s.lower()]
+    assert snapshot_sql
+    assert all(s.rstrip().endswith("LIMIT 0") for s in snapshot_sql)
+
+
+@pytest.mark.parametrize(
+    "report,expected",
+    [
+        (
+            {
+                "registration": "loaded",
+                "process": {"state": "running", "pid": 42},
+                "executor": {"state": "busy", "pid": 42},
+            },
+            "running",
+        ),
+        (
+            {
+                "registration": "loaded",
+                "process": {"state": "running", "pid": 42},
+                "executor": {"state": "idle", "pid": None},
+            },
+            "unknown",
+        ),
+        (BackendError("executor ownership is not confirmed"), "unknown"),
+        ({"registration": "unloaded"}, "unknown"),
+    ],
+    ids=["running", "process-without-busy-executor", "backend-error", "incomplete-report"],
+)
+async def test_overview_service_states_are_explicit(
+    monitoring_profile, monkeypatch, report, expected
+):
+    # Review gate G11: the only green state and every inspection failure resolve
+    # explicitly, and the service handle is always released.
+    from insto.desktop import operations, watches
+
+    service = type("Service", (), {})()
+    if isinstance(report, Exception):
+        service.inspect_owned = AsyncMock(side_effect=report)
+    else:
+        service.inspect_owned = AsyncMock(return_value=report)
+    monkeypatch.setattr(operations, "read_service", lambda *a: service)
+    result = await watches.overview(monitoring_profile, deadline=time.monotonic() + 10)
+    assert result["service_state"] == expected
+    assert service._active is False
+
+
+async def test_overview_deadline_after_watch_page_skips_service_inspection(
+    monitoring_profile, monkeypatch
+):
+    from insto.desktop import operations, watches
+
+    monkeypatch.setattr(operations, "read_service", lambda *a: pytest.fail("service inspected"))
+    real_run = watches.run
+    finished = []
+
+    def run_then_arm(*args, **kwargs):
+        page = real_run(*args, **kwargs)
+        finished.append(page)
+        return page
+
+    def expiring(deadline):
+        if finished:
+            raise DesktopError("operation_timeout")
+
+    monkeypatch.setattr(watches, "run", run_then_arm)
+    monkeypatch.setattr(watches, "check_deadline", expiring)
+    with pytest.raises(DesktopError, match="operation_timeout"):
+        await watches.overview(monitoring_profile, deadline=time.monotonic() + 10)
+    assert finished and finished[0]["items"] == []
+
+
+async def test_overview_through_real_handle(monitoring_profile, monkeypatch):
+    from insto.desktop import operations
+    from insto.desktop.dispatch import handle
+
+    command(monitoring_profile, "watches.add", {"user": "alice"})
+    service = type("Service", (), {})()
+    service.inspect_owned = AsyncMock(
+        return_value={
+            "registration": "unloaded",
+            "process": {"state": None, "pid": None},
+            "executor": {"state": "idle", "pid": None},
+        }
+    )
+    monkeypatch.setattr(operations, "read_service", lambda *a: service)
+    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(monitoring_profile.root))
+    request = json.dumps(
+        {"protocol_version": 1, "request_id": "overview-1", "operation": "overview", "params": {}}
+    )
+    raw = await handle((request + "\n").encode())
+    assert raw.count(b"\n") == 1 and b"offline-desktop-token" not in raw
+    response = json.loads(raw)
+    assert response["request_id"] == "overview-1"
+    assert response["result"]["configured"] is True
+    assert response["result"]["service_state"] == "stopped"
+    assert [item["user"] for item in response["result"]["watches"]] == ["alice"]
+
+
+def test_mutating_a_missing_watch_is_not_found(monitoring_profile):
+    revision = "f" * 64
+    for action in ("pause", "resume", "remove"):
+        with pytest.raises(DesktopError, match="watch_not_found"):
+            command(
+                monitoring_profile, f"watches.{action}", {"user": "ghost", "revision": revision}
+            )
+    with pytest.raises(DesktopError, match="watch_not_found"):
+        command(
+            monitoring_profile,
+            "watches.update",
+            {"user": "ghost", "revision": revision, "interval_seconds": 600},
+        )
+
+
+def test_real_bridge_watch_list_offline(monitoring_profile):
+    import os
+    import subprocess
+    import sys
+
+    command(monitoring_profile, "watches.add", {"user": "alice"})
+    request = (
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "request_id": "subprocess-c2",
+                "operation": "watches.list",
+                "params": {},
+            }
+        )
+        + "\n"
+    ).encode()
+    result = subprocess.run(
+        [sys.executable, "-B", "-m", "insto.desktop"],
+        input=request,
+        capture_output=True,
+        timeout=15,
+        env={
+            "PATH": os.defpath,
+            "INSTO_DESKTOP_ROOT": str(monitoring_profile.root),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
+    )
+    assert result.returncode == 0 and result.stderr == b""
+    assert result.stdout.count(b"\n") == 1
+    assert json.loads(result.stdout)["result"]["items"][0]["user"] == "alice"
+    assert b"offline-desktop-token" not in result.stdout

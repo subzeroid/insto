@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 HELLO = b'{"protocol_version":1,"request_id":"child","operation":"hello","params":{}}\n'
-C1_CAPABILITIES = [
+EXACT_CAPABILITIES = [
     "hello",
     "setup.inspect",
     "setup.configure",
@@ -18,6 +18,13 @@ C1_CAPABILITIES = [
     "service.start",
     "service.stop",
     "service.repair",
+    "overview",
+    "watches.list",
+    "watches.add",
+    "watches.update",
+    "watches.pause",
+    "watches.resume",
+    "watches.remove",
 ]
 
 
@@ -44,7 +51,7 @@ def test_isolated_process(raw: bytes, code: str | None, tmp_path: Path) -> None:
         assert response["error"]["code"] == code
         assert response["request_id"] is None
     else:
-        assert response["result"]["capabilities"] == C1_CAPABILITIES
+        assert response["result"]["capabilities"] == EXACT_CAPABILITIES
     assert not state.exists()
 
 
@@ -62,7 +69,7 @@ def test_hello_never_imports_sdks(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == b""
-    assert json.loads(result.stdout)["result"]["capabilities"] == C1_CAPABILITIES
+    assert json.loads(result.stdout)["result"]["capabilities"] == EXACT_CAPABILITIES
 
 
 def test_hello_never_opens_config_runtime_or_database(tmp_path: Path) -> None:
@@ -104,7 +111,7 @@ assert not calls, "a forbidden call was attempted, even if its exception was cau
     )
     assert result.returncode == 0, result.stderr
     assert result.stderr == b""
-    assert json.loads(result.stdout)["result"]["capabilities"] == C1_CAPABILITIES
+    assert json.loads(result.stdout)["result"]["capabilities"] == EXACT_CAPABILITIES
     assert not state.exists()
 
 
@@ -203,3 +210,18 @@ assert not any(name.split('.')[0] in {'hikerapi', 'aiograpi'} for name in sys.mo
     assert not (tmp_path / "foreign").exists()
     if not pending:
         assert not profile.root.exists()
+
+
+def test_isolated_child_imports_this_checkout(tmp_path: Path) -> None:
+    # Isolated children (-I) ignore the working directory; they must still resolve
+    # `insto` to this checkout, not to another worktree's editable install.
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", "import insto; print(insto.__file__)"],
+        capture_output=True,
+        cwd=tmp_path,
+        timeout=10,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout.strip()).resolve() == root / "insto" / "__init__.py"

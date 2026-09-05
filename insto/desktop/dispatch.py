@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from insto import __version__
 from insto.desktop.errors import MESSAGES as DOMAIN_MESSAGES
 from insto.desktop.errors import DesktopError
 from insto.desktop.protocol import PROTOCOL_VERSION, ProtocolError, Request, decode, encode
+from insto.desktop.watch_params import CAPABILITIES as WATCH_CAPABILITIES
+from insto.desktop.watch_params import validate_params as validate_watch_params
 from insto.service.history import _SCHEMA_VERSION
 
 _MESSAGES = {
@@ -27,14 +30,25 @@ CAPABILITIES = (
     "service.start",
     "service.stop",
     "service.repair",
+    *WATCH_CAPABILITIES,
 )
 
 
 async def dispatch(request: Request) -> dict[str, Any]:
     """Validate the exact allowlist before lazily importing operation code."""
+    deadline = time.monotonic() + 10.0
     operation = request.operation
     if operation not in CAPABILITIES:
         raise ProtocolError("unsupported_operation", request.request_id)
+    if operation in WATCH_CAPABILITIES:
+        params = validate_watch_params(operation, request.params)
+        from insto.desktop import watches
+        from insto.desktop.profile import Profile
+
+        profile = Profile.from_environment()
+        if operation == "overview":
+            return await watches.overview(profile, deadline=deadline)
+        return watches.run(profile, operation, params, deadline=deadline)
     token_operation = operation in {"setup.configure", "credentials.replace"}
     if token_operation:
         if request.params.keys() != {"token"}:

@@ -33,8 +33,10 @@ def test_large_saved_history_is_streamed_and_measured(monitoring_profile):
             row[3] for row in db.execute("EXPLAIN QUERY PLAN " + target_sql, target_args)
         ]
         assert any("USE TEMP B-TREE FOR ORDER BY" in line for line in global_plan)
+        # Row-value range text differs by SQLite release ("captured_at<?" or
+        # "(captured_at,rowid)<(?,?)"); either form proves the index range.
         assert any(
-            "idx_snapshots_target_ts" in line and "captured_at<" in line for line in target_plan
+            "idx_snapshots_target_ts" in line and "captured_at" in line for line in target_plan
         )
         assert [row[1] for row in db.execute("PRAGMA index_list(snapshots)")] == [
             "idx_snapshots_target_ts"

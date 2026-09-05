@@ -46,8 +46,10 @@ def query_db():
         avatar_url_hash TEXT, banner_url_hash TEXT)""")
     db.execute("CREATE INDEX idx_snapshots_target_ts ON snapshots(target_pk,captured_at)")
     fields = json.dumps(dict.fromkeys(_PROFILE_TRACKED_FIELDS, None))
-    db.executemany("INSERT INTO snapshots VALUES (?, ?, ?, ?, '[]', NULL, NULL)",
-                   ((i, "7" if i % 2 else "8", i // 2, fields) for i in range(1, 301)))
+    db.executemany(
+        "INSERT INTO snapshots VALUES (?, ?, ?, ?, '[]', NULL, NULL)",
+        ((i, "7" if i % 2 else "8", i // 2, fields) for i in range(1, 301)),
+    )
     yield db
     db.close()
 
@@ -73,13 +75,19 @@ def test_key_scan_plans_use_index_ranges_and_never_sort_payloads(query_db):
     target_sql, target_args = scan_sql(300, (100, 199), "7", 200)
     for sql in (global_sql, target_sql):
         assert "profile_fields_json" not in sql and "last_post_pks_json" not in sql
-    global_plan = [row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + global_sql, global_args)]
-    target_plan = [row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + target_sql, target_args)]
+    global_plan = [
+        row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + global_sql, global_args)
+    ]
+    target_plan = [
+        row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + target_sql, target_args)
+    ]
     assert any("USE TEMP B-TREE FOR ORDER BY" in step for step in global_plan), global_plan
-    assert any("idx_snapshots_target_ts" in step and "captured_at<" in step for step in target_plan), (
-        target_plan
-    )
-    batch_plan = [row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + batch_sql(3), (1, 2, 3))]
+    assert any(
+        "idx_snapshots_target_ts" in step and "captured_at<" in step for step in target_plan
+    ), target_plan
+    batch_plan = [
+        row[3] for row in query_db.execute("EXPLAIN QUERY PLAN " + batch_sql(3), (1, 2, 3))
+    ]
     assert any("INTEGER PRIMARY KEY" in step for step in batch_plan), batch_plan
     reader = Reader(query_db, lambda: None)
     with closing(reader.rows(300, (100, 199), "7", 200)) as rows:

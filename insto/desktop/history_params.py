@@ -10,7 +10,10 @@ from typing import Any, NoReturn
 from insto.desktop.errors import DesktopError
 
 CAPABILITIES = (
-    "snapshots.targets", "snapshots.list", "snapshots.compare", "changes.list",
+    "snapshots.targets",
+    "snapshots.list",
+    "snapshots.compare",
+    "changes.list",
 )
 MAX_CURSOR = 1024
 MAX_ID = 9223372036854775807
@@ -48,11 +51,18 @@ def _constant(value: str) -> Any:
 
 
 def encode_cursor(
-    operation: str, filter_value: str | None, ceiling: int, frontier: tuple[int, int],
+    operation: str,
+    filter_value: str | None,
+    ceiling: int,
+    frontier: tuple[int, int],
 ) -> str:
     value = {
-        "v": 1, "o": operation, "f": filter_value, "c": str(ceiling),
-        "t": frontier[0], "i": str(frontier[1]),
+        "v": 1,
+        "o": operation,
+        "f": filter_value,
+        "c": str(ceiling),
+        "t": frontier[0],
+        "i": str(frontier[1]),
     }
     raw = json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
     token = base64.urlsafe_b64encode(raw.encode("ascii")).decode("ascii").rstrip("=")
@@ -62,7 +72,9 @@ def encode_cursor(
 
 
 def decode_cursor(
-    token: Any, operation: str, filter_value: str | None,
+    token: Any,
+    operation: str,
+    filter_value: str | None,
 ) -> tuple[int, tuple[int, int]]:
     if type(token) is not str or _CURSOR.fullmatch(token) is None:
         _invalid()
@@ -70,15 +82,20 @@ def decode_cursor(
         payload = base64.b64decode(token + "=" * (-len(token) % 4), altchars=b"-_", validate=True)
         if base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=") != token:
             _invalid()
-        value = json.loads(payload.decode("ascii"), object_pairs_hook=_unique,
-                           parse_constant=_constant)
+        value = json.loads(
+            payload.decode("ascii"), object_pairs_hook=_unique, parse_constant=_constant
+        )
     except (ValueError, UnicodeError, RecursionError):
         raise DesktopError("invalid_params") from None
     if (
-        type(value) is not dict or value.keys() != {"v", "o", "f", "c", "t", "i"}
-        or type(value["v"]) is not int or value["v"] != 1
-        or value["o"] != operation or value["f"] != filter_value
-        or type(value["t"]) is not int or not 0 <= value["t"] <= MAX_TIME
+        type(value) is not dict
+        or value.keys() != {"v", "o", "f", "c", "t", "i"}
+        or type(value["v"]) is not int
+        or value["v"] != 1
+        or value["o"] != operation
+        or value["f"] != filter_value
+        or type(value["t"]) is not int
+        or not 0 <= value["t"] <= MAX_TIME
     ):
         _invalid()
     ceiling = int(_decimal(value["c"], snapshot=True))
@@ -104,8 +121,10 @@ def validate_params(operation: str, params: dict[str, Any]) -> dict[str, Any]:
         if result["older_id"] == result["newer_id"]:
             _invalid()
         return result
-    required = {"username"} if operation == "snapshots.targets" else (
-        {"target_pk"} if operation == "snapshots.list" else set()
+    required = (
+        {"username"}
+        if operation == "snapshots.targets"
+        else ({"target_pk"} if operation == "snapshots.list" else set())
     )
     allowed = required | {"limit", "cursor"}
     if operation == "changes.list":
@@ -129,5 +148,7 @@ def validate_params(operation: str, params: dict[str, Any]) -> dict[str, Any]:
     else:
         filter_value = _decimal(params["target_pk"]) if "target_pk" in params else None
         result = {"target_pk": filter_value}
-    cursor = decode_cursor(params["cursor"], operation, filter_value) if "cursor" in params else None
+    cursor = (
+        decode_cursor(params["cursor"], operation, filter_value) if "cursor" in params else None
+    )
     return {**result, "limit": limit, "cursor": cursor}

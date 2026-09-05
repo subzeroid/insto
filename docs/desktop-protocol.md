@@ -220,3 +220,128 @@ source-file behavior. Busy/recovery/ownership/schema failures remain explicit.
 Local read and mutation budgets are10seconds, including validation, SQLite and DTO
 work. Busy waits are at most1second. Timeout or transport loss after a mutation
 requires reading current state; do not automatically retry a non-idempotent add.
+
+## C2b saved history operations
+
+The additional capabilities are `snapshots.targets`, `snapshots.list`,
+`snapshots.compare` and `changes.list`. They inspect saved SQLite snapshots only.
+They never construct a provider, call live `/diff` or command `/history`, start a
+scheduler, download historical media, change a watch, or prune the database.
+
+Exact parameters:
+
+| Operation | Required | Optional |
+| --- | --- | --- |
+| `snapshots.targets` | `username` | `limit`, `cursor` |
+| `snapshots.list` | `target_pk` | `limit`, `cursor` |
+| `snapshots.compare` | `target_pk`, `older_id`, `newer_id` | none |
+| `changes.list` | none | `target_pk`, `limit`, `cursor` |
+
+Username accepts one optional leading `@`, followed by 1–255 ASCII letters,
+digits, periods or underscores; `.` and `..` and whitespace are rejected.
+It is normalized to lowercase without `@`. This matches C2a's protocol storage
+bound and does not assert provider existence. G1 passes the canonical username
+returned by watch operations; history itself rejects raw whitespace. `target_pk` is a canonical positive
+decimal string of at most 64 digits. Snapshot IDs are canonical positive decimal
+strings through `9223372036854775807`; JSON numeric IDs and leading zeroes are
+rejected. `limit` is an actual integer from 1 through 50, default 50. Optional
+keys are omitted when unused, not null. Extra keys and invalid cursor bindings
+return `invalid_params` before profile or history loading.
+
+Pages contain `items`, `next_cursor`, `scan_complete`, and `scanned`. Cursors are
+opaque, canonical, unpadded base64url strings of at most 1,024 characters. They
+bind protocol-internal cursor version, operation, normalized filter, initial
+maximum snapshot ID, and descending `(captured_at,id)` frontier. A caller may
+change the page limit while following a cursor, but may not change its filter
+or operation. New normal AUTOINCREMENT rows are excluded from that traversal,
+including rows inserted with an older timestamp. Retention can remove rows
+between requests. An exact-limit page can conservatively have a cursor whose
+next page is empty and complete.
+
+Snapshot metadata is `{id,target_pk,captured_at}`. `id` and `target_pk` are always
+strings. `captured_at` is UTC Unix epoch seconds, from 0 through 253402300799;
+the GUI renders local time. Every operation orders by `(captured_at,id)`, with
+newest first for pages and increasing order for an explicitly selected pair.
+
+`snapshots.targets` canonicalizes `username` exactly like `watches.add` and the
+CLI, in the same order: leading `@` characters are removed first, then surrounding
+whitespace, then the value is lowercased before the 255-character bound applies,
+so one GUI field means one thing everywhere (a space before `@` stays invalid). It returns `{kind:"target",target_pk,snapshot}` historical
+evidence from saved username values. Deduplication is page-local. The caller
+unions PKs across all pages and retains warnings. One result before
+`scan_complete` never establishes unique identity. Even after completion,
+diagnostic rows mean the evidence is incomplete: no exhaustive zero/one-PK
+claim is permitted. A missing/null old username produces the result-local
+diagnostic `history_identity_unknown`. Multiple PKs require the user to select
+the desired saved history; a newest match is never chosen automatically.
+Renaming an account does not rename its watch registration.
+
+`snapshots.list` returns `{kind:"snapshot",snapshot}` metadata only, or a safe
+diagnostic for an unreadable saved record. Profile fields are checked within
+the raw byte cap but are not included in list items. An empty list means no
+retained snapshots for that PK; one snapshot is an initial retained baseline.
+
+`snapshots.compare` returns `{kind:"comparison",older,newer,changes,unknown_fields}`.
+`changes` contains `{field,old,new}` for known values that differ. The field set
+is the existing tracked profile fields plus `avatar` and `banner` stored hashes.
+Absent fields are listed in `unknown_fields`; explicit JSON null is a known
+value. Missing selected IDs return `snapshot_unavailable`, prompting a list
+refresh. A different PK returns `snapshot_identity_mismatch`; reversed/equal
+pair ordering returns `invalid_params`. The API does not manufacture a prior
+snapshot from null.
+
+`changes.list` compares each candidate with its immediately preceding retained
+snapshot within the same PK and initial ID ceiling. Its earliest retained
+snapshot is `{kind:"baseline",snapshot}`. Fully known unchanged comparisons
+are omitted. A comparison with any unknown field has `kind:"incomplete"` and
+the same `older,newer,changes,unknown_fields` shape. Other changed pairs have
+`kind:"comparison"`. These are observations between capture times, not exact
+Instagram event times; follower counts do not identify individual followers.
+
+Paginated JSON failures appear as `{kind:"diagnostic",snapshot,code}` with
+`history_corrupt` or `history_oversized`, and the cursor can advance past them.
+Invalid identity/order metadata fails the operation with `history_corrupt`
+because a safe continuation cannot be constructed. Pair-read JSON failures
+are static errors with the same code. Raw JSON and exception text are never
+included in diagnostics. A malformed snapshot is not silently an empty result.
+
+Each row's two raw JSON columns together may occupy at most 65,536 UTF-8 bytes.
+SQL uses `length(CAST(... AS BLOB))` and CASE projection to suppress oversized
+columns before they reach Python. Duplicate keys, NaN/infinity, wrong scalar
+types, invalid identifiers and count coercions are rejected. Batches contain
+at most 16 raw rows. The feed selects at most 200 candidates per request plus
+one predecessor lookup per inspected candidate; username discovery selects at
+most 2,000 candidates. `scanned` counts inspected candidates, including a row
+deferred by the byte budget; the cursor advances only through completed rows.
+An unchanged feed page can have no visible items and still have continuation.
+No page contains more than 50 visible items.
+
+All local reads share a 10-second deadline started before parameter validation,
+with SQLite busy timeout at most one second and a progress handler. Decoding,
+comparison and encoding also check that deadline. Timeout discards a partial
+page and returns `operation_timeout`. The deadline covers reading, assembling and
+byte-budgeting the page; the transport's final serialization of an already
+complete result is bounded by the same 2 MiB budget and is deliberately not
+interrupted, so a response may arrive a few milliseconds after the deadline but
+is never partial. Bounded pages reserve worst-case envelope
+and cursor bytes and count actual ASCII JSON escaping; the entire response,
+including request ID and newline, is strictly below 2 MiB. A full byte budget
+shortens the page with continuation instead of becoming `internal_error`.
+
+C2 uses its separate trusted `mode=ro`, `query_only`, explicit-read-transaction
+path with schema validation in the same transaction. It never creates profile
+directories or application locks, migrates schema, calls C1 `check_database`,
+changes settings, or repairs ownership. SQLite may normally maintain its own
+private WAL/SHM files. WAL can contain committed data and is never deleted or
+ignored. Sidecars do not prove a daemon is running. Main-file byte invariance
+is tested without a concurrent writer; concurrent tests check consistency and
+transaction release. C1 setup/settings checks keep their existing separate
+copying and byte-invariance behavior.
+
+The four added static error codes are `history_corrupt`, `history_oversized`,
+`snapshot_unavailable`, and `snapshot_identity_mismatch`, all non-retryable
+without a user decision or refreshed selection. SQLite contention propagates
+the shared reader's `profile_busy`; ownership/config/schema/recovery failures
+remain explicit. The existing retention stays 30 days and at most 100 snapshots
+per PK; the count cap can shorten that period. There is no event archive, cache,
+new schema version or additional index in C2b.

@@ -12,18 +12,26 @@ from insto.desktop.history_params import MAX_CURSOR, encode_cursor
 from insto.desktop.profile import Profile
 from insto.desktop.protocol import MAX_OUTPUT_BYTES, PROTOCOL_VERSION, encode
 from insto.service.history_readonly import (
-    Check, HistoryReadError, Reader, comparison, metadata, snapshot,
+    Check,
+    HistoryReadError,
+    Reader,
+    comparison,
+    metadata,
+    snapshot,
 )
 
 
 def _page(items: list[dict[str, Any]], cursor: str | None, scanned: int) -> dict[str, Any]:
-    return {"items": items, "next_cursor": cursor, "scan_complete": cursor is None,
-            "scanned": scanned}
+    return {
+        "items": items,
+        "next_cursor": cursor,
+        "scan_complete": cursor is None,
+        "scanned": scanned,
+    }
 
 
 def _wire(result: dict[str, Any]) -> bytes:
-    return encode({"protocol_version": PROTOCOL_VERSION, "request_id": "x" * 64,
-                   "result": result})
+    return encode({"protocol_version": PROTOCOL_VERSION, "request_id": "x" * 64, "result": result})
 
 
 class PageBudget:
@@ -36,8 +44,11 @@ class PageBudget:
 
     def add(self, item: dict[str, Any]) -> bool:
         self.check()
-        size = len(json.dumps(item, ensure_ascii=True, allow_nan=False,
-                              separators=(",", ":")).encode("ascii"))
+        size = len(
+            json.dumps(item, ensure_ascii=True, allow_nan=False, separators=(",", ":")).encode(
+                "ascii"
+            )
+        )
         self.check()
         needed = size + (1 if self.items else 0)
         if self.used + needed >= MAX_OUTPUT_BYTES:
@@ -90,11 +101,17 @@ def _pages(reader: Reader, operation: str, params: dict[str, Any], check: Check)
                 if searching:
                     username = current.fields.get("username")
                     if username is None:
-                        item = {"kind": "diagnostic", "snapshot": current_meta.dto(),
-                                "code": "history_identity_unknown"}
+                        item = {
+                            "kind": "diagnostic",
+                            "snapshot": current_meta.dto(),
+                            "code": "history_identity_unknown",
+                        }
                     elif username.lower() == filter_value and current_meta.target_pk not in seen:
-                        item = {"kind": "target", "target_pk": current_meta.target_pk,
-                                "snapshot": current_meta.dto()}
+                        item = {
+                            "kind": "target",
+                            "target_pk": current_meta.target_pk,
+                            "snapshot": current_meta.dto(),
+                        }
                         matched_pk = current_meta.target_pk
                 elif listing:
                     item = {"kind": "snapshot", "snapshot": current_meta.dto()}
@@ -131,9 +148,14 @@ def _pages(reader: Reader, operation: str, params: dict[str, Any], check: Check)
 
 
 def run(
-    profile: Profile, operation: str, params: dict[str, Any], *, deadline: float,
+    profile: Profile,
+    operation: str,
+    params: dict[str, Any],
+    *,
+    deadline: float,
 ) -> dict[str, Any]:
     """Consume already normalized parameters from the pure dispatch validator."""
+
     def check() -> None:
         check_deadline(deadline)
 
@@ -141,8 +163,15 @@ def run(
     try:
         with read_database(profile, deadline=deadline) as connection:
             reader = Reader(connection, check)
-            result = _pair(reader, params, check) if operation == "snapshots.compare" else _pages(
-                reader, operation, params, check,
+            result = (
+                _pair(reader, params, check)
+                if operation == "snapshots.compare"
+                else _pages(
+                    reader,
+                    operation,
+                    params,
+                    check,
+                )
             )
             check()
             if len(_wire(result)) >= MAX_OUTPUT_BYTES:

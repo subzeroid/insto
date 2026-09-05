@@ -5,7 +5,11 @@ import pytest
 
 from insto.service.history import _PROFILE_TRACKED_FIELDS
 from insto.service.history_readonly import (
-    PROJECTION, HistoryReadError, comparison, metadata, snapshot,
+    PROJECTION,
+    HistoryReadError,
+    comparison,
+    metadata,
+    snapshot,
 )
 
 
@@ -22,9 +26,13 @@ def connection():
 
 
 def row(db, payload, posts="[]", *, identifier=1, stamp=1, pk="7", avatar=None):
-    db.execute("INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?, NULL)",
-               (identifier, pk, stamp, payload, posts, avatar))
-    return db.execute("SELECT " + PROJECTION + " FROM snapshots WHERE id=?", (identifier,)).fetchone()
+    db.execute(
+        "INSERT INTO snapshots VALUES (?, ?, ?, ?, ?, ?, NULL)",
+        (identifier, pk, stamp, payload, posts, avatar),
+    )
+    return db.execute(
+        "SELECT " + PROJECTION + " FROM snapshots WHERE id=?", (identifier,)
+    ).fetchone()
 
 
 def test_sql_does_not_materialize_combined_oversize_multibyte_payload(connection):
@@ -38,22 +46,33 @@ def test_sql_does_not_materialize_combined_oversize_multibyte_payload(connection
         snapshot(selected, lambda: None)
 
 
-@pytest.mark.parametrize("payload,posts", [
-    ('{"biography":"secret","biography":"again"}', '[]'),
-    ('{"follower_count":NaN}', '[]'),
-    ('{"follower_count":1e999}', '[]'),
-    ('{"follower_count":true}', '[]'),
-    ('{"follower_count":1.0}', '[]'),
-    ('{"follower_count":-1}', '[]'),
-    ('{"follower_count":9007199254740992}', '[]'),
-    ('{"is_private":1}', '[]'),
-    ('{"biography":[]}', '[]'),
-    ('{"biography":"\\ud800"}', '[]'),
-    ('{"username":"@@alice"}', '[]'),
-    ('[]', '[]'), ('{', '[]'), ('{}', '{}'), ('{}', '[1]'),
-    ('{}', '[{}]'), ('{}', '[NaN]'),
-    (b'{"biography":"secret"}', '[]'), ('{}', b'[]'), (5, '[]'), (None, '[]'), ('{}', None),
-])
+@pytest.mark.parametrize(
+    "payload,posts",
+    [
+        ('{"biography":"secret","biography":"again"}', "[]"),
+        ('{"follower_count":NaN}', "[]"),
+        ('{"follower_count":1e999}', "[]"),
+        ('{"follower_count":true}', "[]"),
+        ('{"follower_count":1.0}', "[]"),
+        ('{"follower_count":-1}', "[]"),
+        ('{"follower_count":9007199254740992}', "[]"),
+        ('{"is_private":1}', "[]"),
+        ('{"biography":[]}', "[]"),
+        ('{"biography":"\\ud800"}', "[]"),
+        ('{"username":"@@alice"}', "[]"),
+        ("[]", "[]"),
+        ("{", "[]"),
+        ("{}", "{}"),
+        ("{}", "[1]"),
+        ("{}", "[{}]"),
+        ("{}", "[NaN]"),
+        (b'{"biography":"secret"}', "[]"),
+        ("{}", b"[]"),
+        (5, "[]"),
+        (None, "[]"),
+        ("{}", None),
+    ],
+)
 def test_corruption_is_explicit_and_never_reflects_raw_text(connection, payload, posts):
     selected = row(connection, payload, posts)
     with pytest.raises(HistoryReadError, match="history_corrupt") as caught:
@@ -61,10 +80,17 @@ def test_corruption_is_explicit_and_never_reflects_raw_text(connection, payload,
     assert "secret" not in str(caught.value)
 
 
-@pytest.mark.parametrize("pk,stamp,avatar", [
-    ("x" * 100000, 1, None), ("01", 1, None), ("7", -1, None),
-    ("7", "x" * 100000, None), ("7", 1, "x" * 100000), ("7", 1, "q" * 64),
-])
+@pytest.mark.parametrize(
+    "pk,stamp,avatar",
+    [
+        ("x" * 100000, 1, None),
+        ("01", 1, None),
+        ("7", -1, None),
+        ("7", "x" * 100000, None),
+        ("7", 1, "x" * 100000),
+        ("7", 1, "q" * 64),
+    ],
+)
 def test_scalar_guards_prevent_large_or_invalid_dtos(connection, pk, stamp, avatar):
     selected = row(connection, "{}", pk=pk, stamp=stamp, avatar=avatar)
     assert all(not isinstance(value, str) or len(value) < 1000 for value in selected)
@@ -89,8 +115,10 @@ def test_invalid_utf8_text_is_fetched_as_bytes_and_reported_as_corrupt(connectio
 
 def test_absent_old_field_is_unknown_but_null_is_known(connection):
     old = snapshot(row(connection, '{"biography":null}', identifier=1), lambda: None)
-    new = snapshot(row(connection, '{"biography":"new","full_name":"Alice"}',
-                       identifier=2, stamp=2), lambda: None)
+    new = snapshot(
+        row(connection, '{"biography":"new","full_name":"Alice"}', identifier=2, stamp=2),
+        lambda: None,
+    )
     result = comparison(old, new, lambda: None)
     assert result["changes"] == [{"field": "biography", "old": None, "new": "new"}]
     assert "full_name" in result["unknown_fields"]
@@ -99,13 +127,20 @@ def test_absent_old_field_is_unknown_but_null_is_known(connection):
 
 def test_identity_precision_ties_and_hash_semantics(connection):
     fields = json.dumps(dict.fromkeys(_PROFILE_TRACKED_FIELDS, None))
-    older = snapshot(row(connection, fields, identifier=9007199254740993, stamp=3,
-                         avatar="a" * 64), lambda: None)
-    newer = snapshot(row(connection, fields, identifier=9007199254740994, stamp=3,
-                         avatar="b" * 64), lambda: None)
+    older = snapshot(
+        row(connection, fields, identifier=9007199254740993, stamp=3, avatar="a" * 64), lambda: None
+    )
+    newer = snapshot(
+        row(connection, fields, identifier=9007199254740994, stamp=3, avatar="b" * 64), lambda: None
+    )
     result = comparison(older, newer, lambda: None)
     assert result["older"]["id"] == "9007199254740993"
     assert result["newer"]["captured_at"] == 3
     assert result["changes"] == [{"field": "avatar", "old": "a" * 64, "new": "b" * 64}]
     assert result["unknown_fields"] == []
-    assert metadata(connection.execute("SELECT " + PROJECTION + " FROM snapshots LIMIT 1").fetchone()).target_pk == "7"
+    assert (
+        metadata(
+            connection.execute("SELECT " + PROJECTION + " FROM snapshots LIMIT 1").fetchone()
+        ).target_pk
+        == "7"
+    )

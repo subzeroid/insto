@@ -87,6 +87,41 @@ def artifacts(home: Path, config: Config) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("unpublished", [b"", b"987\n"])
+async def test_start_waits_for_executor_pid_publication(setup, monkeypatch, unpublished):
+    module, config, home = setup
+    _, job = native(monkeypatch)
+    job["lock"] = Path(f"{config.db_path}.watch.lock")
+    original = legacy._run_launchctl
+    prints = 0
+
+    def delayed(args, **kwargs):
+        nonlocal prints
+        if args[0] == "print" and job["fd"] is not None:
+            prints += 1
+            if prints == 2:
+                os.ftruncate(job["fd"], 0)
+                os.pwrite(job["fd"], b"123\n", 0)
+        result = original(args, **kwargs)
+        if args[0] == "bootstrap":
+            os.ftruncate(job["fd"], 0)
+            os.pwrite(job["fd"], unpublished, 0)
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", delayed)
+    try:
+        with module.managed_service(
+            home=home, config=config, deadline=time.monotonic() + 2
+        ) as lease:
+            result = await lease.ensure_running()
+            assert result["executor"]["pid"] == result["process"]["pid"] == 123
+            assert prints >= 2
+    finally:
+        if job["fd"] is not None:
+            os.close(job["fd"])
+
+
+@pytest.mark.asyncio
 async def test_start_noop_stop_preserves_artifacts(
     setup: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

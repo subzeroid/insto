@@ -20,30 +20,47 @@ def fields(**updates):
 
 
 def insert(profile, *, pk="7", stamp=1, payload=None, posts="[]", identifier=None):
-    body = json.dumps(fields() if payload is None else payload, ensure_ascii=False) if not isinstance(payload, str) else payload
+    body = (
+        json.dumps(fields() if payload is None else payload, ensure_ascii=False)
+        if not isinstance(payload, str)
+        else payload
+    )
     with closing(sqlite3.connect(profile.home / "store.db")) as db, db:
-        cursor = db.execute("INSERT INTO snapshots(id,target_pk,captured_at,"
-                            "profile_fields_json,last_post_pks_json) "
-                            "VALUES (?,?,?,?,?)",
-                            (identifier, pk, stamp, body, posts))
+        cursor = db.execute(
+            "INSERT INTO snapshots(id,target_pk,captured_at,"
+            "profile_fields_json,last_post_pks_json) "
+            "VALUES (?,?,?,?,?)",
+            (identifier, pk, stamp, body, posts),
+        )
         return str(cursor.lastrowid)
 
 
 def request(profile, operation, params):
-    return run(profile, operation, validate_params(operation, params),
-               deadline=time.monotonic() + 10)
+    return run(
+        profile, operation, validate_params(operation, params), deadline=time.monotonic() + 10
+    )
 
 
 def test_empty_one_snapshot_and_metadata_only_list(monitoring_profile):
     p = monitoring_profile
     assert request(p, "snapshots.list", {"target_pk": "7"}) == {
-        "items": [], "next_cursor": None, "scan_complete": True, "scanned": 0,
+        "items": [],
+        "next_cursor": None,
+        "scan_complete": True,
+        "scanned": 0,
     }
     identifier = insert(p, payload=fields(biography="private-observed-biography"))
     page = request(p, "snapshots.list", {"target_pk": "7"})
-    assert page["items"] == [{"kind": "snapshot", "snapshot": {
-        "id": identifier, "target_pk": "7", "captured_at": 1,
-    }}]
+    assert page["items"] == [
+        {
+            "kind": "snapshot",
+            "snapshot": {
+                "id": identifier,
+                "target_pk": "7",
+                "captured_at": 1,
+            },
+        }
+    ]
     assert "private-observed-biography" not in json.dumps(page)
     feed = request(p, "changes.list", {})
     assert feed["items"][0]["kind"] == "baseline"
@@ -98,9 +115,11 @@ def test_target_dedup_is_page_local_and_search_is_incomplete_at_2000(monitoring_
     insert(p, pk="8", stamp=0, payload=fields(username="alice"))
     body = json.dumps(fields(username="alice"))
     with closing(sqlite3.connect(p.home / "store.db")) as db, db:
-        db.executemany("INSERT INTO snapshots(target_pk,captured_at,profile_fields_json,last_post_pks_json) "
-                       "VALUES ('7',? ,?,'[]')",
-                       ((i, body) for i in range(1, 2001)))
+        db.executemany(
+            "INSERT INTO snapshots(target_pk,captured_at,profile_fields_json,last_post_pks_json) "
+            "VALUES ('7',? ,?,'[]')",
+            ((i, body) for i in range(1, 2001)),
+        )
     first = request(p, "snapshots.targets", {"username": "alice"})
     assert first["scanned"] == 2000
     assert first["scan_complete"] is False and first["next_cursor"]
@@ -110,7 +129,9 @@ def test_target_dedup_is_page_local_and_search_is_incomplete_at_2000(monitoring_
     assert second["scan_complete"] is True
     # A separate page boundary is allowed to repeat a PK; callers union the evidence.
     tiny = request(p, "snapshots.targets", {"username": "alice", "limit": 1})
-    again = request(p, "snapshots.targets", {"username": "alice", "limit": 1, "cursor": tiny["next_cursor"]})
+    again = request(
+        p, "snapshots.targets", {"username": "alice", "limit": 1, "cursor": tiny["next_cursor"]}
+    )
     assert tiny["items"][0]["target_pk"] == again["items"][0]["target_pk"] == "7"
 
 
@@ -118,9 +139,11 @@ def test_unchanged_feed_can_continue_without_visible_items(monitoring_profile):
     p = monitoring_profile
     body = json.dumps(fields())
     with closing(sqlite3.connect(p.home / "store.db")) as db, db:
-        db.executemany("INSERT INTO snapshots(target_pk,captured_at,profile_fields_json,last_post_pks_json) "
-                       "VALUES ('7',?,?,'[]')",
-                       ((i, body) for i in range(1, 202)))
+        db.executemany(
+            "INSERT INTO snapshots(target_pk,captured_at,profile_fields_json,last_post_pks_json) "
+            "VALUES ('7',?,?,'[]')",
+            ((i, body) for i in range(1, 202)),
+        )
     first = request(p, "changes.list", {})
     assert first["items"] == [] and first["scanned"] == 200
     assert first["next_cursor"] and first["scan_complete"] is False
@@ -161,21 +184,39 @@ def test_all_page_types_honor_ceiling_and_equal_timestamp_order(monitoring_profi
         assert len(identifiers) == len(set(identifiers))
 
 
-@pytest.mark.parametrize("payload,code", [('{"biography":"private-token",', "history_corrupt"),
-                                          (json.dumps({"biography": "界" * 24000}, ensure_ascii=False), "history_oversized")])
-@pytest.mark.parametrize("operation,params", [
-    ("snapshots.list", {"target_pk": "7"}),
-    ("snapshots.targets", {"username": "alice"}),
-    ("changes.list", {}),
-])
-def test_bad_json_is_a_diagnostic_with_progress(monitoring_profile, payload, code, operation, params):
+@pytest.mark.parametrize(
+    "payload,code",
+    [
+        ('{"biography":"private-token",', "history_corrupt"),
+        (json.dumps({"biography": "界" * 24000}, ensure_ascii=False), "history_oversized"),
+    ],
+)
+@pytest.mark.parametrize(
+    "operation,params",
+    [
+        ("snapshots.list", {"target_pk": "7"}),
+        ("snapshots.targets", {"username": "alice"}),
+        ("changes.list", {}),
+    ],
+)
+def test_bad_json_is_a_diagnostic_with_progress(
+    monitoring_profile, payload, code, operation, params
+):
     p = monitoring_profile
     bad = insert(p, stamp=2, payload=payload)
     insert(p, stamp=1)
     page = request(p, operation, {**params, "limit": 1})
-    assert page["items"] == [{"kind": "diagnostic", "snapshot": {
-        "id": bad, "target_pk": "7", "captured_at": 2,
-    }, "code": code}]
+    assert page["items"] == [
+        {
+            "kind": "diagnostic",
+            "snapshot": {
+                "id": bad,
+                "target_pk": "7",
+                "captured_at": 2,
+            },
+            "code": code,
+        }
+    ]
     assert page["next_cursor"] and not page["scan_complete"]
     assert "private-token" not in json.dumps(page)
 
@@ -184,7 +225,9 @@ def test_encoded_byte_limit_shortens_feed_without_losing_deferred_item(monitorin
     p = monitoring_profile
     identifiers = []
     for i in range(1, 52):
-        identifiers.append(insert(p, stamp=i, payload=fields(biography=("界" if i % 2 else "語") * 21000)))
+        identifiers.append(
+            insert(p, stamp=i, payload=fields(biography=("界" if i % 2 else "語") * 21000))
+        )
     page = request(p, "changes.list", {"target_pk": "7"})
     assert 0 < len(page["items"]) < 50
     all_items = []
@@ -212,8 +255,7 @@ def test_visible_cap_is_fifty_for_every_page_operation(monitoring_profile):
     p = monitoring_profile
     for i in range(1, 62):
         insert(p, pk=str(i), stamp=i)
-    for operation, params in [("changes.list", {}),
-                              ("snapshots.targets", {"username": "alice"})]:
+    for operation, params in [("changes.list", {}), ("snapshots.targets", {"username": "alice"})]:
         page = request(p, operation, params)
         assert len(page["items"]) == 50
         assert page["next_cursor"]
@@ -266,13 +308,23 @@ def test_invalid_utf8_rows_are_diagnostics_not_storage_errors(monitoring_profile
         ("changes.list", {}),
     ]:
         page = request(p, operation, {**params, "limit": 1})
-        assert page["items"] == [{"kind": "diagnostic", "snapshot": {
-            "id": bad_newer, "target_pk": "7", "captured_at": 3,
-        }, "code": "history_corrupt"}]
+        assert page["items"] == [
+            {
+                "kind": "diagnostic",
+                "snapshot": {
+                    "id": bad_newer,
+                    "target_pk": "7",
+                    "captured_at": 3,
+                },
+                "code": "history_corrupt",
+            }
+        ]
         assert page["next_cursor"] and not page["scan_complete"]
     feed = request(p, "changes.list", {})
     assert [(item["kind"], item["snapshot"]["id"]) for item in feed["items"]] == [
-        ("diagnostic", bad_newer), ("diagnostic", good), ("diagnostic", bad_older),
+        ("diagnostic", bad_newer),
+        ("diagnostic", good),
+        ("diagnostic", bad_older),
     ]
     with pytest.raises(DesktopError, match="history_corrupt"):
         request(p, "snapshots.compare", {"target_pk": "7", "older_id": bad_older, "newer_id": good})
@@ -291,18 +343,25 @@ def test_continuation_survives_rows_deleted_between_pages(monitoring_profile):
     assert feed["items"][0]["older"]["id"] == second and feed["items"][0]["newer"]["id"] == third
     with closing(sqlite3.connect(p.home / "store.db")) as db, db:
         db.execute("DELETE FROM snapshots WHERE id=?", (second,))
-    rest = request(p, "snapshots.list", {"target_pk": "7", "limit": 1, "cursor": page["next_cursor"]})
+    rest = request(
+        p, "snapshots.list", {"target_pk": "7", "limit": 1, "cursor": page["next_cursor"]}
+    )
     assert [item["snapshot"]["id"] for item in rest["items"]] == [first]
     assert rest["next_cursor"]  # conservative cursor at exactly the visible limit
-    final = request(p, "snapshots.list", {"target_pk": "7", "limit": 1, "cursor": rest["next_cursor"]})
+    final = request(
+        p, "snapshots.list", {"target_pk": "7", "limit": 1, "cursor": rest["next_cursor"]}
+    )
     assert final == {"items": [], "next_cursor": None, "scan_complete": True, "scanned": 0}
     feed_rest = request(p, "changes.list", {"limit": 1, "cursor": feed["next_cursor"]})
     assert [item["kind"] for item in feed_rest["items"]] == ["baseline"]
     assert feed_rest["items"][0]["snapshot"]["id"] == first
 
 
-def test_history_reads_under_held_profile_lease_have_no_application_writes(monitoring_profile, monkeypatch):
+def test_history_reads_under_held_profile_lease_have_no_application_writes(
+    monitoring_profile, monkeypatch
+):
     import os
+
     from insto.desktop import configuration
     from insto.service.history import HistoryStore
 
@@ -337,7 +396,9 @@ def test_missing_history_profile_is_not_created(tmp_path):
     assert not profile.root.exists()
 
 
-def test_cpu_timeout_after_decoding_discards_partial_page_and_closes_transaction(monitoring_profile, monkeypatch):
+def test_cpu_timeout_after_decoding_discards_partial_page_and_closes_transaction(
+    monitoring_profile, monkeypatch
+):
     from insto.desktop import history as desktop_history
     from insto.service import history_readonly as saved
 
@@ -397,7 +458,8 @@ def test_encoding_timeout_is_not_a_partial_success(monitoring_profile, monkeypat
 
 
 def test_timeout_on_second_candidate_discards_the_accumulated_first_item(
-    monitoring_profile, monkeypatch,
+    monitoring_profile,
+    monkeypatch,
 ):
     # The first candidate is fully accumulated before the second is decoded; an
     # expiry while handling the second must fail the whole request, never return

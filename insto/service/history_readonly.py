@@ -64,8 +64,11 @@ class Metadata:
         return self.captured_at, self.identifier
 
     def dto(self) -> dict[str, Any]:
-        return {"id": str(self.identifier), "target_pk": self.target_pk,
-                "captured_at": self.captured_at}
+        return {
+            "id": str(self.identifier),
+            "target_pk": self.target_pk,
+            "captured_at": self.captured_at,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,9 +82,12 @@ class SavedSnapshot:
 def metadata(row: sqlite3.Row) -> Metadata:
     identifier, pk, stamp = row["snapshot_id"], row["safe_target_pk"], row["safe_captured_at"]
     if (
-        type(identifier) is not int or not 1 <= identifier <= MAX_ID
-        or type(pk) is not str or _PK.fullmatch(pk) is None
-        or type(stamp) is not int or not 0 <= stamp <= MAX_TIME
+        type(identifier) is not int
+        or not 1 <= identifier <= MAX_ID
+        or type(pk) is not str
+        or _PK.fullmatch(pk) is None
+        or type(stamp) is not int
+        or not 0 <= stamp <= MAX_TIME
     ):
         raise HistoryReadError()
     return Metadata(identifier, pk, stamp)
@@ -116,8 +122,12 @@ def _json(raw: object, check: Check) -> Any:
     if type(raw) is not bytes:
         raise HistoryReadError()
     try:
-        value = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique,
-                           parse_constant=_constant, parse_float=_float)
+        value = json.loads(
+            raw.decode("utf-8"),
+            object_pairs_hook=_unique,
+            parse_constant=_constant,
+            parse_float=_float,
+        )
     except (UnicodeDecodeError, TypeError, ValueError, RecursionError):
         raise HistoryReadError() from None
     check()
@@ -189,12 +199,20 @@ def comparison(old: SavedSnapshot, new: SavedSnapshot, check: Check) -> dict[str
         if before != after:
             changes.append({"field": field, "old": before, "new": after})
     check()
-    return {"kind": "comparison", "older": old.meta.dto(), "newer": new.meta.dto(),
-            "changes": changes, "unknown_fields": unknown}
+    return {
+        "kind": "comparison",
+        "older": old.meta.dto(),
+        "newer": new.meta.dto(),
+        "changes": changes,
+        "unknown_fields": unknown,
+    }
 
 
 def scan_sql(
-    ceiling: int, frontier: tuple[int, int] | None, target_pk: str | None, limit: int,
+    ceiling: int,
+    frontier: tuple[int, int] | None,
+    target_pk: str | None,
+    limit: int,
 ) -> tuple[str, tuple[Any, ...]]:
     """Key-only keyset scan: ordered (id, captured_at) pairs, never JSON payloads.
 
@@ -247,7 +265,8 @@ class Reader:
     def selected(self, identifier: int) -> sqlite3.Row | None:
         self.check()
         cursor = self.connection.execute(
-            "SELECT " + PROJECTION + " FROM snapshots WHERE id=?", (identifier,),
+            "SELECT " + PROJECTION + " FROM snapshots WHERE id=?",
+            (identifier,),
         )
         try:
             row: sqlite3.Row | None = cursor.fetchone()
@@ -257,8 +276,11 @@ class Reader:
         return row
 
     def rows(
-        self, ceiling: int, frontier: tuple[int, int] | None,
-        target_pk: str | None, limit: int,
+        self,
+        ceiling: int,
+        frontier: tuple[int, int] | None,
+        target_pk: str | None,
+        limit: int,
     ) -> Generator[sqlite3.Row, None, None]:
         self.check()
         sql, arguments = scan_sql(ceiling, frontier, target_pk, limit)

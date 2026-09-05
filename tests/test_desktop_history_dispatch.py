@@ -15,8 +15,17 @@ from insto.desktop.history_params import CAPABILITIES
 
 
 def wire(operation, params, request_id="history-1"):
-    return (json.dumps({"protocol_version": 1, "request_id": request_id,
-                       "operation": operation, "params": params}) + "\n").encode()
+    return (
+        json.dumps(
+            {
+                "protocol_version": 1,
+                "request_id": request_id,
+                "operation": operation,
+                "params": params,
+            }
+        )
+        + "\n"
+    ).encode()
 
 
 async def test_hello_advertises_all_four_saved_operations():
@@ -25,13 +34,18 @@ async def test_hello_advertises_all_four_saved_operations():
     assert len(result["capabilities"]) == len(set(result["capabilities"]))
 
 
-@pytest.mark.parametrize("operation,params", [
-    ("snapshots.targets", {"username": "@Alice"}),
-    ("snapshots.list", {"target_pk": "7"}),
-    ("snapshots.compare", {"target_pk": "7", "older_id": "1", "newer_id": "2"}),
-    ("changes.list", {}),
-])
-async def test_route_uses_normalized_params_and_prevalidation_deadline(monkeypatch, tmp_path, operation, params):
+@pytest.mark.parametrize(
+    "operation,params",
+    [
+        ("snapshots.targets", {"username": "@Alice"}),
+        ("snapshots.list", {"target_pk": "7"}),
+        ("snapshots.compare", {"target_pk": "7", "older_id": "1", "newer_id": "2"}),
+        ("changes.list", {}),
+    ],
+)
+async def test_route_uses_normalized_params_and_prevalidation_deadline(
+    monkeypatch, tmp_path, operation, params
+):
     from insto import desktop
     from insto.desktop import dispatch as router
 
@@ -68,8 +82,14 @@ async def test_invalid_params_precede_profile_history_and_provider_imports(monke
     from insto import desktop
 
     monkeypatch.delattr(desktop, "history", raising=False)
-    for name in ("insto.desktop.profile", "insto.desktop.history", "insto.desktop.operations",
-                 "insto.service.runtime", "hikerapi", "aiograpi"):
+    for name in (
+        "insto.desktop.profile",
+        "insto.desktop.history",
+        "insto.desktop.operations",
+        "insto.service.runtime",
+        "hikerapi",
+        "aiograpi",
+    ):
         monkeypatch.setitem(sys.modules, name, None)
     raw = await handle(wire(operation, {"home": "/foreign/private-token", "backend": "fake"}))
     assert b"private-token" not in raw
@@ -163,7 +183,7 @@ async def test_populated_list_and_compare_through_real_handle(monitoring_profile
 
 def test_fresh_process_reads_without_provider_or_native_work(monitoring_profile):
     root = Path(__file__).resolve().parents[1]
-    script = '''
+    script = """
 import asyncio
 import importlib.abc
 import json
@@ -187,16 +207,29 @@ subprocess.Popen = forbidden
 socket.create_connection = forbidden
 from insto.desktop.dispatch import handle
 sys.stdout.buffer.write(asyncio.run(handle(sys.stdin.buffer.read())))
-'''
-    environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C.UTF-8",
-                   "PYTHONDONTWRITEBYTECODE": "1",
-                   "INSTO_DESKTOP_ROOT": str(monitoring_profile.root),
-                   "INSTO_HOME": "/foreign", "HIKERAPI_TOKEN": "foreign-private-token"}
-    result = subprocess.run([sys.executable, "-B", "-c", script], cwd=root, env=environment,
-                            input=wire("changes.list", {}), capture_output=True, timeout=12)
+"""
+    environment = {
+        "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+        "LANG": "C.UTF-8",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "INSTO_DESKTOP_ROOT": str(monitoring_profile.root),
+        "INSTO_HOME": "/foreign",
+        "HIKERAPI_TOKEN": "foreign-private-token",
+    }
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script],
+        cwd=root,
+        env=environment,
+        input=wire("changes.list", {}),
+        capture_output=True,
+        timeout=12,
+    )
     assert result.returncode == 0 and result.stderr == b""
     assert result.stdout.count(b"\n") == 1
     assert b"foreign-private-token" not in result.stdout
     assert json.loads(result.stdout)["result"] == {
-        "items": [], "next_cursor": None, "scan_complete": True, "scanned": 0,
+        "items": [],
+        "next_cursor": None,
+        "scan_complete": True,
+        "scanned": 0,
     }

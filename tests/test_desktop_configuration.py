@@ -126,3 +126,78 @@ def test_fixed_auxiliary_paths_cannot_redirect_outside_profile(tmp_path, leaf):
         (profile.home / leaf).symlink_to(tmp_path / "elsewhere")
         with pytest.raises(DesktopError, match="profile_ownership"):
             parse_config(profile, config_bytes(profile, "offline-token"))
+
+
+def test_missing_database_never_adopts_an_orphan_wal(tmp_path):
+    from insto.desktop.configuration import check_database, initialize_database
+
+    origin = tmp_path / "origin.db"
+    target = tmp_path / "target.db"
+    initialize_database(origin)
+    connection = sqlite3.connect(origin)
+    try:
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute(
+            "INSERT INTO watches VALUES "
+            "('orphan', 'foreign-generation', 900, 12, NULL, 0, 'paused')"
+        )
+        connection.commit()
+        orphan = tmp_path / "target.db-wal"
+        orphan.write_bytes((tmp_path / "origin.db-wal").read_bytes())
+        orphan.chmod(0o600)
+        before = orphan.read_bytes()
+        for action in (check_database, initialize_database):
+            with pytest.raises(DesktopError, match="schema_mismatch"):
+                action(target)
+            assert not target.exists()
+            assert orphan.read_bytes() == before
+            assert orphan.stat().st_mode & 0o777 == 0o600
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
+@pytest.mark.parametrize("kind", ["ordinary", "symlink", "directory"])
+def test_missing_database_refuses_every_orphan_sidecar(tmp_path, suffix, kind):
+    from insto.desktop.configuration import check_database, initialize_database
+
+    target = tmp_path / "target.db"
+    sidecar = tmp_path / ("target.db" + suffix)
+    if kind == "ordinary":
+        sidecar.write_bytes(b"orphan sentinel")
+        sidecar.chmod(0o600)
+    elif kind == "symlink":
+        sidecar.symlink_to(tmp_path / "missing")
+    else:
+        sidecar.mkdir(mode=0o700)
+    before = sidecar.lstat()
+    for action in (check_database, initialize_database):
+        with pytest.raises(DesktopError, match="schema_mismatch"):
+            action(target)
+        assert not target.exists()
+        after = sidecar.lstat()
+        assert (after.st_ino, after.st_mode, after.st_size) == (
+            before.st_ino,
+            before.st_mode,
+            before.st_size,
+        )
+
+
+def test_database_publication_rechecks_sidecars_after_staging(tmp_path, monkeypatch):
+    from insto.desktop import configuration
+
+    target = tmp_path / "target.db"
+    sidecar = tmp_path / "target.db-wal"
+    original = configuration.HistoryStore
+
+    def initialize_and_publish_orphan(path):
+        store = original(path)
+        sidecar.write_bytes(b"appeared during staging")
+        sidecar.chmod(0o600)
+        return store
+
+    monkeypatch.setattr(configuration, "HistoryStore", initialize_and_publish_orphan)
+    with pytest.raises(DesktopError, match="schema_mismatch"):
+        configuration.initialize_database(target)
+    assert not target.exists()
+    assert sidecar.read_bytes() == b"appeared during staging"

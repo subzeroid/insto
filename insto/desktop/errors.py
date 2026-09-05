@@ -19,6 +19,10 @@ MESSAGES: dict[str, tuple[str, bool]] = {
     "storage_error": ("Private profile storage is unavailable.", False),
     "schema_mismatch": ("The profile database schema is incompatible.", False),
     "unsupported_platform": ("Desktop service management requires macOS.", False),
+    "watch_conflict": ("The watch changed; refresh it before retrying.", False),
+    "watch_not_found": ("The watch no longer exists; refresh the list.", False),
+    "watch_exists": ("The watch already exists; refresh the list.", False),
+    "watch_limit": ("At most three watches can be active.", False),
 }
 
 

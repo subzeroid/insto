@@ -43,13 +43,13 @@ import re
 import sqlite3
 import threading
 import time
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
 from insto.exceptions import BackendError
 from insto.models import Profile, Snapshot, WatchRegistration, WatchSpec, WatchStatus
+from insto.service.watch_registry import register_in_transaction
 
 _SCHEMA_VERSION = 2
 
@@ -472,63 +472,14 @@ class HistoryStore:
 
         def _do() -> WatchRegistration:
             with self._lock:
-                cur = self._conn.cursor()
-                cur.execute("BEGIN IMMEDIATE")
+                self._conn.execute("BEGIN IMMEDIATE")
                 try:
-                    row = cur.execute(
-                        _WATCH_SELECT + " WHERE user = ?",
-                        (canonical,),
-                    ).fetchone()
-                    if row is not None and row["status"] == "active":
-                        result = WatchRegistration("already_active", _row_to_watchspec(row))
-                    elif row is not None:
-                        active_count = cur.execute(
-                            "SELECT COUNT(*) FROM watches WHERE status = 'active'"
-                        ).fetchone()[0]
-                        if active_count >= 3:
-                            result = WatchRegistration("full", None)
-                        else:
-                            registration_id = uuid.uuid4().hex
-                            cur.execute(
-                                """
-                                UPDATE watches
-                                SET registration_id = ?, interval_seconds = ?, last_error = NULL,
-                                    consecutive_errors = 0, status = 'active'
-                                WHERE user = ?
-                                """,
-                                (registration_id, interval_seconds, canonical),
-                            )
-                            updated = cur.execute(
-                                _WATCH_SELECT + " WHERE user = ?", (canonical,)
-                            ).fetchone()
-                            assert updated is not None
-                            result = WatchRegistration("reactivated", _row_to_watchspec(updated))
-                    else:
-                        active_count = cur.execute(
-                            "SELECT COUNT(*) FROM watches WHERE status = 'active'"
-                        ).fetchone()[0]
-                        if active_count >= 3:
-                            result = WatchRegistration("full", None)
-                        else:
-                            registration_id = uuid.uuid4().hex
-                            cur.execute(
-                                """
-                                INSERT INTO watches(
-                                    user, registration_id, interval_seconds, last_ok,
-                                    last_error, consecutive_errors, status
-                                ) VALUES(?, ?, ?, NULL, NULL, 0, 'active')
-                                """,
-                                (canonical, registration_id, interval_seconds),
-                            )
-                            created = cur.execute(
-                                _WATCH_SELECT + " WHERE user = ?", (canonical,)
-                            ).fetchone()
-                            assert created is not None
-                            result = WatchRegistration("created", _row_to_watchspec(created))
-                    cur.execute("COMMIT")
+                    kind, row = register_in_transaction(self._conn, canonical, interval_seconds)
+                    result = WatchRegistration(kind, _row_to_watchspec(row) if row else None)
+                    self._conn.execute("COMMIT")
                     return result
                 except BaseException:
-                    cur.execute("ROLLBACK")
+                    self._conn.execute("ROLLBACK")
                     raise
 
         return _with_lock_retry(_do)

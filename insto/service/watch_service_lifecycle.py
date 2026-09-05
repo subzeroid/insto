@@ -280,7 +280,13 @@ class ManagedService:
                         service._atomic_write(path, desired)
         await self._command(["enable", self._target])
         if report["registration"] == "loaded":
-            await self._command(["kickstart", self._target])
+            try:
+                await self._command(["kickstart", self._target])
+            except BackendError as exc:
+                if not isinstance(exc.__cause__, subprocess.TimeoutExpired):
+                    raise
+                # A timed-out client may already have started the job. The native
+                # worker has drained; retain the lease and prove readiness below.
         else:
             await self._command(["bootstrap", f"gui/{os.getuid()}", str(self._paths.plist)])
         return await self._ready()

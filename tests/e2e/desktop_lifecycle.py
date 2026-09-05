@@ -15,7 +15,7 @@ from pathlib import Path
 import insto
 from insto.config import Config
 from insto.service.watch_service import service_paths, uninstall_service
-from insto.service.watch_service_lifecycle import managed_service
+from insto.service.watch_service_lifecycle import _outer_fields, managed_service
 
 
 def validate_fixture(home: Path) -> None:
@@ -46,6 +46,21 @@ async def run(home: Path) -> None:
     )
     evidence = {}
     with managed_service(home=home, config=config, deadline=time.monotonic() + 90) as lease:
+        original_process = lease._process
+
+        def observe_process(output: bytes):
+            fields, _ = _outer_fields(output)
+            record = {key: fields.get(key) for key in ("state", "pid", "last exit code")}
+            descriptor = os.open(
+                home / "desktop-native-states.jsonl",
+                os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+                0o600,
+            )
+            with os.fdopen(descriptor, "w") as stream:
+                stream.write(json.dumps(record) + "\n")
+            return original_process(output)
+
+        lease._process = observe_process
         first = await lease.ensure_running()
         evidence["started"] = first
         second = await lease.ensure_running()

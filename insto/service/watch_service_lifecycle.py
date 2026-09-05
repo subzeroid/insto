@@ -21,6 +21,7 @@ from insto.service import watch_service as service
 
 _READINESS_SECONDS = 10.0
 _STOPPED_STATES = {"not running", "exited", "waiting"}
+_STARTING_STATES = {"xpcproxy"}
 
 
 def _outer_fields(output: bytes) -> tuple[dict[str, str], list[str]]:
@@ -186,9 +187,11 @@ class ManagedService:
         ):
             raise BackendError("loaded watch service runtime provenance is unknown")
         state = fields.get("state")
-        if state not in {"running", *_STOPPED_STATES}:
+        if state not in {"running", *_STOPPED_STATES, *_STARTING_STATES}:
             raise BackendError("loaded watch service process state is unknown")
         for key, pattern in (("pid", r"[1-9][0-9]*"), ("last exit code", r"-?[0-9]+")):
+            if key == "last exit code" and fields.get(key) == "(never exited)":
+                continue
             if key in fields and not re.fullmatch(pattern, fields[key]):
                 raise BackendError("loaded watch service process identity is malformed")
         process = service._parse_launchctl_print(
@@ -229,7 +232,7 @@ class ManagedService:
         executor = report["executor"]
         process = report["process"]
         if executor["state"] == "busy" and (
-            process["state"] != "running"
+            process["state"] not in {"running", *_STARTING_STATES}
             or executor["pid"] is None
             or executor["pid"] != process["pid"]
         ):
@@ -260,7 +263,7 @@ class ManagedService:
     async def ensure_running(self) -> dict[str, Any]:
         report = await self.inspect_owned()
         self._check_executor(report)
-        if report["process"]["state"] == "running":
+        if report["process"]["state"] in {"running", *_STARTING_STATES}:
             return await self._ready()
         # Prove the executor remains idle during artifact publication.
         # Release before startup: the runner must acquire the same inode itself.

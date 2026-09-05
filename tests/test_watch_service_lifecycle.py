@@ -87,6 +87,53 @@ def artifacts(home: Path, config: Config) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("already_spawning", [False, True])
+async def test_native_xpcproxy_and_never_exited_are_pending_not_ready(
+    setup, monkeypatch, already_spawning
+):
+    module, config, home = setup
+    calls, job = native(monkeypatch, "xpcproxy" if already_spawning else "missing")
+    job["lock"] = Path(f"{config.db_path}.watch.lock")
+    original = legacy._run_launchctl
+    prints = 0
+
+    def transient(args, **kwargs):
+        nonlocal prints
+        result = original(args, **kwargs)
+        if args[0] == "print" and result.returncode == 0:
+            prints += 1
+            state = "xpcproxy" if prints == 1 else "running"
+            result.stdout = (
+                result.stdout.replace(
+                    f"state = {job['state']}".encode(), f"state = {state}".encode()
+                )
+                + b"last exit code = (never exited)\n"
+            )
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", transient)
+    try:
+        with module.managed_service(
+            home=home, config=config, deadline=time.monotonic() + 2
+        ) as lease:
+            if already_spawning:
+                artifacts(home, config)
+                job["fd"] = os.open(job["lock"], os.O_RDWR | os.O_CREAT, 0o600)
+                fcntl.flock(job["fd"], fcntl.LOCK_EX | fcntl.LOCK_NB)
+                os.write(job["fd"], b"123\n")
+            report = await lease.ensure_running()
+            assert report["process"]["state"] == "running"
+            assert report["process"]["last_exit_code"] is None
+            assert report["executor"]["pid"] == report["process"]["pid"] == 123
+            assert prints >= 2
+            if already_spawning:
+                assert all(call[0] == "print" for call in calls)
+    finally:
+        if job["fd"] is not None:
+            os.close(job["fd"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("unpublished", [b"", b"987\n"])
 async def test_start_waits_for_executor_pid_publication(setup, monkeypatch, unpublished):
     module, config, home = setup

@@ -15,6 +15,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC
@@ -241,17 +242,32 @@ def _atomic_write(path: Path, content: bytes) -> None:
         raise
 
 
-def _run_launchctl(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
+def _run_launchctl(
+    arguments: list[str], *, timeout: float = 10
+) -> subprocess.CompletedProcess[bytes]:
     try:
         return subprocess.run(
-            [_LAUNCHCTL, *arguments], capture_output=True, timeout=10, check=False
+            [_LAUNCHCTL, *arguments], capture_output=True, timeout=timeout, check=False
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise BackendError("launchctl operation failed or timed out") from exc
 
 
-async def _launchctl(arguments: list[str]) -> subprocess.CompletedProcess[bytes]:
-    worker = asyncio.create_task(asyncio.to_thread(_run_launchctl, arguments))
+async def _launchctl(
+    arguments: list[str], *, timeout: float | None = None, deadline: float | None = None
+) -> subprocess.CompletedProcess[bytes]:
+    def run() -> subprocess.CompletedProcess[bytes]:
+        limit = timeout
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackendError("launchctl operation deadline expired")
+            limit = min(10.0 if limit is None else limit, remaining)
+        if limit is None:
+            return _run_launchctl(arguments)
+        return _run_launchctl(arguments, timeout=limit)
+
+    worker = asyncio.create_task(asyncio.to_thread(run))
     try:
         return await asyncio.shield(worker)
     except asyncio.CancelledError as cancellation:

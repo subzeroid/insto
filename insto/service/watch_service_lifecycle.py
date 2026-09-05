@@ -1,0 +1,267 @@
+"""Exclusive, deadline-bounded lifecycle lease for the desktop watch service."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import fcntl
+import os
+import plistlib
+import re
+import stat
+import subprocess
+import time
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+from insto.config import Config
+from insto.exceptions import BackendError
+from insto.service import watch_service as service
+
+_READINESS_SECONDS = 10.0
+_STOPPED_STATES = {"not running", "exited", "waiting"}
+
+
+class ManagedService:
+    """Valid only inside ``managed_service``; caller may extend rollback deadline."""
+
+    def __init__(self, paths: service.ServicePaths, config: Config, deadline: float) -> None:
+        self.deadline = deadline
+        self._paths = paths
+        self._manifest, self._plist = service._desired(paths, config, None)
+        self._db_path = config.db_path.expanduser().absolute()
+        self._lock_path = Path(f"{config.db_path.expanduser().resolve()}.watch.lock")
+        self._target = f"gui/{os.getuid()}/{paths.label}"
+        self._active = True
+
+    def _remaining(self) -> float:
+        if not self._active:
+            raise BackendError("watch service lease is no longer active")
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise BackendError("watch service operation deadline expired")
+        return remaining
+
+    async def _native(
+        self, arguments: list[str], *, deadline: float | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        return await service._launchctl(
+            arguments,
+            timeout=min(10.0, self._remaining()),
+            deadline=min(self.deadline, deadline) if deadline is not None else self.deadline,
+        )
+
+    def _artifacts(self) -> str:
+        service._validate_service_parents(self._paths)
+        exists = []
+        for path, desired in (
+            (self._paths.manifest, self._manifest),
+            (self._paths.plist, self._plist),
+        ):
+            present = os.path.lexists(path)
+            if present and not service._existing_matches(path, desired):
+                raise BackendError("watch service artifacts do not match the owned runtime")
+            exists.append(present)
+        return "installed" if all(exists) else "incomplete" if any(exists) else "not_installed"
+
+    def _validate_lock(self, fd: int) -> None:
+        info = os.fstat(fd)
+        current = self._lock_path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_nlink != 1
+            or (info.st_dev, info.st_ino) != (current.st_dev, current.st_ino)
+        ):
+            raise BackendError("unsafe watch executor lock")
+
+    @contextlib.contextmanager
+    def _executor(self, *, create: bool) -> Iterator[tuple[int | None, dict[str, Any]]]:
+        self._remaining()
+        fd = None
+        acquired = False
+        try:
+            flags = os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
+            if create:
+                if not os.path.lexists(self._lock_path):
+                    info = self._db_path.lstat()
+                    if (
+                        not stat.S_ISREG(info.st_mode)
+                        or info.st_uid != os.getuid()
+                        or stat.S_IMODE(info.st_mode) != 0o600
+                        or info.st_nlink != 1
+                    ):
+                        raise BackendError("watch database is unavailable or unsafe")
+                flags |= os.O_CREAT
+            try:
+                fd = os.open(self._lock_path, flags, 0o600)
+            except FileNotFoundError:
+                if create:
+                    raise BackendError("watch executor lock parent is unavailable") from None
+                yield None, {"state": "missing", "pid": None}
+                return
+            self._validate_lock(fd)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                acquired = True
+            except BlockingIOError:
+                pass
+            self._validate_lock(fd)
+            raw = os.pread(fd, 64, 0).strip()
+            pid = int(raw) if raw.isdigit() and 0 < len(raw) <= 10 else None
+            if pid == 0:
+                pid = None
+            yield fd, {"state": "idle" if acquired else "busy", "pid": pid}
+            self._validate_lock(fd)
+        except OSError as exc:
+            raise BackendError("watch executor lock is unavailable or unsafe") from exc
+        finally:
+            if fd is not None:
+                if acquired:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+
+    @contextlib.contextmanager
+    def idle_executor(self) -> Iterator[None]:
+        """Hold the stable executor inode without changing its PID contents."""
+        with self._executor(create=True) as (_, executor):
+            if executor["state"] != "idle":
+                raise BackendError("another watch executor is active")
+            yield
+
+    def _process(self, output: bytes) -> dict[str, Any]:
+        text = output.decode("utf-8", "replace")
+        expected = plistlib.loads(self._plist)["ProgramArguments"]
+        programs = re.findall(r"(?m)^\s*program = (.+)$", text)
+        arguments = re.findall(r"(?m)^\s*arguments = \{\s*\n(.*?)^\s*\}", text, re.S)
+        paths = re.findall(r"(?m)^\s*path = (.+)$", text)
+        if (
+            len(programs) != 1
+            or programs[0].strip() != expected[0]
+            or len(arguments) != 1
+            or [line.strip() for line in arguments[0].splitlines() if line.strip()] != expected
+            or (paths and (len(paths) != 1 or paths[0].strip() != str(self._paths.plist)))
+        ):
+            raise BackendError("loaded watch service runtime provenance is unknown")
+        process = service._parse_launchctl_print(output)
+        states = re.findall(r"(?m)^\s*state\s*=\s*([^\n]+?)\s*$", text)
+        if len(states) != 1 or states[0] not in {"running", *_STOPPED_STATES}:
+            raise BackendError("loaded watch service process state is unknown")
+        process["state"] = states[0]
+        if process["state"] == "running" and not process["pid"]:
+            raise BackendError("loaded watch service process identity is unknown")
+        return process
+
+    async def inspect_owned(self) -> dict[str, Any]:
+        return await self._inspect()
+
+    async def _inspect(self, *, deadline: float | None = None) -> dict[str, Any]:
+        self._remaining()
+        installation = self._artifacts()
+        result = await self._native(["print", self._target], deadline=deadline)
+        loaded = result.returncode == 0
+        if loaded and installation != "installed":
+            raise BackendError("refusing a loaded service with incomplete ownership")
+        if not loaded and not service._is_missing(result):
+            raise BackendError("watch service registration is unknown")
+        process = (
+            self._process(result.stdout)
+            if loaded
+            else {"state": None, "pid": None, "last_exit_code": None}
+        )
+        with self._executor(create=False) as (_, executor):
+            return {
+                "installation": installation,
+                "registration": "loaded" if loaded else "unloaded",
+                "process": process,
+                "executor": executor,
+            }
+
+    @staticmethod
+    def _check_executor(report: dict[str, Any]) -> None:
+        executor = report["executor"]
+        process = report["process"]
+        if executor["state"] == "busy" and (
+            process["state"] != "running"
+            or executor["pid"] is None
+            or executor["pid"] != process["pid"]
+        ):
+            raise BackendError("watch executor does not match the owned running service")
+
+    async def _command(self, arguments: list[str]) -> None:
+        if (await self._native(arguments)).returncode != 0:
+            raise BackendError("watch service native operation failed")
+
+    async def _ready(self) -> dict[str, Any]:
+        until = min(self.deadline, time.monotonic() + _READINESS_SECONDS)
+        while True:
+            report = await self._inspect(deadline=until)
+            self._check_executor(report)
+            if report["process"]["state"] == "running" and report["executor"]["state"] == "busy":
+                return report
+            remaining = min(until, self.deadline) - time.monotonic()
+            if remaining <= 0:
+                raise BackendError("watch service did not become ready")
+            await asyncio.sleep(min(0.05, remaining))
+
+    async def ensure_running(self) -> dict[str, Any]:
+        report = await self.inspect_owned()
+        self._check_executor(report)
+        if report["process"]["state"] == "running":
+            return await self._ready()
+        # Prove the executor remains idle during artifact publication.
+        # Release before startup: the runner must acquire the same inode itself.
+        with self.idle_executor():
+            self._remaining()
+            self._artifacts()
+            if report["registration"] == "unloaded":
+                for path, desired in (
+                    (self._paths.manifest, self._manifest),
+                    (self._paths.plist, self._plist),
+                ):
+                    if not os.path.lexists(path):
+                        service._atomic_write(path, desired)
+        await self._command(["enable", self._target])
+        if report["registration"] == "loaded":
+            await self._command(["kickstart", self._target])
+        else:
+            await self._command(["bootstrap", f"gui/{os.getuid()}", str(self._paths.plist)])
+        return await self._ready()
+
+    async def ensure_stopped(self) -> dict[str, Any]:
+        report = await self.inspect_owned()
+        self._check_executor(report)
+        if report["installation"] != "not_installed":
+            await self._command(["disable", self._target])
+        if report["registration"] == "loaded":
+            await self._command(["bootout", self._target])
+        until = min(self.deadline, time.monotonic() + _READINESS_SECONDS)
+        while True:
+            result = await self._inspect(deadline=until)
+            if result["registration"] == "unloaded" and result["executor"]["state"] in {
+                "idle",
+                "missing",
+            }:
+                return result
+            remaining = min(until, self.deadline) - time.monotonic()
+            if remaining <= 0:
+                raise BackendError("watch service did not stop")
+            await asyncio.sleep(min(0.05, remaining))
+
+
+@contextlib.contextmanager
+def managed_service(*, home: Path, config: Config, deadline: float) -> Iterator[ManagedService]:
+    """Serialize desktop lifecycle with legacy installation and uninstallation."""
+    service._require_macos()
+    paths = service.service_paths(home)
+    for path in (paths.home, paths.home / "services", paths.directory, paths.log_dir):
+        service._private_directory(path)
+    service._owned_directory(paths.plist.parent)
+    with service._management_lock(paths):
+        lease = ManagedService(paths, config, deadline)
+        try:
+            yield lease
+        finally:
+            lease._active = False

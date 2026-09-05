@@ -23,6 +23,10 @@ MESSAGES: dict[str, tuple[str, bool]] = {
     "watch_not_found": ("The watch no longer exists; refresh the list.", False),
     "watch_exists": ("The watch already exists; refresh the list.", False),
     "watch_limit": ("At most three watches can be active.", False),
+    "history_corrupt": ("A saved snapshot cannot be read safely.", False),
+    "history_oversized": ("A saved snapshot exceeds the supported size.", False),
+    "snapshot_unavailable": ("A selected snapshot is no longer available; refresh the list.", False),
+    "snapshot_identity_mismatch": ("Select snapshots from the same saved account history.", False),
 }
 
 

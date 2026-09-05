@@ -156,6 +156,9 @@ async def _credentials(profile: Profile, token: str, *, replace: bool) -> dict[s
                     raise DesktopError("recovery_required")
                 if profile.read_config() is None:
                     checkpoint(forward)
+                    journal = dict(journal, new_remaining=remaining)
+                    profile.write_journal(journal)
+                    checkpoint(forward)
                     profile.write_config(config_bytes(profile, token))
                 checkpoint(forward)
                 profile.write_state(

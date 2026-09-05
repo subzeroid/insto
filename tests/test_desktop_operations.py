@@ -434,3 +434,24 @@ asyncio.run(operations.replace_credentials(profile, "offline-new-secret"))
         if child.poll() is None:
             child.kill()
             child.wait(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_resumed_setup_binds_quota_to_current_candidate_before_start_failure(
+    environment, monkeypatch
+):
+    from insto.desktop import operations
+
+    profile, service = environment
+    with profile.locked(initialize=True):
+        profile.write_journal(
+            profile.new_journal(
+                kind="setup", previous_state=None, previous_running=False, remaining=99
+            )
+        )
+    monkeypatch.setattr(operations, "validate_candidate", AsyncMock(return_value=0))
+    service.fail_start = 1
+    with pytest.raises(DesktopError):
+        await operations.configure(profile, "offline-new-secret")
+    assert profile.read_state()["quota_remaining"] == 0
+    assert profile.read_journal()["new_remaining"] == 0

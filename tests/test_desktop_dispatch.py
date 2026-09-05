@@ -26,6 +26,10 @@ CAPABILITIES = [
     "watches.pause",
     "watches.resume",
     "watches.remove",
+    "snapshots.targets",
+    "snapshots.list",
+    "snapshots.compare",
+    "changes.list",
 ]
 
 
@@ -38,7 +42,7 @@ def wire(operation, params):
     ).encode()
 
 
-async def test_exact_c2a_capabilities():
+async def test_exact_c2_capabilities():
     response = json.loads(await handle(wire("hello", {})))
     assert response["result"]["capabilities"] == CAPABILITIES
 

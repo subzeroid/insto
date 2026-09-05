@@ -8,6 +8,8 @@ from typing import Any
 from insto import __version__
 from insto.desktop.errors import MESSAGES as DOMAIN_MESSAGES
 from insto.desktop.errors import DesktopError
+from insto.desktop.history_params import CAPABILITIES as HISTORY_CAPABILITIES
+from insto.desktop.history_params import validate_params as validate_history_params
 from insto.desktop.protocol import PROTOCOL_VERSION, ProtocolError, Request, decode, encode
 from insto.desktop.watch_params import CAPABILITIES as WATCH_CAPABILITIES
 from insto.desktop.watch_params import validate_params as validate_watch_params
@@ -31,6 +33,7 @@ CAPABILITIES = (
     "service.stop",
     "service.repair",
     *WATCH_CAPABILITIES,
+    *HISTORY_CAPABILITIES,
 )
 
 
@@ -49,6 +52,13 @@ async def dispatch(request: Request) -> dict[str, Any]:
         if operation == "overview":
             return await watches.overview(profile, deadline=deadline)
         return watches.run(profile, operation, params, deadline=deadline)
+    if operation in HISTORY_CAPABILITIES:
+        params = validate_history_params(operation, request.params)
+        from insto.desktop import history
+        from insto.desktop.profile import Profile
+
+        profile = Profile.from_environment()
+        return history.run(profile, operation, params, deadline=deadline)
     token_operation = operation in {"setup.configure", "credentials.replace"}
     if token_operation:
         if request.params.keys() != {"token"}:

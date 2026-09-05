@@ -113,6 +113,12 @@ def check_database(path: Path, *, deadline: float | None = None) -> bool:
     if deadline is not None and time.monotonic() >= deadline:
         raise DesktopError("operation_timeout")
     if not os.path.lexists(path):
+        # An absent main file does not make existing SQLite sidecars ours. A
+        # newly published database could otherwise replay an unrelated WAL.
+        if any(
+            os.path.lexists(Path(str(path) + suffix)) for suffix in ("-wal", "-shm", "-journal")
+        ):
+            raise DesktopError("schema_mismatch")
         return False
     try:
         sources = {path: _fingerprint(_database_file(path))}
@@ -166,7 +172,7 @@ def initialize_database(path: Path, *, deadline: float | None = None) -> None:
         check_database(staged, deadline=deadline)
         with staged.open("rb") as stream:
             os.fsync(stream.fileno())
-        if os.path.lexists(path):
+        if check_database(path, deadline=deadline):
             raise DesktopError("profile_ownership")
         if deadline is not None and time.monotonic() >= deadline:
             raise DesktopError("operation_timeout")

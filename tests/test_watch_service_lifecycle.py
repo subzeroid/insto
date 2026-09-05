@@ -87,6 +87,45 @@ def artifacts(home: Path, config: Config) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("already_stopping", [False, True])
+async def test_stop_waits_through_native_sigtermed_state(setup, monkeypatch, already_stopping):
+    module, config, home = setup
+    _, job = native(monkeypatch, "SIGTERMed" if already_stopping else "running")
+    job["lock"] = Path(f"{config.db_path}.watch.lock")
+    original = legacy._run_launchctl
+    stopping_prints = 0
+    booted_out = False
+
+    def transient(args, **kwargs):
+        nonlocal stopping_prints, booted_out
+        if args[0] == "print" and booted_out:
+            stopping_prints += 1
+            if stopping_prints == 2:
+                job["state"] = "missing"
+        result = original(args, **kwargs)
+        if args[0] == "bootout":
+            booted_out = True
+            job["state"] = "SIGTERMed"
+        return result
+
+    monkeypatch.setattr(legacy, "_run_launchctl", transient)
+    try:
+        with module.managed_service(
+            home=home, config=config, deadline=time.monotonic() + 2
+        ) as lease:
+            artifacts(home, config)
+            job["fd"] = os.open(job["lock"], os.O_RDWR | os.O_CREAT, 0o600)
+            fcntl.flock(job["fd"], fcntl.LOCK_EX | fcntl.LOCK_NB)
+            os.write(job["fd"], b"123\n")
+            report = await lease.ensure_stopped()
+            assert report["registration"] == "unloaded" and report["executor"]["state"] == "idle"
+            assert stopping_prints == 2
+    finally:
+        if job["fd"] is not None:
+            os.close(job["fd"])
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("already_spawning", [False, True])
 async def test_native_xpcproxy_and_never_exited_are_pending_not_ready(
     setup, monkeypatch, already_spawning

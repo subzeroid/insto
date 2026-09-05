@@ -22,6 +22,7 @@ from insto.service import watch_service as service
 _READINESS_SECONDS = 10.0
 _STOPPED_STATES = {"not running", "exited", "waiting"}
 _STARTING_STATES = {"xpcproxy"}
+_STOPPING_STATES = {"SIGTERMed"}
 
 
 def _outer_fields(output: bytes) -> tuple[dict[str, str], list[str]]:
@@ -187,7 +188,7 @@ class ManagedService:
         ):
             raise BackendError("loaded watch service runtime provenance is unknown")
         state = fields.get("state")
-        if state not in {"running", *_STOPPED_STATES, *_STARTING_STATES}:
+        if state not in {"running", *_STOPPED_STATES, *_STARTING_STATES, *_STOPPING_STATES}:
             raise BackendError("loaded watch service process state is unknown")
         for key, pattern in (("pid", r"[1-9][0-9]*"), ("last exit code", r"-?[0-9]+")):
             if key == "last exit code" and fields.get(key) == "(never exited)":
@@ -232,7 +233,7 @@ class ManagedService:
         executor = report["executor"]
         process = report["process"]
         if executor["state"] == "busy" and (
-            process["state"] not in {"running", *_STARTING_STATES}
+            process["state"] not in {"running", *_STARTING_STATES, *_STOPPING_STATES}
             or executor["pid"] is None
             or executor["pid"] != process["pid"]
         ):

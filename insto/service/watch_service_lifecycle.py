@@ -23,6 +23,51 @@ _READINESS_SECONDS = 10.0
 _STOPPED_STATES = {"not running", "exited", "waiting"}
 
 
+def _outer_fields(output: bytes) -> tuple[dict[str, str], list[str]]:
+    """Read job fields, excluding nested launchctl resource/coalition dictionaries."""
+    lines = [line.strip() for line in output.decode("utf-8", "replace").splitlines()]
+    lines = [line for line in lines if line]
+    if lines and lines[0].startswith("gui/") and lines[0].endswith(" = {"):
+        if lines[-1] != "}":
+            raise BackendError("loaded watch service output is malformed")
+        lines = lines[1:-1]
+    fields: dict[str, str] = {}
+    arguments: list[str] = []
+    depth = 0
+    in_arguments = False
+    for line in lines:
+        if in_arguments:
+            if line == "}":
+                in_arguments = False
+                depth = 0
+            else:
+                arguments.append(line)
+            continue
+        if line == "}":
+            depth -= 1
+            if depth < 0:
+                raise BackendError("loaded watch service output is malformed")
+            continue
+        key, separator, value = line.partition(" = ")
+        if (
+            depth == 0
+            and separator
+            and key in {"program", "arguments", "path", "state", "pid", "last exit code"}
+        ):
+            if key in fields:
+                raise BackendError("loaded watch service output has ambiguous fields")
+            fields[key] = value
+            if key == "arguments":
+                if value != "{":
+                    raise BackendError("loaded watch service arguments are malformed")
+                in_arguments = True
+        if separator and value == "{":
+            depth += 1
+    if depth or in_arguments:
+        raise BackendError("loaded watch service output is malformed")
+    return fields, arguments
+
+
 class ManagedService:
     """Valid only inside ``managed_service``; caller may extend rollback deadline."""
 
@@ -132,24 +177,24 @@ class ManagedService:
             yield
 
     def _process(self, output: bytes) -> dict[str, Any]:
-        text = output.decode("utf-8", "replace")
+        fields, arguments = _outer_fields(output)
         expected = plistlib.loads(self._plist)["ProgramArguments"]
-        programs = re.findall(r"(?m)^\s*program = (.+)$", text)
-        arguments = re.findall(r"(?m)^\s*arguments = \{\s*\n(.*?)^\s*\}", text, re.S)
-        paths = re.findall(r"(?m)^\s*path = (.+)$", text)
         if (
-            len(programs) != 1
-            or programs[0].strip() != expected[0]
-            or len(arguments) != 1
-            or [line.strip() for line in arguments[0].splitlines() if line.strip()] != expected
-            or (paths and (len(paths) != 1 or paths[0].strip() != str(self._paths.plist)))
+            fields.get("program") != expected[0]
+            or arguments != expected
+            or ("path" in fields and fields["path"] != str(self._paths.plist))
         ):
             raise BackendError("loaded watch service runtime provenance is unknown")
-        process = service._parse_launchctl_print(output)
-        states = re.findall(r"(?m)^\s*state\s*=\s*([^\n]+?)\s*$", text)
-        if len(states) != 1 or states[0] not in {"running", *_STOPPED_STATES}:
+        state = fields.get("state")
+        if state not in {"running", *_STOPPED_STATES}:
             raise BackendError("loaded watch service process state is unknown")
-        process["state"] = states[0]
+        for key, pattern in (("pid", r"[1-9][0-9]*"), ("last exit code", r"-?[0-9]+")):
+            if key in fields and not re.fullmatch(pattern, fields[key]):
+                raise BackendError("loaded watch service process identity is malformed")
+        process = service._parse_launchctl_print(
+            "\n".join(f"{key} = {value}" for key, value in fields.items()).encode()
+        )
+        process["state"] = state
         if process["state"] == "running" and not process["pid"]:
             raise BackendError("loaded watch service process identity is unknown")
         return process

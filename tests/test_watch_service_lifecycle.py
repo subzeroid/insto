@@ -4,6 +4,7 @@ import asyncio
 import fcntl
 import importlib
 import os
+import plistlib
 import subprocess
 import threading
 import time
@@ -731,17 +732,41 @@ def test_managed_service_accepts_explicit_artifacts(
         backend="hikerapi", hiker_token="offline-artifacts-token", db_path=home / "store.db"
     )
     paths = legacy.service_paths(home)
-    explicit = (b"m", b"p")
+    explicit = (b'{"m":1}\n', plistlib.dumps({"ProgramArguments": ["/x"]}))
     lease = ManagedService(paths, config, deadline=1e12, artifacts=explicit)
     assert (lease._manifest, lease._plist) == explicit and lease._config is config
     default = ManagedService(paths, config, deadline=1e12)
-    assert default._manifest != b"m" and b"python" in default._manifest
+    assert default._manifest != explicit[0] and b"python" in default._manifest
 
 
-@pytest.mark.asyncio
-async def test_remove_registration_requires_an_unloaded_idle_service(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    "artifacts",
+    [
+        (b"not json", plistlib.dumps({"ProgramArguments": ["/x"]})),
+        (b"\xff", plistlib.dumps({"ProgramArguments": ["/x"]})),
+        (b"{}", b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n'),
+        (b"{}", b"bplist00garbage"),
+        (b"{}", plistlib.dumps({"Label": "x"})),
+        (b"{}", plistlib.dumps({"ProgramArguments": "/x"})),
+        (b"{}", plistlib.dumps({"ProgramArguments": []})),
+        (b"{}", plistlib.dumps(["/x"])),
+    ],
+)
+def test_managed_service_refuses_malformed_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, artifacts: tuple[bytes, bytes]
 ) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    config = Config(backend="hikerapi", hiker_token="offline-malformed", db_path=home / "store.db")
+    paths = legacy.service_paths(home)
+    with pytest.raises(BackendError, match="artifacts are malformed"):
+        ManagedService(paths, config, deadline=1e12, artifacts=artifacts)
+
+
+def _registered_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[legacy.ServicePaths, Config]:
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     (tmp_path / "Library" / "LaunchAgents").mkdir(parents=True)
     home = tmp_path / "home"
@@ -755,8 +780,10 @@ async def test_remove_registration_requires_an_unloaded_idle_service(
     manifest, plist = legacy._desired(paths, config, None)
     legacy._atomic_write(paths.manifest, manifest)
     legacy._atomic_write(paths.plist, plist)
-    outputs = {"print": (0, b"\tstate = running\n\tpid = 9\n")}
+    return paths, config
 
+
+def _fake_launchctl(monkeypatch: pytest.MonkeyPatch, outputs: dict[str, tuple[int, bytes]]) -> None:
     async def fake(
         arguments: list[str], *, timeout: float | None = None, deadline: float | None = None
     ) -> subprocess.CompletedProcess[bytes]:
@@ -766,6 +793,21 @@ async def test_remove_registration_requires_an_unloaded_idle_service(
         )
 
     monkeypatch.setattr(legacy, "_launchctl", fake)
+
+
+def _loaded_output(plist: bytes) -> bytes:
+    argv = plistlib.loads(plist)["ProgramArguments"]
+    provenance = f"program = {argv[0]}\narguments = {{\n" + "\n".join(argv) + "\n}\n"
+    return f"state = running\npid = 123\n{provenance}".encode()
+
+
+@pytest.mark.asyncio
+async def test_remove_registration_requires_an_unloaded_idle_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths, config = _registered_home(tmp_path, monkeypatch)
+    outputs = {"print": (0, b"\tstate = running\n\tpid = 9\n")}
+    _fake_launchctl(monkeypatch, outputs)
     lease = ManagedService(paths, config, deadline=1e12)
     with pytest.raises(BackendError):
         await lease.remove_registration()  # still loaded
@@ -774,3 +816,35 @@ async def test_remove_registration_requires_an_unloaded_idle_service(
     await lease.remove_registration()
     assert not paths.plist.exists() and not paths.manifest.exists()
     await lease.remove_registration()  # idempotent
+
+
+@pytest.mark.asyncio
+async def test_remove_registration_refuses_a_loaded_owned_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths, config = _registered_home(tmp_path, monkeypatch)
+    lease = ManagedService(paths, config, deadline=1e12)
+    _fake_launchctl(monkeypatch, {"print": (0, _loaded_output(lease._plist))})
+    with pytest.raises(BackendError, match="still registered or running"):
+        await lease.remove_registration()
+    assert paths.manifest.exists() and paths.plist.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_registration_refuses_a_busy_executor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths, config = _registered_home(tmp_path, monkeypatch)
+    _fake_launchctl(monkeypatch, {})
+    lease = ManagedService(paths, config, deadline=1e12)
+    fd = os.open(lease._lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    os.write(fd, b"123\n")
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    try:
+        with pytest.raises(BackendError, match="still registered or running"):
+            await lease.remove_registration()
+        assert paths.manifest.exists() and paths.plist.exists()
+    finally:
+        os.close(fd)
+    await lease.remove_registration()  # the executor is idle once the lock is released
+    assert not paths.plist.exists() and not paths.manifest.exists()

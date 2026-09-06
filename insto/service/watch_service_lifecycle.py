@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import json
 import os
 import plistlib
 import re
@@ -14,6 +15,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 from insto.config import Config
 from insto.exceptions import BackendError
@@ -70,6 +72,19 @@ def _outer_fields(output: bytes) -> tuple[dict[str, str], list[str]]:
     return fields, arguments
 
 
+def _validated_artifacts(artifacts: tuple[bytes, bytes]) -> tuple[bytes, bytes]:
+    """Refuse caller-supplied artifacts that ``_process`` could not parse later."""
+    manifest, plist = artifacts
+    try:
+        json.loads(manifest)
+        arguments = plistlib.loads(plist)["ProgramArguments"]
+    except (plistlib.InvalidFileException, ExpatError, ValueError, KeyError, TypeError) as exc:
+        raise BackendError("watch service artifacts are malformed") from exc
+    if not isinstance(arguments, list) or not arguments:
+        raise BackendError("watch service artifacts are malformed")
+    return artifacts
+
+
 class ManagedService:
     """Valid only inside ``managed_service``; caller may extend rollback deadline."""
 
@@ -85,7 +100,9 @@ class ManagedService:
         self._paths = paths
         self._config = config
         self._manifest, self._plist = (
-            artifacts if artifacts is not None else service._desired(paths, config, None)
+            _validated_artifacts(artifacts)
+            if artifacts is not None
+            else service._desired(paths, config, None)
         )
         self._db_path = config.db_path.expanduser().absolute()
         self._lock_path = Path(f"{config.db_path.expanduser().resolve()}.watch.lock")

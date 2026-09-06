@@ -14,7 +14,7 @@ from pathlib import Path
 import tomli_w
 
 from insto._redact import register_secret
-from insto.config import BACKEND_HIKERAPI, Config
+from insto.config import BACKEND_HIKERAPI, Config, normalize_backend
 from insto.desktop.access import validate_token
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile, _directory, _sync_directory
@@ -71,11 +71,20 @@ def parse_profile_config(profile: Profile, payload: bytes) -> Config:
         return parse_config(profile, payload)
     try:
         data = tomllib.loads(payload.decode())
+    except (UnicodeDecodeError, ValueError):
+        raise DesktopError("home_invalid") from None
+    # Name the backend before the runner's credential checks: an aiograpi home
+    # without credentials is unsupported here, not invalid.
+    backend = data.get("backend")
+    if isinstance(backend, str) and normalize_backend(backend) != BACKEND_HIKERAPI:
+        raise DesktopError("home_backend_unsupported")
+    try:
         config = load_home_config(profile.home, data)
-    except (UnicodeDecodeError, ValueError, TypeError, BackendError):
+    except (ValueError, TypeError, BackendError):
         # TypeError: a non-string path value such as `db_path = 5` reaches Path().
         raise DesktopError("home_invalid") from None
     if config.backend != BACKEND_HIKERAPI:
+        # An absent key still defaults through load_config; the resolved value rules.
         raise DesktopError("home_backend_unsupported")
     token = config.hiker_token
     if not isinstance(token, str):
@@ -89,16 +98,22 @@ def parse_profile_config(profile: Profile, payload: bytes) -> Config:
 
 
 def adopted_config_bytes(payload: bytes, token: str) -> bytes:
-    """Rewrite only the HikerAPI token of an adopted home's TOML; other keys survive."""
+    """Rewrite only the HikerAPI token of an adopted home's TOML; other keys survive.
+
+    The file is re-serialised from its parsed tables, so TOML comments and layout
+    are not preserved (as the design documents).
+    """
     validate_token(token)
     try:
         data = tomllib.loads(payload.decode())
     except (UnicodeDecodeError, ValueError):
         raise DesktopError("home_invalid") from None
-    section = data.get("hikerapi")
-    if not isinstance(section, dict):
-        legacy = data.get("hiker")
-        section = legacy if isinstance(legacy, dict) else data.setdefault("hikerapi", {})
+    hikerapi, legacy = data.get("hikerapi"), data.get("hiker")
+    if any(value is not None and not isinstance(value, dict) for value in (hikerapi, legacy)):
+        raise DesktopError("home_invalid")
+    section = hikerapi if hikerapi is not None else legacy
+    if section is None:
+        section = data.setdefault("hikerapi", {})
     section["token"] = token
     return tomli_w.dumps(data).encode()
 

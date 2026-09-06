@@ -185,7 +185,10 @@ def load_home_config(home: Path, toml_data: dict[str, Any] | None = None) -> Con
     """Resolve a home's configuration like the service runner, without env-file secrets.
 
     Relative paths resolve against the home, which is the service's WorkingDirectory;
-    the bridge's own working directory is never a base for a CLI home's paths.
+    the bridge's own working directory is never a base for a CLI home's paths. The
+    one exception is an explicit relative ``aiograpi.session_path``: ``load_config``
+    already resolves it against the process cwd before this function sees it
+    (pre-existing runner behaviour, irrelevant for hikerapi homes).
     """
     with _temporary_service_environment(home, {}):
         data = (

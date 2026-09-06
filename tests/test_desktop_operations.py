@@ -472,12 +472,8 @@ async def test_null_quota_is_not_exhausted_and_is_reported_null(environment):
     assert result["quota_remaining"] is None and result["quota_checked_at"] is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("token", ["offline-cli-secret", "offline-new-secret"])
-async def test_configure_refuses_an_adopted_home_before_validation(environment, tmp_path, token):
-    from insto.desktop import operations
-
-    own, service = environment
+def adopted_profile(own, tmp_path):
+    """Bind the own profile to a sibling CLI home that holds a hikerapi config."""
     home = tmp_path / "cli-home"
     home.mkdir(mode=0o700)
     original = b'backend = "hikerapi"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
@@ -487,9 +483,31 @@ async def test_configure_refuses_an_adopted_home_before_validation(environment, 
         own.write_binding(home)
     profile = Profile(own.root, home=home)
     assert profile.adopted
+    return profile, original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", ["offline-cli-secret", "offline-new-secret"])
+async def test_configure_refuses_an_adopted_home_before_validation(environment, tmp_path, token):
+    from insto.desktop import operations
+
+    own, service = environment
+    profile, original = adopted_profile(own, tmp_path)
     with pytest.raises(DesktopError, match="already_configured"):
         await operations.configure(profile, token)
     operations.validate_candidate.assert_not_awaited()
     assert not service.events
-    assert (home / "config.toml").read_bytes() == original
+    assert profile.config.read_bytes() == original
     assert profile.read_state() is None and profile.read_journal() is None
+
+
+@pytest.mark.asyncio
+async def test_inspect_adopted_home_without_state_is_unconfigured(environment, tmp_path):
+    from insto.desktop import operations
+
+    own, service = environment
+    profile, original = adopted_profile(own, tmp_path)
+    result = await operations.inspect_profile(profile)
+    assert result["configured"] is False and result["status"] == "unconfigured"
+    assert not service.events
+    assert profile.config.read_bytes() == original

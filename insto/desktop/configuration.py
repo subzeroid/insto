@@ -17,10 +17,26 @@ from insto._redact import register_secret
 from insto.config import BACKEND_HIKERAPI, Config, normalize_backend
 from insto.desktop.access import validate_token
 from insto.desktop.errors import DesktopError
-from insto.desktop.profile import Profile, _directory, _sync_directory
+from insto.desktop.profile import Profile, _directory, _sync_directory, _trusted_ancestors
 from insto.exceptions import BackendError
 from insto.service.history import _SCHEMA_VERSION, HistoryStore
 from insto.service.watch_service_runner import load_home_config
+
+
+def check_database_location(home: Path, db_path: Path) -> None:
+    """An external database sits in an existing owned private directory under trusted
+    parents, like the home itself; inside the home the home's own checks cover it.
+
+    Raises `home_invalid`. Shared by the adopted config parser (every desktop open)
+    and `home.inspect`, so inspection and later opens agree.
+    """
+    if db_path.parent == home or home in db_path.parents:
+        return
+    try:
+        _trusted_ancestors(db_path)
+        _directory(db_path.parent)
+    except (DesktopError, OSError):
+        raise DesktopError("home_invalid") from None
 
 
 def config_bytes(profile: Profile, token: str) -> bytes:
@@ -86,6 +102,7 @@ def parse_profile_config(profile: Profile, payload: bytes) -> Config:
     if config.backend != BACKEND_HIKERAPI:
         # An absent key still defaults through load_config; the resolved value rules.
         raise DesktopError("home_backend_unsupported")
+    check_database_location(profile.home, config.db_path)
     token = config.hiker_token
     if not isinstance(token, str):
         raise DesktopError("home_invalid")
@@ -238,11 +255,19 @@ def initialize_database(
         check_database(staged, deadline=deadline)
         with staged.open("rb") as stream:
             os.fsync(stream.fileno())
+        # A concurrent writer (the CLI) may have published first: its database is
+        # kept and its schema decides; sidecars that appeared meanwhile are refused
+        # by the same check. The link never replaces a file that won the race.
         if check_database(path, deadline=deadline):
-            raise DesktopError("profile_ownership")
+            return
         if deadline is not None and time.monotonic() >= deadline:
             raise DesktopError("operation_timeout")
-        os.replace(staged, path)
+        try:
+            os.link(staged, path)
+        except FileExistsError:
+            pass
+        else:
+            staged.unlink()
         _sync_directory(Path(temporary))
     _sync_directory(path.parent)
     check_database(path, deadline=deadline)

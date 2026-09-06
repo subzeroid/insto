@@ -18,12 +18,13 @@ def validate_path(value: Any, *, allow_none: bool) -> Path | None:
         if allow_none:
             return None
         raise DesktopError("invalid_params")
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value.encode("utf-8")) > PATH_LIMIT_BYTES
-        or "\x00" in value
-    ):
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise DesktopError("invalid_params")
+    try:
+        encoded = value.encode("utf-8")  # a lone surrogate is not a path
+    except UnicodeEncodeError:
+        raise DesktopError("invalid_params") from None
+    if len(encoded) > PATH_LIMIT_BYTES:
         raise DesktopError("invalid_params")
     expanded = value
     if value == "~" or value.startswith("~/"):
@@ -37,7 +38,8 @@ def validate_path(value: Any, *, allow_none: bool) -> Path | None:
         raise DesktopError("home_invalid")
     try:
         resolved = path.resolve()
-    except OSError:
+    except (OSError, RuntimeError):
+        # RuntimeError: a symlink loop on Python 3.11/3.12 (ELOOP as OSError later).
         raise DesktopError("home_invalid") from None
     if resolved != path:
         raise DesktopError("home_invalid")

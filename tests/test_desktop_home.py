@@ -758,3 +758,72 @@ def test_validate_path_refuses_tilde_without_an_account_home(monkeypatch, value)
     monkeypatch.setenv("HOME", "")
     with pytest.raises(DesktopError, match="home_invalid"):
         validate_path(value, allow_none=False)
+
+
+@pytest.mark.parametrize("setup", ["configured", "lock_only"])
+async def test_another_desktop_roots_own_profile_is_reported_and_refused(
+    tmp_path, own, launchd, setup
+):
+    """C2: `root-B/profile` is private and readable, but adopting it would fork intent
+    across two roots; inspect says so and select refuses before any change."""
+    from insto.desktop import home, operations
+    from insto.desktop.configuration import initialize_database
+
+    other = Profile(tmp_path / "root-b")
+    if setup == "configured":
+        with other.locked(initialize=True):
+            other.write_config(operations.config_bytes(other, "offline-other-secret"))
+            other.write_state(other.new_state(remaining=None, desired="stopped"))
+            initialize_database(other.home / "store.db")
+    else:
+        with other.locked(initialize=True):
+            pass  # a root mid-setup: only its lock file exists beside the profile
+    report = await home.inspect(other.home, deadline=time.monotonic() + 10)
+    assert report["exists"] and report["private"] is True
+    assert report["adoptable"] is False and report["reason"] == "home_invalid"
+    assert report["config"] == ("ok" if setup == "configured" else "missing")
+    with pytest.raises(DesktopError) as info:
+        await home.select(own, other.home)
+    assert info.value.code == "home_invalid"
+    assert launchd.events == [] and not own.binding.exists()
+    assert not (other.home / "desktop-state.json").exists()
+    assert sorted(p.name for p in other.root.iterdir()) == (
+        [".desktop.lock", "desktop-state.json", "profile"]
+        if setup == "configured"
+        else [".desktop.lock", "profile"]
+    )
+
+
+async def test_missing_database_parent_inside_the_home_is_unreadable(tmp_path, own, launchd):
+    """F3: selection would stage the database beside its path; inspect agrees up front."""
+    from insto.desktop import home
+
+    path = cli_home(tmp_path, database="missing", extra='db_path = "data/store.db"\n')
+    report = await home.inspect(path, deadline=time.monotonic() + 10)
+    assert report["config"] == "ok" and report["database"] == "unreadable"
+    assert report["adoptable"] is False and report["reason"] == "storage_error"
+    with pytest.raises(DesktopError) as info:
+        await home.select(own, path)
+    assert info.value.code == "storage_error"
+    assert launchd.events == [] and not own.binding.exists()
+    assert not (path / "data").exists() and not (path / "desktop-state.json").exists()
+
+
+@pytest.mark.parametrize("parent", ["private", "world_writable"])
+async def test_external_database_parent_must_be_owned_and_private(
+    tmp_path, launch_agents, launchd, parent
+):
+    """C4: inspect applies the rule every later desktop open applies to an external db."""
+    from insto.desktop import home
+
+    external = tmp_path / "elsewhere"
+    external.mkdir(mode=0o700)
+    external.chmod(0o777 if parent == "world_writable" else 0o700)
+    path = cli_home(tmp_path, database="missing", extra=f'db_path = "{external / "store.db"}"\n')
+    report = await home.inspect(path, deadline=time.monotonic() + 10)
+    if parent == "private":
+        assert report["config"] == "ok" and report["database"] == "missing"
+        assert report["adoptable"] is True
+    else:
+        assert report["config"] == "invalid" and report["backend"] is None
+        assert report["adoptable"] is False and report["reason"] == "home_invalid"

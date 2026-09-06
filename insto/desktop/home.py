@@ -10,10 +10,21 @@ from typing import Any
 
 from insto.config import BACKEND_HIKERAPI, Config, normalize_backend
 from insto.desktop.access import validate_token
-from insto.desktop.configuration import check_database, initialize_database, parse_profile_config
+from insto.desktop.configuration import (
+    check_database,
+    check_database_location,
+    initialize_database,
+    parse_profile_config,
+)
 from insto.desktop.errors import DesktopError
 from insto.desktop.operations import OPERATION_SECONDS, _config, _dto, _error, _running
-from insto.desktop.profile import Profile, _directory, _file, _trusted_ancestors
+from insto.desktop.profile import (
+    Profile,
+    _directory,
+    _file,
+    _own_profile_of_a_desktop_root,
+    _trusted_ancestors,
+)
 from insto.desktop.recovery import _lease_artifacts, checkpoint, finish_terminal, require_settled
 from insto.desktop.service_facts import _owned_files, registration_facts
 from insto.exceptions import BackendError
@@ -49,6 +60,7 @@ def _config_report(path: Path) -> tuple[str, str | None, Config | None]:
             backend = normalize_backend(named)
             return "ok", backend if backend in _BACKENDS else None, None
         config = load_home_config(path, data)
+        check_database_location(path, config.db_path)  # the same rule every open applies
     except (DesktopError, BackendError, TypeError, ValueError, OSError):
         return "invalid", None, None
     token = config.hiker_token
@@ -62,6 +74,12 @@ def _config_report(path: Path) -> tuple[str, str | None, Config | None]:
 
 
 def _database_report(db_path: Path, deadline: float) -> str:
+    try:
+        # Selection stages and publishes a missing database beside it: a parent that
+        # is not an existing owned private directory is unusable, not "missing".
+        _directory(db_path.parent)
+    except (DesktopError, OSError):
+        return "unreadable"
     try:
         return "ok" if check_database(db_path, deadline=deadline) else "missing"
     except DesktopError as error:
@@ -111,7 +129,10 @@ async def _inspect(path: Path, *, deadline: float) -> tuple[dict[str, Any], Conf
     report["database"] = _database_report(db_path, deadline)
     facts = await registration_facts(watch_service.service_paths(path), deadline=deadline)
     report.update({key: facts[key] for key in _FACT_KEYS})
-    report["reason"] = _reason(report)
+    # Another desktop root's own profile is described but never adoptable: the same
+    # rule Profile applies to a binding, reported without touching the root.
+    foreign_root = _own_profile_of_a_desktop_root(path)
+    report["reason"] = "home_invalid" if foreign_root else _reason(report)
     report["adoptable"] = report["reason"] is None
     checkpoint(deadline)
     return report, config

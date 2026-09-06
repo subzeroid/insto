@@ -102,6 +102,30 @@ async def test_home_inspect_rejects_a_null_path(monkeypatch):
     assert json.loads(raw)["error"]["code"] == "invalid_params"
 
 
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+async def test_lone_surrogates_in_a_path_are_invalid_params(monkeypatch, operation):
+    """C9: a JSON escape that decodes to a lone surrogate has no UTF-8 form; it is
+    refused as a parameter, never as an internal error."""
+    forbid_import(monkeypatch, "home")
+    raw = (
+        f'{{"protocol_version": 1, "request_id": "c1", "operation": "{operation}", '
+        '"params": {"path": "/x/\\udc80"}}\n'
+    ).encode()
+    response = json.loads(await handle(raw))
+    assert response["request_id"] == "c1"
+    assert response["error"]["code"] == "invalid_params"
+
+
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+async def test_symlink_loops_in_a_path_are_home_invalid(monkeypatch, tmp_path, operation):
+    """C9: resolve() reports a loop as RuntimeError (3.11/3.12) or OSError (later)."""
+    forbid_import(monkeypatch, "home")
+    (tmp_path / "a").symlink_to(tmp_path / "b")
+    (tmp_path / "b").symlink_to(tmp_path / "a")
+    raw = await handle(wire(operation, {"path": str(tmp_path / "a" / "home")}))
+    assert json.loads(raw)["error"]["code"] == "home_invalid"
+
+
 @pytest.mark.parametrize("operation", ["service.inspect", "service.migrate", "service.uninstall"])
 async def test_c3_service_operations_take_no_params(monkeypatch, operation):
     forbid_import(monkeypatch, "operations")

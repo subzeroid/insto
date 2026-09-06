@@ -44,6 +44,9 @@ _JOURNAL_KEYS = {
 }
 _BINDING_KEYS = {"schema_version", "managed_by", "uid", "home"}
 RETAINED_REGISTRATION = "migration-registration.json"
+# Files only a desktop root carries beside its own profile. Any of them (a bare
+# lock file included: a root mid-setup) marks the parent as a desktop root.
+_DESKTOP_ROOT_MARKERS = ("desktop-state.json", "desktop-home.json", ".desktop.lock")
 
 
 def _directory(path: Path, *, private: bool = True) -> None:
@@ -65,14 +68,26 @@ def _file(info: os.stat_result) -> None:
         raise DesktopError("profile_ownership")
 
 
+def _own_profile_of_a_desktop_root(home: Path) -> bool:
+    """`root/profile` of some desktop root, which may never be adopted by another root.
+
+    Two roots sharing it would share config, database, registration and recovery
+    files under different locks and state files: forked intent. The rule is the
+    parent carrying desktop metadata; `home.inspect` reports it as `home_invalid`.
+    """
+    return any(os.path.lexists(home.parent / name) for name in _DESKTOP_ROOT_MARKERS)
+
+
 def _valid_home(root: Path, home: Path) -> bool:
-    """An adopted home is absolute, resolved, and disjoint from the desktop root."""
+    """An adopted home is absolute, resolved, disjoint from the desktop root, and not
+    the own profile of any desktop root."""
     return (
         home.is_absolute()
         and home.resolve() == home
         and home != root
         and root not in home.parents
         and home not in root.parents
+        and not _own_profile_of_a_desktop_root(home)
     )
 
 
@@ -498,6 +513,8 @@ class Profile:
         descriptors: list[int] = []
         acquired: list[int] = []
         try:
+            # The adopted home is checked before its lock file is created inside it.
+            self._existing_root()
             if self.home_lock_path is not None:
                 self._flock(self.home_lock_path, descriptors, acquired)
             self._leased = True

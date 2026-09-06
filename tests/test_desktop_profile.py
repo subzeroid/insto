@@ -567,6 +567,7 @@ def test_adopted_home_is_validated_before_a_fresh_root_is_created(tmp_path):
     root = tmp_path / "desktop"
     home = tmp_path / "cli-home"
     home.mkdir(mode=0o755)
+    home.chmod(0o755)  # mkdir(mode=) is umask-masked; the home must really be non-private
     profile = Profile(root, home=home)
     with (
         pytest.raises(DesktopError, match="home_invalid"),
@@ -625,3 +626,56 @@ def test_symlinked_adopted_home_lock_is_refused(tmp_path):
     ):
         pass
     assert (home / ".desktop.lock").is_symlink()
+
+
+@pytest.mark.parametrize("marker", ["desktop-state.json", "desktop-home.json", ".desktop.lock"])
+def test_another_desktop_roots_own_profile_is_never_adopted(tmp_path, marker):
+    """C2: `root-B/profile` under a root carrying desktop metadata (a bare lock file
+    from a root mid-setup included) is refused by the constructor and by the binding."""
+    from insto.desktop.errors import DesktopError
+    from insto.desktop.profile import Profile
+
+    root_b = tmp_path / "root-b"
+    root_b.mkdir(mode=0o700)
+    home = root_b / "profile"
+    home.mkdir(mode=0o700)
+    (root_b / marker).write_bytes(b"")
+    (root_b / marker).chmod(0o600)
+    root_a = tmp_path / "root-a"
+    root_a.mkdir(mode=0o700)
+    with pytest.raises(DesktopError) as info:
+        Profile(root_a, home=home)
+    assert info.value.code == "home_invalid"
+    binding = root_a / "desktop-home.json"
+    binding.write_text(
+        json.dumps(
+            {"schema_version": 1, "managed_by": "insto-gui", "uid": os.getuid(), "home": str(home)}
+        )
+    )
+    binding.chmod(0o600)
+    with pytest.raises(DesktopError) as info:
+        Profile(root_a).read_binding()
+    assert info.value.code == "home_invalid"
+    # A plain CLI home beside a desktop root is unaffected by the sibling's metadata.
+    sibling = tmp_path / "cli-home"
+    sibling.mkdir(mode=0o700)
+    assert Profile(root_a, home=sibling).adopted
+
+
+def test_shared_lease_validates_the_home_before_creating_its_lock(tmp_path):
+    """F8: nothing is created inside a home that has not passed the ancestry checks."""
+    from insto.desktop.errors import DesktopError
+    from insto.desktop.profile import Profile
+
+    root = tmp_path / "desktop"
+    own = Profile(root)
+    missing = Profile(root, home=tmp_path / "missing")
+    loose = tmp_path / "loose"
+    loose.mkdir(mode=0o755)
+    loose.chmod(0o755)
+    with own.locked(initialize=True):
+        for adopted in (missing, Profile(root, home=loose)):
+            with pytest.raises(DesktopError) as info, adopted.shared_lease(own):
+                pass
+            assert info.value.code == "home_invalid" and not adopted._leased
+    assert not (tmp_path / "missing").exists() and not (loose / ".desktop.lock").exists()

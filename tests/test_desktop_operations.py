@@ -16,8 +16,9 @@ from insto.exceptions import BackendError
 
 
 class Service:
-    def __init__(self, profile):
+    def __init__(self, profile, artifacts=None):
         self.profile = profile
+        self.artifacts = artifacts
         self.running = False
         self.events = []
         self.fail_start = 0
@@ -61,6 +62,9 @@ class Service:
             raise BackendError("busy")
         self.events.append(("idle", self.profile.read_config()))
         yield
+
+    async def remove_registration(self):
+        self.events.append(("remove", None))
 
 
 @pytest.fixture

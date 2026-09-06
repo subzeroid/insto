@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Third-party actions are pinned to commit SHAs, which is what makes a
+  # poisoned upstream tag a non-event. Pins only stay safe while they stay
+  # current, so let Dependabot refresh them; it rewrites both the SHA and the
+  # trailing version comment. Monthly keeps the noise down.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci

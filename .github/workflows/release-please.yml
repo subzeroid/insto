@@ -5,35 +5,49 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: write
-  pull-requests: write
-  actions: write # dispatch release.yml when a release is cut
+# Least privilege per job, and nothing by default so a job added later has to
+# ask. The third-party action keeps contents/pull-requests to open and land the
+# release PR; it no longer holds actions: write, so it cannot dispatch, re-run
+# or cancel workflows. It can still create the release tag, which is what
+# release.yml publishes from: gating that is the `pypi` environment's job, not
+# this file's.
+permissions: {}
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - id: release
-        uses: googleapis/release-please-action@v5
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # release-please creates the tag with GITHUB_TOKEN, and GitHub does NOT
-      # fire `push: tags` workflows for GITHUB_TOKEN-created tags (recursion
-      # guard) — so release.yml never ran and PyPI fell behind the GitHub
-      # releases. workflow_dispatch is the documented exception to that guard,
-      # so dispatch release.yml explicitly against the new tag to build +
-      # publish to PyPI + attach the artifacts. TAG comes from release-please
-      # (a trusted vX.Y.Z output), passed via env and quoted per workflow
-      # injection-safety guidance.
+  # release-please creates the tag with GITHUB_TOKEN, and GitHub does NOT fire
+  # `push: tags` workflows for GITHUB_TOKEN-created tags (recursion guard) — so
+  # release.yml never ran and PyPI fell behind the GitHub releases.
+  # workflow_dispatch is the documented exception to that guard, so dispatch
+  # release.yml explicitly against the new tag to build + publish to PyPI +
+  # attach the artifacts. TAG comes from release-please (a trusted vX.Y.Z
+  # output), passed via env and quoted per workflow injection-safety guidance.
+  dispatch-release:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # dispatch release.yml when a release is cut
+    steps:
       - name: Publish the new release to PyPI
-        if: ${{ steps.release.outputs.release_created == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag_name }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
           REPO: ${{ github.repository }}
         # -R is required: this job has no checkout, so `gh` cannot infer the
         # repo from a local .git dir. REPO/TAG are trusted Actions contexts.

@@ -62,7 +62,7 @@ jobs:
       - name: Build and install wheel for native smoke
         run: |
           uv build --wheel --out-dir "$RUNNER_TEMP/insto-service-dist"
-          uv venv "$RUNNER_TEMP/insto-service-venv"
+          uv venv --python 3.11 "$RUNNER_TEMP/insto-service-venv"
           uv pip install --python "$RUNNER_TEMP/insto-service-venv/bin/python" "$RUNNER_TEMP"/insto-service-dist/*.whl
       - name: Native LaunchAgent smoke (explicit skip without GUI domain)
         env:

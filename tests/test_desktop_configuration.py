@@ -240,10 +240,12 @@ def test_adopted_config_honours_cli_keys_and_registers_the_secret(tmp_path):
             b'backend = "aiograpi"\n[aiograpi]\nusername = "u"\npassword = "p"\n',
             "home_backend_unsupported",
         ),
+        (b'backend = "aiograpi"\n', "home_backend_unsupported"),
         (b'backend = "fake"\n', "home_backend_unsupported"),
         (b"backend = \n", "home_invalid"),
         (b'backend = "hikerapi"\n', "home_invalid"),
         (b'backend = "hikerapi"\n[hikerapi]\ntoken = "abc"\n', "home_invalid"),
+        (b'db_path = 5\n[hikerapi]\ntoken = "offline-cli-secret"\n', "home_invalid"),
     ],
 )
 def test_adopted_config_rejections(tmp_path, toml, code):
@@ -254,6 +256,34 @@ def test_adopted_config_rejections(tmp_path, toml, code):
     with pytest.raises(DesktopError) as info:
         parse_profile_config(profile, profile.config.read_bytes())
     assert info.value.code == code
+
+
+def test_adopted_config_expands_home_and_defaults_paths_to_the_home(tmp_path, monkeypatch):
+    from insto.desktop.configuration import parse_profile_config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = cli_home(
+        tmp_path, b'db_path = "~/x/store.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.db_path == tmp_path / "x" / "store.db"
+    default = parse_profile_config(profile, b'[hikerapi]\ntoken = "offline-cli-secret"\n')
+    assert default.backend == "hikerapi"
+    assert default.db_path == home / "store.db"
+    assert default.output_dir == home / "output"
+    assert default.cli_history_path == home / "cli_history"
+    assert default.aiograpi_session_path == home / "aiograpi.session.json"
+
+
+def test_adopted_config_accepts_the_legacy_hiker_table(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(tmp_path, b'backend = "hiker"\n[hiker]\ntoken = "offline-legacy-secret"\n')
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.backend == "hikerapi"
+    assert config.hiker_token == "offline-legacy-secret"
 
 
 def test_own_profile_config_stays_strict(tmp_path):
@@ -286,3 +316,15 @@ def test_adopted_config_bytes_replaces_only_the_token(tmp_path):
     fresh_toml = b'backend = "hikerapi"\n'
     fresh = tomllib.loads(adopted_config_bytes(fresh_toml, "offline-new-secret").decode())
     assert fresh["hikerapi"]["token"] == "offline-new-secret"
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [b'hikerapi = "x"\n', b'hiker = 1\n[hikerapi]\ntoken = "offline-old-secret"\n'],
+)
+def test_adopted_config_bytes_refuses_a_non_table_credential_section(toml):
+    from insto.desktop.configuration import adopted_config_bytes
+
+    with pytest.raises(DesktopError) as info:
+        adopted_config_bytes(toml, "offline-new-secret")
+    assert info.value.code == "home_invalid"

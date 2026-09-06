@@ -10,6 +10,8 @@ from insto.desktop.errors import MESSAGES as DOMAIN_MESSAGES
 from insto.desktop.errors import DesktopError
 from insto.desktop.history_params import CAPABILITIES as HISTORY_CAPABILITIES
 from insto.desktop.history_params import validate_params as validate_history_params
+from insto.desktop.home_params import CAPABILITIES as HOME_CAPABILITIES
+from insto.desktop.home_params import validate_path
 from insto.desktop.protocol import PROTOCOL_VERSION, ProtocolError, Request, decode, encode
 from insto.desktop.watch_params import CAPABILITIES as WATCH_CAPABILITIES
 from insto.desktop.watch_params import validate_params as validate_watch_params
@@ -23,6 +25,8 @@ _MESSAGES = {
     "internal_error": "Desktop operation failed.",
 }
 
+_SERVICE_C3 = ("service.inspect", "service.migrate", "service.uninstall")
+
 CAPABILITIES = (
     "hello",
     "setup.inspect",
@@ -34,6 +38,8 @@ CAPABILITIES = (
     "service.repair",
     *WATCH_CAPABILITIES,
     *HISTORY_CAPABILITIES,
+    *_SERVICE_C3,
+    *HOME_CAPABILITIES,
 )
 
 
@@ -59,6 +65,18 @@ async def dispatch(request: Request) -> dict[str, Any]:
 
         profile = Profile.from_environment()
         return history.run(profile, operation, params, deadline=deadline)
+    if operation in HOME_CAPABILITIES:
+        if request.params.keys() != {"path"}:
+            raise ProtocolError("invalid_params", request.request_id)
+        path = validate_path(request.params["path"], allow_none=operation == "home.select")
+        from insto.desktop import home
+        from insto.desktop.profile import Profile
+
+        if operation == "home.inspect":
+            if path is None:
+                raise ProtocolError("invalid_params", request.request_id)
+            return await home.inspect(path, deadline=deadline)
+        return await home.select(Profile.own_from_environment(), path)
     token_operation = operation in {"setup.configure", "credentials.replace"}
     if token_operation:
         if request.params.keys() != {"token"}:
@@ -85,6 +103,14 @@ async def dispatch(request: Request) -> dict[str, Any]:
         return await operations.configure(profile, request.params["token"])
     if operation == "credentials.replace":
         return await operations.replace_credentials(profile, request.params["token"])
+    if operation == "service.inspect":
+        return await operations.inspect_service(profile)
+    if operation in _SERVICE_C3:
+        from insto.desktop import migration
+
+        if operation == "service.migrate":
+            return await migration.migrate(profile)
+        return await migration.uninstall(profile)
     return await operations.change_service(profile, operation.removeprefix("service."))
 
 

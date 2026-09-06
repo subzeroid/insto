@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from typing import Any
 
@@ -17,12 +18,14 @@ from insto.desktop.configuration import (
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
 from insto.desktop.recovery import checkpoint, cleanup, phase, reconcile, rollback_drained
+from insto.desktop.service_facts import registration_facts
 from insto.exceptions import BackendError
 from insto.service import watch_service
 from insto.service.watch_service_lifecycle import ManagedService, managed_service
 
 OPERATION_SECONDS = 120.0
 ROLLBACK_SECONDS = 35.0
+INSPECT_SECONDS = 10.0
 
 
 def read_service(profile: Profile, config: Config, deadline: float) -> ManagedService:
@@ -92,6 +95,33 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
     finally:
         if service is not None:
             service._active = False
+
+
+async def inspect_service(profile: Profile) -> dict[str, Any]:
+    """Registration facts for the current profile; a read that never touches launchd state."""
+    deadline = time.monotonic() + INSPECT_SECONDS
+    if profile.read_state() is None:
+        return {
+            "registration": "none",
+            "interpreter": None,
+            "interpreter_exists": None,
+            "loaded": None,
+            "settings": None,
+        }
+    paths = watch_service.service_paths(profile.home)
+    expected: dict[str, Any] | None = None
+    payload = profile.read_config()
+    if payload is not None:
+        try:
+            config = parse_profile_config(profile, payload)
+            expected = json.loads(watch_service._desired(paths, config, None)[0])
+        except DesktopError:
+            expected = None
+    facts = await registration_facts(paths, deadline=deadline, expected=expected)
+    return {
+        key: facts[key]
+        for key in ("registration", "interpreter", "interpreter_exists", "loaded", "settings")
+    }
 
 
 def _config(profile: Profile, token: str | None = None, *, deadline: float) -> Config:

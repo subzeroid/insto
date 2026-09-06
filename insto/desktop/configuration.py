@@ -219,12 +219,17 @@ def check_database(path: Path, *, deadline: float | None = None) -> bool:
         raise DesktopError("schema_mismatch") from None
 
 
-def initialize_database(path: Path, *, deadline: float | None = None) -> None:
+def initialize_database(
+    path: Path, *, deadline: float | None = None, stage_dir: Path | None = None
+) -> None:
     if check_database(path, deadline=deadline):
         return
-    # Stage outside the profile, so process death cannot strand a partial final
-    # database or turn a not-yet-bound profile into a populated foreign profile.
-    with tempfile.TemporaryDirectory(prefix=".desktop-db-", dir=path.parent.parent) as temporary:
+    # Stage outside the profile by default, so process death cannot strand a partial
+    # final database or turn a not-yet-bound profile into a populated foreign profile.
+    # An adopted home stages beside its database (same filesystem, private temp dir).
+    with tempfile.TemporaryDirectory(
+        prefix=".desktop-db-", dir=stage_dir if stage_dir is not None else path.parent.parent
+    ) as temporary:
         staged = Path(temporary) / "store.db"
         descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(descriptor)

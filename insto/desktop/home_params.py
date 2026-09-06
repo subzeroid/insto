@@ -1,0 +1,38 @@
+"""Parameter validation for home operations; imported before any operation code."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Any
+
+from insto.desktop.errors import DesktopError
+
+CAPABILITIES = ("home.inspect", "home.select")
+PATH_LIMIT_BYTES = 1024
+
+
+def validate_path(value: Any, *, allow_none: bool) -> Path | None:
+    """An absolute or `~`/`~/…` path (this account's home), canonical, symlink-free."""
+    if value is None:
+        if allow_none:
+            return None
+        raise DesktopError("invalid_params")
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > PATH_LIMIT_BYTES
+        or "\x00" in value
+    ):
+        raise DesktopError("invalid_params")
+    expanded = os.path.expanduser(value) if value == "~" or value.startswith("~/") else value
+    path = Path(expanded)
+    if not path.is_absolute() or os.path.normpath(expanded) != str(path):
+        raise DesktopError("home_invalid")
+    try:
+        resolved = path.resolve()
+    except OSError:
+        raise DesktopError("home_invalid") from None
+    if resolved != path:
+        raise DesktopError("home_invalid")
+    return path

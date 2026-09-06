@@ -482,3 +482,31 @@ class Profile:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             for descriptor in descriptors:
                 os.close(descriptor)
+
+    @contextlib.contextmanager
+    def shared_lease(self, holder: Profile) -> Iterator[None]:
+        """Write through a second Profile object while `holder` owns this root's lock.
+
+        Both objects share `root/.desktop.lock`; a second flock in the same process
+        would report the root as busy, so an adoption writes the new home's state
+        under the lease the own profile already holds. The adopted home's own lock
+        (`home/.desktop.lock`) is still taken here, so two desktop roots can never
+        write the same adopted home at once.
+        """
+        if not holder._leased or holder.lock_path != self.lock_path or self._leased:
+            raise DesktopError("storage_error")
+        descriptors: list[int] = []
+        acquired: list[int] = []
+        try:
+            if self.home_lock_path is not None:
+                self._flock(self.home_lock_path, descriptors, acquired)
+            self._leased = True
+            yield
+        except OSError:
+            raise DesktopError("storage_error") from None
+        finally:
+            self._leased = False
+            for descriptor in acquired:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            for descriptor in descriptors:
+                os.close(descriptor)

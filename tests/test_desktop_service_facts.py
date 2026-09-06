@@ -251,10 +251,12 @@ async def test_expired_deadline_is_a_timeout_not_degraded_facts(home, monkeypatc
         await registration_facts(watch_service.service_paths(home), deadline=time.monotonic() - 1)
 
 
-async def test_inspect_service_on_unconfigured_profile_is_none(tmp_path):
+async def test_inspect_service_on_unconfigured_profile_is_none(tmp_path, monkeypatch):
+    """An unconfigured profile with no registration files asks launchd nothing (F5)."""
     from insto.desktop import operations
     from insto.desktop.profile import Profile
 
+    launchctl(monkeypatch, returncode=0, error=AssertionError("launchd is never asked"))
     result = await operations.inspect_service(Profile(tmp_path / "desktop"))
     assert result == {
         "registration": "none",
@@ -263,6 +265,63 @@ async def test_inspect_service_on_unconfigured_profile_is_none(tmp_path):
         "loaded": None,
         "settings": None,
     }
+    assert not (tmp_path / "desktop").exists()
+
+
+@pytest.mark.parametrize("config", [False, True])
+async def test_inspect_service_reports_a_registration_without_desktop_state(
+    home, monkeypatch, tmp_path, config
+):
+    """F5: facts are read-only, so a registration is described even before the desktop
+    has any intent for the home; `settings` needs a parseable config."""
+    from insto.desktop import operations
+    from insto.desktop.profile import Profile
+
+    if config:
+        (home / "config.toml").write_bytes(
+            b'backend = "hikerapi"\n[hikerapi]\ntoken = "offline-facts-token"\n'
+        )
+        (home / "config.toml").chmod(0o600)
+    registration(home, python=str(tmp_path / "old" / "python3"))
+    root = tmp_path / "desktop"
+    own = Profile(root)
+    with own.locked(initialize=True):
+        own.write_binding(home)
+    launchctl(monkeypatch, returncode=113, stderr=b"Could not find service")
+    adopted = Profile(root, home=home)
+    assert adopted.read_state() is None
+    result = await operations.inspect_service(adopted)
+    assert result["registration"] == "owned" and result["interpreter"] == "other"
+    assert result["loaded"] is False
+    assert result["settings"] == ("matching" if config else None)
+    assert not (home / "desktop-state.json").exists()
+
+
+async def test_inspect_service_maps_exotic_os_errors_to_storage_error(home, monkeypatch, tmp_path):
+    """F11: the read shares the mutations' error mapping; nothing is an internal error."""
+    from insto.desktop import operations
+    from insto.desktop.profile import Profile
+
+    registration(home)
+    root = tmp_path / "desktop"
+    own = Profile(root)
+    with own.locked(initialize=True):
+        own.write_binding(home)
+
+    async def failing(paths, *, deadline, expected=None):
+        raise PermissionError("EPERM from a probe")
+
+    monkeypatch.setattr(operations, "registration_facts", failing)
+    with pytest.raises(DesktopError) as info:
+        await operations.inspect_service(Profile(root, home=home))
+    assert info.value.code == "storage_error"
+
+    async def expired(paths, *, deadline, expected=None):
+        raise DesktopError("operation_timeout")
+
+    monkeypatch.setattr(operations, "registration_facts", expired)
+    with pytest.raises(DesktopError, match="operation_timeout"):
+        await operations.inspect_service(Profile(root, home=home))
 
 
 async def test_inspect_service_compares_the_home_configuration(home, monkeypatch, tmp_path):

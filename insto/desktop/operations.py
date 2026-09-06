@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from typing import Any
 
@@ -111,30 +112,39 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
 
 
 async def inspect_service(profile: Profile) -> dict[str, Any]:
-    """Registration facts for the current profile; a read that never touches launchd state."""
+    """Registration facts for the current profile; a read that never touches launchd state.
+
+    Facts are read-only, so a registration is reported even without desktop state
+    (`settings` stays None without a parseable config). Without state and without
+    registration files nothing is asked of launchd.
+    """
     deadline = time.monotonic() + INSPECT_SECONDS
-    if profile.read_state() is None:
+    try:
+        paths = watch_service.service_paths(profile.home)
+        has_files = os.path.lexists(paths.manifest) or os.path.lexists(paths.plist)
+        if profile.read_state() is None and not has_files:
+            return {
+                "registration": "none",
+                "interpreter": None,
+                "interpreter_exists": None,
+                "loaded": None,
+                "settings": None,
+            }
+        expected: dict[str, Any] | None = None
+        payload = profile.read_config()
+        if payload is not None:
+            try:
+                config = parse_profile_config(profile, payload)
+                expected = json.loads(watch_service._desired(paths, config, None)[0])
+            except DesktopError:
+                expected = None
+        facts = await registration_facts(paths, deadline=deadline, expected=expected)
         return {
-            "registration": "none",
-            "interpreter": None,
-            "interpreter_exists": None,
-            "loaded": None,
-            "settings": None,
+            key: facts[key]
+            for key in ("registration", "interpreter", "interpreter_exists", "loaded", "settings")
         }
-    paths = watch_service.service_paths(profile.home)
-    expected: dict[str, Any] | None = None
-    payload = profile.read_config()
-    if payload is not None:
-        try:
-            config = parse_profile_config(profile, payload)
-            expected = json.loads(watch_service._desired(paths, config, None)[0])
-        except DesktopError:
-            expected = None
-    facts = await registration_facts(paths, deadline=deadline, expected=expected)
-    return {
-        key: facts[key]
-        for key in ("registration", "interpreter", "interpreter_exists", "loaded", "settings")
-    }
+    except Exception as exc:
+        raise _error(exc, deadline) from None
 
 
 def _config(profile: Profile, token: str | None = None, *, deadline: float) -> Config:

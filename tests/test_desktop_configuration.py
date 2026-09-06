@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -201,3 +202,310 @@ def test_database_publication_rechecks_sidecars_after_staging(tmp_path, monkeypa
         configuration.initialize_database(target)
     assert not target.exists()
     assert sidecar.read_bytes() == b"appeared during staging"
+
+
+def cli_home(tmp_path, toml: bytes) -> Path:
+    home = tmp_path / "cli-home"
+    home.mkdir(mode=0o700)
+    (home / "config.toml").write_bytes(toml)
+    (home / "config.toml").chmod(0o600)
+    return home
+
+
+def test_adopted_config_honours_cli_keys_and_registers_the_secret(tmp_path):
+    from insto._redact import redact_secrets
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(
+        tmp_path,
+        b'backend = "hikerapi"\ndb_path = "history.db"\n[hikerapi]\n'
+        b'token = "offline-cli-secret"\nproxy = "http://127.0.0.1:8118"\n',
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.backend == "hikerapi"
+    assert config.hiker_token == "offline-cli-secret"
+    assert config.hiker_proxy == "http://127.0.0.1:8118"
+    # A relative CLI path resolves against the home (the service's WorkingDirectory),
+    # never against the bridge's own working directory.
+    assert config.db_path == home / "history.db" and config.db_path.is_absolute()
+    assert config.output_dir == home / "output"
+    assert "offline-cli-secret" not in redact_secrets("token offline-cli-secret leaked")
+
+
+@pytest.mark.parametrize(
+    ("toml", "code"),
+    [
+        (
+            b'backend = "aiograpi"\n[aiograpi]\nusername = "u"\npassword = "p"\n',
+            "home_backend_unsupported",
+        ),
+        (b'backend = "aiograpi"\n', "home_backend_unsupported"),
+        (b'backend = "fake"\n', "home_backend_unsupported"),
+        (b"backend = \n", "home_invalid"),
+        (b'backend = "hikerapi"\n', "home_invalid"),
+        (b'backend = "hikerapi"\n[hikerapi]\ntoken = "abc"\n', "home_invalid"),
+        (b'db_path = 5\n[hikerapi]\ntoken = "offline-cli-secret"\n', "home_invalid"),
+    ],
+)
+def test_adopted_config_rejections(tmp_path, toml, code):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(tmp_path, toml)
+    profile = Profile(tmp_path / "desktop", home=home)
+    with pytest.raises(DesktopError) as info:
+        parse_profile_config(profile, profile.config.read_bytes())
+    assert info.value.code == code
+
+
+def test_adopted_config_expands_home_and_defaults_paths_to_the_home(tmp_path, monkeypatch):
+    from insto.desktop.configuration import parse_profile_config
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = cli_home(
+        tmp_path, b'db_path = "~/x/store.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    )
+    (tmp_path / "x").mkdir(mode=0o700)  # an external database parent must exist (C4)
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.db_path == tmp_path / "x" / "store.db"
+    default = parse_profile_config(profile, b'[hikerapi]\ntoken = "offline-cli-secret"\n')
+    assert default.backend == "hikerapi"
+    assert default.db_path == home / "store.db"
+    assert default.output_dir == home / "output"
+    assert default.cli_history_path == home / "cli_history"
+    assert default.aiograpi_session_path == home / "aiograpi.session.json"
+
+
+def test_adopted_config_accepts_the_legacy_hiker_table(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(tmp_path, b'backend = "hiker"\n[hiker]\ntoken = "offline-legacy-secret"\n')
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.backend == "hikerapi"
+    assert config.hiker_token == "offline-legacy-secret"
+
+
+def test_own_profile_config_stays_strict(tmp_path):
+    from insto.desktop.configuration import config_bytes, parse_profile_config
+
+    profile = Profile(tmp_path / "desktop")
+    config = parse_profile_config(profile, config_bytes(profile, "offline-desktop-token"))
+    assert config.hiker_token == "offline-desktop-token"
+    with pytest.raises(DesktopError):
+        parse_profile_config(
+            profile, b'backend = "hikerapi"\n[hikerapi]\ntoken = "offline-desktop-token"\n'
+        )
+
+
+def test_adopted_config_bytes_replaces_only_the_token(tmp_path):
+    import tomllib
+
+    from insto.desktop.configuration import adopted_config_bytes
+
+    original = (
+        b'backend = "hikerapi"\ntheme = "dark"\n[hikerapi]\n'
+        b'token = "offline-old-secret"\nproxy = "http://127.0.0.1:8118"\n'
+    )
+    updated = tomllib.loads(adopted_config_bytes(original, "offline-new-secret").decode())
+    assert updated["hikerapi"] == {"token": "offline-new-secret", "proxy": "http://127.0.0.1:8118"}
+    assert updated["theme"] == "dark" and updated["backend"] == "hikerapi"
+    legacy_toml = b'[hiker]\ntoken = "offline-old-secret"\n'
+    legacy = tomllib.loads(adopted_config_bytes(legacy_toml, "offline-new-secret").decode())
+    assert legacy == {"hiker": {"token": "offline-new-secret"}}
+    fresh_toml = b'backend = "hikerapi"\n'
+    fresh = tomllib.loads(adopted_config_bytes(fresh_toml, "offline-new-secret").decode())
+    assert fresh["hikerapi"]["token"] == "offline-new-secret"
+
+
+@pytest.mark.parametrize(
+    "toml",
+    [b'hikerapi = "x"\n', b'hiker = 1\n[hikerapi]\ntoken = "offline-old-secret"\n'],
+)
+def test_adopted_config_bytes_refuses_a_non_table_credential_section(toml):
+    from insto.desktop.configuration import adopted_config_bytes
+
+    with pytest.raises(DesktopError) as info:
+        adopted_config_bytes(toml, "offline-new-secret")
+    assert info.value.code == "home_invalid"
+
+
+@pytest.mark.parametrize("parent", ["private", "world_writable", "group_readable", "missing"])
+def test_external_database_needs_an_owned_private_parent_under_trusted_ancestors(tmp_path, parent):
+    """C4: an absolute db_path outside the home is honoured only from a directory that
+    passes the same ownership rule as the home itself; every desktop open applies it."""
+    from insto.desktop.configuration import parse_profile_config
+
+    external = tmp_path / "elsewhere"
+    if parent != "missing":
+        external.mkdir(mode=0o700)
+        external.chmod({"private": 0o700, "world_writable": 0o777, "group_readable": 0o750}[parent])
+    home = cli_home(
+        tmp_path,
+        b'db_path = "%s"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+        % str(external / "s.db").encode(),
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    if parent == "private":
+        config = parse_profile_config(profile, profile.config.read_bytes())
+        assert config.db_path == external / "s.db"
+        return
+    with pytest.raises(DesktopError) as info:
+        parse_profile_config(profile, profile.config.read_bytes())
+    assert info.value.code == "home_invalid"
+
+
+def test_external_database_under_an_untrusted_ancestor_is_refused(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    external = shared / "private"
+    external.mkdir(mode=0o700)
+    home = cli_home(
+        tmp_path,
+        b'db_path = "%s"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+        % str(external / "s.db").encode(),
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    with pytest.raises(DesktopError, match="home_invalid"):
+        parse_profile_config(profile, profile.config.read_bytes())
+
+
+def test_database_inside_the_home_needs_no_extra_ancestry(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(
+        tmp_path, b'db_path = "data/store.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    assert (
+        parse_profile_config(profile, profile.config.read_bytes()).db_path
+        == home / "data" / "store.db"
+    )
+
+
+def test_a_parent_escaping_relative_database_is_judged_where_it_lands(tmp_path):
+    """C4: `..` must not buy the home's exemption. The untrusted ancestor that refuses
+    the absolute path refuses the relative one that lands in the same directory."""
+    from insto.desktop.configuration import parse_profile_config
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "private").mkdir(mode=0o700)
+    home = cli_home(
+        tmp_path,
+        b'db_path = "../shared/private/s.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n',
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    with pytest.raises(DesktopError, match="home_invalid"):
+        parse_profile_config(profile, profile.config.read_bytes())
+
+
+def test_a_relative_database_landing_back_inside_the_home_is_accepted(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(
+        tmp_path, b'db_path = "data/../store.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    )
+    (home / "data").mkdir(mode=0o700)
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert Path(os.path.normpath(config.db_path)) == home / "store.db"
+
+
+@pytest.mark.parametrize("moment", ["before_recheck", "at_link"])
+def test_database_publication_keeps_a_concurrently_created_database(tmp_path, monkeypatch, moment):
+    """C3: a writer that publishes between the absence check and the link (the CLI) wins;
+    its file is kept and validated, never replaced."""
+    from insto.desktop import configuration
+
+    target = tmp_path / "store.db"
+    original_store = configuration.HistoryStore
+    original_link = os.link
+
+    def publish_winner():
+        original_store(target).close()
+        target.chmod(0o600)
+
+    def store_then_publish(path):
+        store = original_store(path)
+        publish_winner()
+        return store
+
+    def link_after_winner(src, dst, *args, **kwargs):
+        publish_winner()
+        return original_link(src, dst, *args, **kwargs)
+
+    if moment == "before_recheck":
+        monkeypatch.setattr(configuration, "HistoryStore", store_then_publish)
+    else:
+        monkeypatch.setattr(os, "link", link_after_winner)
+    configuration.initialize_database(target)
+    winner = target.stat()
+    assert winner.st_nlink == 1 and stat_mode(target) == 0o600
+    assert configuration.check_database(target)
+    assert not any(p.name.startswith(".desktop-db-") for p in tmp_path.iterdir())
+    # Nothing of ours replaced it: the inode is the winner's, and a second run is a no-op.
+    configuration.initialize_database(target)
+    assert target.stat().st_ino == winner.st_ino
+
+
+def test_database_publication_refuses_an_incompatible_concurrent_winner(tmp_path, monkeypatch):
+    from insto.desktop import configuration
+
+    target = tmp_path / "store.db"
+    original_link = os.link
+
+    def link_after_incompatible_winner(src, dst, *args, **kwargs):
+        with sqlite3.connect(target) as connection:
+            connection.execute("CREATE TABLE _meta(key TEXT, value TEXT)")
+            connection.execute("INSERT INTO _meta VALUES ('schema_version', '999')")
+        target.chmod(0o600)
+        return original_link(src, dst, *args, **kwargs)
+
+    monkeypatch.setattr(os, "link", link_after_incompatible_winner)
+    with pytest.raises(DesktopError, match="schema_mismatch"):
+        configuration.initialize_database(target)
+    with sqlite3.connect(target) as connection:
+        assert connection.execute("SELECT value FROM _meta").fetchall() == [("999",)]
+
+
+def test_database_publication_repairs_its_own_stranded_stage_link(tmp_path):
+    """A death between the link and the stage unlink strands a two-link database that
+    every later open refuses; the next initialization drops only our own stage link."""
+    from insto.desktop import configuration
+    from insto.service.history import HistoryStore
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    target = home / "store.db"
+    stage = tmp_path / ".desktop-db-crashed"  # where initialize_database stages
+    stage.mkdir(mode=0o700)
+    staged = stage / "store.db"
+    os.close(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    HistoryStore(staged).close()
+    os.link(staged, target)  # the process died here: the stage unlink never ran
+    other = tmp_path / ".desktop-db-live"
+    other.mkdir(mode=0o700)
+    foreign = other / "store.db"
+    foreign.write_bytes(b"another process is staging here")
+    foreign.chmod(0o600)
+    with pytest.raises(DesktopError, match="profile_ownership"):
+        configuration.check_database(target)
+
+    configuration.initialize_database(target)
+
+    assert configuration.check_database(target) is True
+    assert target.stat().st_nlink == 1 and stat_mode(target) == 0o600
+    # Only the duplicate link goes; the stage directory and every unrelated stage
+    # file (which may belong to a live process) are untouched.
+    assert not staged.exists() and stage.is_dir()
+    assert foreign.read_bytes() == b"another process is staging here"
+
+
+def stat_mode(path: Path) -> int:
+    return os.stat(path).st_mode & 0o777

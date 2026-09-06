@@ -161,6 +161,11 @@ async def test_hello() -> None:
                 "snapshots.list",
                 "snapshots.compare",
                 "changes.list",
+                "service.inspect",
+                "service.migrate",
+                "service.uninstall",
+                "home.inspect",
+                "home.select",
             ],
         },
     }

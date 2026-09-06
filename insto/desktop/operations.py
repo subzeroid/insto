@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 from typing import Any
 
@@ -11,17 +13,27 @@ from insto.desktop.access import validate_candidate
 from insto.desktop.configuration import (
     check_database,
     config_bytes,
-    parse_config,
+    config_payload,
+    parse_profile_config,
 )
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
-from insto.desktop.recovery import checkpoint, cleanup, phase, reconcile, rollback_drained
+from insto.desktop.recovery import (
+    RestartFailedError,
+    checkpoint,
+    cleanup,
+    phase,
+    reconcile,
+    rollback_drained,
+)
+from insto.desktop.service_facts import registration_facts
 from insto.exceptions import BackendError
 from insto.service import watch_service
 from insto.service.watch_service_lifecycle import ManagedService, managed_service
 
 OPERATION_SECONDS = 120.0
 ROLLBACK_SECONDS = 35.0
+INSPECT_SECONDS = 10.0
 
 
 def read_service(profile: Profile, config: Config, deadline: float) -> ManagedService:
@@ -72,12 +84,18 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
     if journal is not None or backup is not None:
         return _dto(state, pending=True)
     if state is None:
-        if profile.home.exists() and any(profile.home.iterdir()):
+        if not profile.adopted and profile.home.exists() and any(profile.home.iterdir()):
             raise DesktopError("profile_ownership")
         return _dto(None)
+    try:
+        watch_service.read_retained_registration(watch_service.service_paths(profile.home))
+    except BackendError:
+        # An unreadable retained registration blocks every transition until it is
+        # dealt with: pending, like a journal, never a healthy profile.
+        return _dto(state, pending=True)
     if payload is None:
         raise DesktopError("recovery_required")
-    config = parse_config(profile, payload)
+    config = parse_profile_config(profile, payload)
     if not check_database(config.db_path, deadline=deadline):
         return _dto(state, pending=True)
     service = None
@@ -93,13 +111,49 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
             service._active = False
 
 
+async def inspect_service(profile: Profile) -> dict[str, Any]:
+    """Registration facts for the current profile; a read that never touches launchd state.
+
+    Facts are read-only, so a registration is reported even without desktop state
+    (`settings` stays None without a parseable config). Without state and without
+    registration files nothing is asked of launchd.
+    """
+    deadline = time.monotonic() + INSPECT_SECONDS
+    try:
+        paths = watch_service.service_paths(profile.home)
+        has_files = os.path.lexists(paths.manifest) or os.path.lexists(paths.plist)
+        if profile.read_state() is None and not has_files:
+            return {
+                "registration": "none",
+                "interpreter": None,
+                "interpreter_exists": None,
+                "loaded": None,
+                "settings": None,
+            }
+        expected: dict[str, Any] | None = None
+        payload = profile.read_config()
+        if payload is not None:
+            try:
+                config = parse_profile_config(profile, payload)
+                expected = json.loads(watch_service._desired(paths, config, None)[0])
+            except DesktopError:
+                expected = None
+        facts = await registration_facts(paths, deadline=deadline, expected=expected)
+        return {
+            key: facts[key]
+            for key in ("registration", "interpreter", "interpreter_exists", "loaded", "settings")
+        }
+    except Exception as exc:
+        raise _error(exc, deadline) from None
+
+
 def _config(profile: Profile, token: str | None = None, *, deadline: float) -> Config:
     payload = profile.read_config()
     if payload is None:
         if token is None:
             raise DesktopError("not_configured")
-        return parse_config(profile, config_bytes(profile, token))
-    config = parse_config(profile, payload)
+        return parse_profile_config(profile, config_bytes(profile, token))
+    config = parse_profile_config(profile, payload)
     exists = check_database(config.db_path, deadline=deadline)
     journal = profile.read_journal()
     if not exists and (journal is None or journal["kind"] != "setup"):
@@ -112,6 +166,16 @@ async def _recover(profile: Profile, service: ManagedService, deadline: float) -
         return await reconcile(profile, service, deadline)
     except asyncio.CancelledError:
         raise
+    except RestartFailedError:
+        # The rollback settled the profile; the restored registration names a
+        # service this lease cannot start. The caller's own inspection reports it.
+        return True
+    except DesktopError as exc:
+        if exc.code == "service_ownership_unknown":
+            # Registration bytes that no journaled migration wrote: Repair refuses
+            # to touch them, and that verdict must reach the user as itself.
+            raise
+        raise DesktopError("recovery_required") from None
     except Exception:
         raise DesktopError("recovery_required") from None
 
@@ -125,6 +189,10 @@ def _error(exc: Exception, deadline: float) -> DesktopError:
 
 
 async def configure(profile: Profile, token: str) -> dict[str, Any]:
+    if profile.adopted:
+        # Setup never runs on an adopted home: its credentials already exist and
+        # are replaced through credentials.replace. Refused before validation.
+        raise DesktopError("already_configured")
     return await _credentials(profile, token, replace=False)
 
 
@@ -173,7 +241,7 @@ async def _credentials(profile: Profile, token: str, *, replace: bool) -> dict[s
                 checkpoint(forward)
                 if state is not None:
                     assert payload is not None
-                    current = parse_config(profile, payload)
+                    current = parse_profile_config(profile, payload)
                     if current.hiker_token == token:
                         state = dict(
                             state, quota_remaining=remaining, quota_checked_at=int(time.time())
@@ -221,7 +289,7 @@ async def _replace(
         phase(profile, journal, "stopped", forward)
         with service.idle_executor():
             checkpoint(forward)
-            profile.write_config(config_bytes(profile, token))
+            profile.write_config(config_payload(profile, old, token))
             phase(profile, journal, "written", forward)
         if previous_running:
             await service.ensure_running()
@@ -272,7 +340,15 @@ async def change_service(profile: Profile, action: str) -> dict[str, Any]:
                 if state is None:
                     raise DesktopError("not_configured")
                 if recovered and action == "repair":
-                    return _dto(state, running=_running(await service.inspect_owned()))
+                    try:
+                        return _dto(state, running=_running(await service.inspect_owned()))
+                    except BackendError:
+                        # A rolled-back migration restored a registration that names
+                        # another interpreter; the repair succeeded, the lease cannot
+                        # manage that registration. Same shape as inspect_profile.
+                        result = _dto(state)
+                        result["status"] = "service_error"
+                        return result
                 checkpoint(deadline)
                 if action in {"start", "stop"}:
                     state = dict(

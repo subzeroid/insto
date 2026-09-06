@@ -11,7 +11,8 @@ from insto.desktop.access import validate_candidate
 from insto.desktop.configuration import (
     check_database,
     config_bytes,
-    parse_config,
+    config_payload,
+    parse_profile_config,
 )
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
@@ -72,12 +73,12 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
     if journal is not None or backup is not None:
         return _dto(state, pending=True)
     if state is None:
-        if profile.home.exists() and any(profile.home.iterdir()):
+        if not profile.adopted and profile.home.exists() and any(profile.home.iterdir()):
             raise DesktopError("profile_ownership")
         return _dto(None)
     if payload is None:
         raise DesktopError("recovery_required")
-    config = parse_config(profile, payload)
+    config = parse_profile_config(profile, payload)
     if not check_database(config.db_path, deadline=deadline):
         return _dto(state, pending=True)
     service = None
@@ -98,8 +99,8 @@ def _config(profile: Profile, token: str | None = None, *, deadline: float) -> C
     if payload is None:
         if token is None:
             raise DesktopError("not_configured")
-        return parse_config(profile, config_bytes(profile, token))
-    config = parse_config(profile, payload)
+        return parse_profile_config(profile, config_bytes(profile, token))
+    config = parse_profile_config(profile, payload)
     exists = check_database(config.db_path, deadline=deadline)
     journal = profile.read_journal()
     if not exists and (journal is None or journal["kind"] != "setup"):
@@ -125,6 +126,10 @@ def _error(exc: Exception, deadline: float) -> DesktopError:
 
 
 async def configure(profile: Profile, token: str) -> dict[str, Any]:
+    if profile.adopted:
+        # Setup never runs on an adopted home: its credentials already exist and
+        # are replaced through credentials.replace. Refused before validation.
+        raise DesktopError("already_configured")
     return await _credentials(profile, token, replace=False)
 
 
@@ -173,7 +178,7 @@ async def _credentials(profile: Profile, token: str, *, replace: bool) -> dict[s
                 checkpoint(forward)
                 if state is not None:
                     assert payload is not None
-                    current = parse_config(profile, payload)
+                    current = parse_profile_config(profile, payload)
                     if current.hiker_token == token:
                         state = dict(
                             state, quota_remaining=remaining, quota_checked_at=int(time.time())
@@ -221,7 +226,7 @@ async def _replace(
         phase(profile, journal, "stopped", forward)
         with service.idle_executor():
             checkpoint(forward)
-            profile.write_config(config_bytes(profile, token))
+            profile.write_config(config_payload(profile, old, token))
             phase(profile, journal, "written", forward)
         if previous_running:
             await service.ensure_running()

@@ -455,3 +455,41 @@ async def test_resumed_setup_binds_quota_to_current_candidate_before_start_failu
         await operations.configure(profile, "offline-new-secret")
     assert profile.read_state()["quota_remaining"] == 0
     assert profile.read_journal()["new_remaining"] == 0
+
+
+@pytest.mark.asyncio
+async def test_null_quota_is_not_exhausted_and_is_reported_null(environment):
+    from insto.desktop import operations
+    from insto.desktop.configuration import initialize_database
+
+    profile, _ = environment
+    with profile.locked(initialize=True):
+        profile.write_config(operations.config_bytes(profile, "offline-old-secret"))
+        profile.write_state(profile.new_state(remaining=None, desired="stopped"))
+        initialize_database(profile.home / "store.db")
+    result = await operations.inspect_profile(profile)
+    assert result["status"] == "stopped"
+    assert result["quota_remaining"] is None and result["quota_checked_at"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", ["offline-cli-secret", "offline-new-secret"])
+async def test_configure_refuses_an_adopted_home_before_validation(environment, tmp_path, token):
+    from insto.desktop import operations
+
+    own, service = environment
+    home = tmp_path / "cli-home"
+    home.mkdir(mode=0o700)
+    original = b'backend = "hikerapi"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    (home / "config.toml").write_bytes(original)
+    (home / "config.toml").chmod(0o600)
+    with own.locked(initialize=True):
+        own.write_binding(home)
+    profile = Profile(own.root, home=home)
+    assert profile.adopted
+    with pytest.raises(DesktopError, match="already_configured"):
+        await operations.configure(profile, token)
+    operations.validate_candidate.assert_not_awaited()
+    assert not service.events
+    assert (home / "config.toml").read_bytes() == original
+    assert profile.read_state() is None and profile.read_journal() is None

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from insto.config import Config
-from insto.desktop.configuration import _database_file, parse_config
+from insto.desktop.configuration import _database_file, parse_profile_config
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
 from insto.service.history import _SCHEMA_VERSION
@@ -32,7 +32,7 @@ def inspect_profile_files(profile: Profile, *, deadline: float) -> tuple[dict[st
     payload = profile.read_config()
     if payload is None:
         raise DesktopError("recovery_required")
-    config = parse_config(profile, payload)
+    config = parse_profile_config(profile, payload)
     check_deadline(deadline)
     if profile.read_journal() is not None or profile.read_backup() is not None:
         raise DesktopError("recovery_required")

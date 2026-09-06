@@ -6,7 +6,7 @@ import asyncio
 import time
 from typing import Any
 
-from insto.desktop.configuration import initialize_database, parse_config
+from insto.desktop.configuration import initialize_database, parse_profile_config
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
 from insto.service.watch_service_lifecycle import ManagedService
@@ -53,7 +53,7 @@ async def reconcile(profile: Profile, service: ManagedService, deadline: float) 
         payload = profile.read_config()
         if payload is None:
             raise DesktopError("recovery_required")
-        config = parse_config(profile, payload)
+        config = parse_profile_config(profile, payload)
         if profile.read_state() is None:
             checkpoint(deadline)
             profile.write_state(
@@ -72,7 +72,7 @@ async def reconcile(profile: Profile, service: ManagedService, deadline: float) 
         return True
     if backup is None:
         raise DesktopError("recovery_required")
-    parse_config(profile, backup)
+    parse_profile_config(profile, backup)
     phase(profile, journal, "rollback", deadline)
     await service.ensure_stopped()
     with service.idle_executor():

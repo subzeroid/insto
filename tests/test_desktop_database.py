@@ -289,7 +289,7 @@ def test_missing_schema_pieces_are_schema_mismatch(monitoring_profile, statement
 def test_profile_files_changing_during_inspection_are_busy(monitoring_profile, monkeypatch):
     from insto.desktop import database
 
-    original = database.parse_config
+    original = database.parse_profile_config
 
     def parse_then_change_state(profile, payload):
         config = original(profile, payload)
@@ -297,7 +297,7 @@ def test_profile_files_changing_during_inspection_are_busy(monitoring_profile, m
             profile.write_state(profile.new_state(remaining=1, desired="stopped"))
         return config
 
-    monkeypatch.setattr(database, "parse_config", parse_then_change_state)
+    monkeypatch.setattr(database, "parse_profile_config", parse_then_change_state)
     with (
         pytest.raises(DesktopError, match="profile_busy"),
         database.read_database(monitoring_profile, deadline=time.monotonic() + 10),

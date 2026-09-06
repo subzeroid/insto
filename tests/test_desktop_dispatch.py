@@ -1,12 +1,16 @@
 """Only implemented C1 commands and exact parameters cross the bridge."""
 
+import importlib
 import json
+import os
 import sys
 import types
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
+import insto.desktop
 from insto.desktop.dispatch import handle
 from insto.desktop.errors import MESSAGES, DesktopError
 
@@ -55,6 +59,12 @@ def wire(operation, params):
     ).encode()
 
 
+def forbid_import(monkeypatch, name):
+    """Make `from insto.desktop import <name>` fail even after a real import bound it."""
+    monkeypatch.setitem(sys.modules, f"insto.desktop.{name}", None)
+    monkeypatch.delattr(insto.desktop, name, raising=False)
+
+
 async def test_exact_c2_capabilities():
     response = json.loads(await handle(wire("hello", {})))
     assert response["result"]["capabilities"] == list(CAPABILITIES)
@@ -79,23 +89,23 @@ async def test_exact_c2_capabilities():
 async def test_home_params_are_validated_before_importing_home(
     monkeypatch, operation, params, code
 ):
-    monkeypatch.setitem(sys.modules, "insto.desktop.home", None)
-    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
+    forbid_import(monkeypatch, "home")
+    forbid_import(monkeypatch, "operations")
     raw = await handle(wire(operation, params))
     assert b"offline-sentinel" not in raw
     assert json.loads(raw)["error"]["code"] == code
 
 
 async def test_home_inspect_rejects_a_null_path(monkeypatch):
-    monkeypatch.setitem(sys.modules, "insto.desktop.home", None)
+    forbid_import(monkeypatch, "home")
     raw = await handle(wire("home.inspect", {"path": None}))
     assert json.loads(raw)["error"]["code"] == "invalid_params"
 
 
 @pytest.mark.parametrize("operation", ["service.inspect", "service.migrate", "service.uninstall"])
 async def test_c3_service_operations_take_no_params(monkeypatch, operation):
-    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
-    monkeypatch.setitem(sys.modules, "insto.desktop.migration", None)
+    forbid_import(monkeypatch, "operations")
+    forbid_import(monkeypatch, "migration")
     raw = await handle(wire(operation, {"token": "offline-sentinel"}))
     assert b"offline-sentinel" not in raw
     assert json.loads(raw)["error"]["code"] == "invalid_params"
@@ -103,13 +113,15 @@ async def test_c3_service_operations_take_no_params(monkeypatch, operation):
 
 async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):
     from insto.desktop import home, migration, operations
+    from insto.desktop.profile import Profile
 
     calls = []
-    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(tmp_path / "root"))
+    root = tmp_path / "root"
+    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(root))
 
     def record(name):
         async def call(*args, **kwargs):
-            calls.append(name)
+            calls.append((name, args, kwargs))
             return {"ok": name}
 
         return call
@@ -128,13 +140,66 @@ async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):
     assert json.loads(await handle(wire("home.select", {"path": None})))["result"] == {
         "ok": "home.select"
     }
-    assert calls == [
+    assert [name for name, _, _ in calls] == [
         "service.inspect",
         "service.migrate",
         "service.uninstall",
         "home.inspect",
         "home.select",
     ]
+    for _, args, kwargs in calls[:3]:
+        assert len(args) == 1 and kwargs == {}
+        assert isinstance(args[0], Profile) and args[0].root == root and not args[0].adopted
+    _, args, kwargs = calls[3]
+    assert args == (Path(probe),)
+    assert set(kwargs) == {"deadline"} and isinstance(kwargs["deadline"], float)
+    _, args, kwargs = calls[4]
+    assert len(args) == 2 and kwargs == {}
+    assert isinstance(args[0], Profile) and args[0].root == root and not args[0].adopted
+    assert args[1] is None
+
+
+async def test_forbid_import_blocks_a_module_imported_earlier(monkeypatch, tmp_path):
+    importlib.import_module("insto.desktop.operations")
+    assert hasattr(insto.desktop, "operations")
+    forbid_import(monkeypatch, "operations")
+    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(tmp_path / "root"))
+    assert json.loads(await handle(wire("service.stop", {})))["error"]["code"] == "internal_error"
+
+
+async def test_home_select_uses_the_own_profile_when_the_binding_is_broken(monkeypatch, tmp_path):
+    from insto.desktop import home
+    from insto.desktop.profile import Profile
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    binding = root / "desktop-home.json"
+    binding.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "managed_by": "insto-gui",
+                "uid": os.getuid(),
+                "home": str(tmp_path / "missing"),
+            }
+        )
+    )
+    binding.chmod(0o600)
+    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(root))
+    assert json.loads(await handle(wire("service.inspect", {})))["error"]["code"] == "home_invalid"
+    calls = []
+
+    async def select(profile, path):
+        calls.append((profile, path))
+        return {"ok": "home.select"}
+
+    monkeypatch.setattr(home, "select", select)
+    assert json.loads(await handle(wire("home.select", {"path": None})))["result"] == {
+        "ok": "home.select"
+    }
+    [(profile, path)] = calls
+    assert isinstance(profile, Profile) and profile.root == root and not profile.adopted
+    assert path is None
 
 
 @pytest.mark.parametrize("operation", ["setup.configure", "credentials.replace"])
@@ -155,7 +220,7 @@ async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):
     ],
 )
 async def test_invalid_token_params_never_import_operations(monkeypatch, operation, params):
-    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
+    forbid_import(monkeypatch, "operations")
     raw = await handle(wire(operation, params))
     assert b"offline-sentinel" not in raw
     response = json.loads(raw)
@@ -174,7 +239,7 @@ async def test_invalid_token_params_never_import_operations(monkeypatch, operati
     ],
 )
 async def test_empty_only_params(monkeypatch, operation):
-    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
+    forbid_import(monkeypatch, "operations")
     response = json.loads(await handle(wire(operation, {"runtime": "/foreign"})))
     assert response["error"]["code"] == "invalid_params"
 

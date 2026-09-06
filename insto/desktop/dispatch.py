@@ -70,12 +70,13 @@ async def dispatch(request: Request) -> dict[str, Any]:
             raise ProtocolError("invalid_params", request.request_id)
         path = validate_path(request.params["path"], allow_none=operation == "home.select")
         from insto.desktop import home
-        from insto.desktop.profile import Profile
 
         if operation == "home.inspect":
             if path is None:
                 raise ProtocolError("invalid_params", request.request_id)
             return await home.inspect(path, deadline=deadline)
+        from insto.desktop.profile import Profile
+
         return await home.select(Profile.own_from_environment(), path)
     token_operation = operation in {"setup.configure", "credentials.replace"}
     if token_operation:
@@ -105,7 +106,7 @@ async def dispatch(request: Request) -> dict[str, Any]:
         return await operations.replace_credentials(profile, request.params["token"])
     if operation == "service.inspect":
         return await operations.inspect_service(profile)
-    if operation in _SERVICE_C3:
+    if operation in {"service.migrate", "service.uninstall"}:
         from insto.desktop import migration
 
         if operation == "service.migrate":

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import fcntl
 import hashlib
@@ -21,6 +23,7 @@ from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
 from typing import Any, Protocol, cast
+from xml.parsers.expat import ExpatError
 
 from insto.config import Config, config_dir
 from insto.exceptions import BackendError
@@ -32,6 +35,7 @@ _MISSING_DIAGNOSTICS = (
     "service cannot be found",
     "no such process",
 )
+RETAINED_REGISTRATION = "migration-registration.json"
 
 
 @dataclass(frozen=True)
@@ -221,6 +225,15 @@ def _management_lock(paths: ServicePaths) -> Iterator[None]:
         os.close(fd)
 
 
+def _sync_dir(path: Path) -> None:
+    """Make a directory's entries durable; publications are never claimed before this."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
 def _atomic_write(path: Path, content: bytes) -> None:
     fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     tmp = Path(raw_tmp)
@@ -234,12 +247,138 @@ def _atomic_write(path: Path, content: bytes) -> None:
         # while refusing to replace a target created after our preflight.
         os.link(tmp, path)
         tmp.unlink()
+        _sync_dir(path.parent)
     except Exception:
         with contextlib.suppress(OSError):
             os.close(fd)
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+Registration = tuple[bytes | None, bytes | None]
+
+
+def _read_component(path: Path) -> bytes | None:
+    return read_private_file(path) if os.path.lexists(path) else None
+
+
+def read_registration(paths: ServicePaths) -> Registration:
+    """Exact on-disk manifest and plist bytes; None for an absent component."""
+    return _read_component(paths.manifest), _read_component(paths.plist)
+
+
+def _encode_registration(pair: Registration) -> dict[str, str | None]:
+    return {
+        "manifest": base64.b64encode(pair[0]).decode() if pair[0] is not None else None,
+        "plist": base64.b64encode(pair[1]).decode() if pair[1] is not None else None,
+    }
+
+
+def _decode_registration(value: object) -> Registration:
+    if not isinstance(value, dict) or set(value) != {"manifest", "plist"}:
+        raise BackendError("retained migration registration is invalid")
+    decoded: list[bytes | None] = []
+    for key in ("manifest", "plist"):
+        raw = value[key]
+        if raw is None:
+            decoded.append(None)
+        elif isinstance(raw, str):
+            try:
+                decoded.append(base64.b64decode(raw, validate=True))
+            except binascii.Error as exc:
+                raise BackendError("retained migration registration is invalid") from exc
+        else:
+            raise BackendError("retained migration registration is invalid")
+    return decoded[0], decoded[1]
+
+
+def retain_registration(
+    paths: ServicePaths, *, previous: Registration, candidate: Registration
+) -> None:
+    """Retain both sides of a migration in one durable document; never overwrites."""
+    path = paths.directory / RETAINED_REGISTRATION
+    if os.path.lexists(path):
+        raise BackendError("a migration registration is already retained")
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "previous": _encode_registration(previous),
+            "candidate": _encode_registration(candidate),
+        },
+        sort_keys=True,
+    ).encode()
+    _atomic_write(path, payload)
+
+
+def read_retained_registration(paths: ServicePaths) -> dict[str, Registration] | None:
+    path = paths.directory / RETAINED_REGISTRATION
+    if not os.path.lexists(path):
+        return None
+    try:
+        value = json.loads(read_private_file(path, max_bytes=262144).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise BackendError("retained migration registration is invalid") from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "previous", "candidate"}
+        or value["schema_version"] != 1
+    ):
+        raise BackendError("retained migration registration is invalid")
+    return {
+        "previous": _decode_registration(value["previous"]),
+        "candidate": _decode_registration(value["candidate"]),
+    }
+
+
+def discard_retained_registration(paths: ServicePaths) -> None:
+    path = paths.directory / RETAINED_REGISTRATION
+    if os.path.lexists(path):
+        read_private_file(path, max_bytes=262144)
+        path.unlink()
+        _sync_dir(paths.directory)
+
+
+def _replace_file(path: Path, content: bytes) -> None:
+    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    tmp = Path(raw_tmp)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+        _sync_dir(path.parent)
+    except Exception:
+        with contextlib.suppress(OSError):
+            os.close(fd)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+def replace_registration(
+    paths: ServicePaths, expected: Registration, desired: Registration
+) -> None:
+    """Publish `desired` over a registration that is exactly `expected` (None = absent)."""
+    targets = (paths.manifest, paths.plist)
+    for path, before in zip(targets, expected, strict=True):
+        present = os.path.lexists(path)
+        if before is None:
+            if present:
+                raise BackendError("watch service registration changed during migration")
+        elif not _existing_matches(path, before):
+            raise BackendError("watch service registration changed during migration")
+    for path, before, content in zip(targets, expected, desired, strict=True):
+        if content is None:
+            if before is not None:
+                path.unlink()
+                _sync_dir(path.parent)
+        elif before is None:
+            _atomic_write(path, content)  # link-based: refuses a file that appeared meanwhile
+        else:
+            _replace_file(path, content)
 
 
 def _run_launchctl(
@@ -482,7 +621,7 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
         if plist_exists:
             try:
                 actual_plist = plistlib.loads(read_private_file(paths.plist))
-            except plistlib.InvalidFileException as exc:
+            except (plistlib.InvalidFileException, ExpatError) as exc:
                 raise BackendError("invalid LaunchAgent plist") from exc
             if not _matches_owned_plist(paths, manifest, actual_plist):
                 raise BackendError("LaunchAgent plist ownership mismatch")
@@ -497,9 +636,13 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
             current = await _launchctl(["print", target])
         if not _is_missing(current):
             raise BackendError("could not confirm LaunchAgent absence")
-        paths.manifest.unlink()
+        # The plist goes first: a death between the two unlinks must never leave
+        # an autostart plist without the manifest that proves its ownership.
         if plist_exists:
             paths.plist.unlink()
+            _sync_dir(paths.plist.parent)
+        paths.manifest.unlink()
+        _sync_dir(paths.directory)
         return _operation_report(
             paths,
             changed=True,

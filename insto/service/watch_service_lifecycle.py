@@ -73,10 +73,20 @@ def _outer_fields(output: bytes) -> tuple[dict[str, str], list[str]]:
 class ManagedService:
     """Valid only inside ``managed_service``; caller may extend rollback deadline."""
 
-    def __init__(self, paths: service.ServicePaths, config: Config, deadline: float) -> None:
+    def __init__(
+        self,
+        paths: service.ServicePaths,
+        config: Config,
+        deadline: float,
+        *,
+        artifacts: tuple[bytes, bytes] | None = None,
+    ) -> None:
         self.deadline = deadline
         self._paths = paths
-        self._manifest, self._plist = service._desired(paths, config, None)
+        self._config = config
+        self._manifest, self._plist = (
+            artifacts if artifacts is not None else service._desired(paths, config, None)
+        )
         self._db_path = config.db_path.expanduser().absolute()
         self._lock_path = Path(f"{config.db_path.expanduser().resolve()}.watch.lock")
         self._target = f"gui/{os.getuid()}/{paths.label}"
@@ -311,9 +321,25 @@ class ManagedService:
                 raise BackendError("watch service did not stop")
             await asyncio.sleep(min(0.05, remaining))
 
+    async def remove_registration(self) -> None:
+        """Unlink the owned files once the job is unloaded and no executor is running.
+
+        The plist goes first: a death between the two unlinks must never leave an
+        autostart plist without the manifest that proves its ownership.
+        """
+        report = await self.inspect_owned()
+        if report["registration"] == "loaded" or report["executor"]["state"] == "busy":
+            raise BackendError("watch service is still registered or running")
+        for path in (self._paths.plist, self._paths.manifest):
+            if os.path.lexists(path):
+                path.unlink()
+                service._sync_dir(path.parent)
+
 
 @contextlib.contextmanager
-def managed_service(*, home: Path, config: Config, deadline: float) -> Iterator[ManagedService]:
+def managed_service(
+    *, home: Path, config: Config, deadline: float, artifacts: tuple[bytes, bytes] | None = None
+) -> Iterator[ManagedService]:
     """Serialize desktop lifecycle with legacy installation and uninstallation."""
     service._require_macos()
     paths = service.service_paths(home)
@@ -321,7 +347,7 @@ def managed_service(*, home: Path, config: Config, deadline: float) -> Iterator[
         service._private_directory(path)
     service._owned_directory(paths.plist.parent)
     with service._management_lock(paths):
-        lease = ManagedService(paths, config, deadline)
+        lease = ManagedService(paths, config, deadline, artifacts=artifacts)
         try:
             yield lease
         finally:

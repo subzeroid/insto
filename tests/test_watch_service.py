@@ -5,6 +5,7 @@ import json
 import os
 import plistlib
 import sqlite3
+import stat
 import subprocess
 import threading
 from pathlib import Path
@@ -12,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from insto.config import Config
 from insto.exceptions import BackendError
 from insto.service import watch_service
 from insto.service.history import HistoryStore
@@ -761,3 +763,143 @@ async def test_status_treats_out_of_range_last_ok_as_unavailable_database(
     assert status["database_state"] == "unavailable"
     assert status["database_error"] == "watch database could not be read safely"
     assert "9223372036854775807" not in json.dumps(status)
+
+
+@pytest.fixture
+def registration_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> watch_service.ServicePaths:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / "Library" / "LaunchAgents").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    paths = watch_service.service_paths(home)
+    paths.directory.mkdir(parents=True, mode=0o700)
+    paths.directory.parent.chmod(0o700)
+    return paths
+
+
+def test_registration_retention_and_replacement(
+    registration_home: watch_service.ServicePaths,
+) -> None:
+    paths = registration_home
+    assert watch_service.read_registration(paths) == (None, None)
+    old = (b'{"old":1}\n', b"<plist>old</plist>\n")
+    new = (b'{"new":1}\n', b"<plist>new</plist>\n")
+    watch_service._atomic_write(paths.manifest, old[0])
+    watch_service._atomic_write(paths.plist, old[1])
+    assert watch_service.read_registration(paths) == old
+    assert watch_service.read_retained_registration(paths) is None
+    watch_service.retain_registration(paths, previous=old, candidate=new)
+    assert watch_service.read_retained_registration(paths) == {"previous": old, "candidate": new}
+    with pytest.raises(BackendError):
+        watch_service.retain_registration(paths, previous=old, candidate=new)
+    with pytest.raises(BackendError):
+        watch_service.replace_registration(paths, new, old)  # bytes on disk are not `new`
+    assert watch_service.read_registration(paths) == old
+    watch_service.replace_registration(paths, old, new)
+    assert watch_service.read_registration(paths) == new
+    for path in (paths.manifest, paths.plist):
+        info = path.lstat()
+        assert stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1
+    watch_service.discard_retained_registration(paths)
+    assert watch_service.read_retained_registration(paths) is None
+    watch_service.discard_retained_registration(paths)
+
+
+def test_replace_registration_handles_absent_components(
+    registration_home: watch_service.ServicePaths,
+) -> None:
+    paths = registration_home
+    manifest_only = (b'{"m":1}\n', None)
+    full = (b'{"m":2}\n', b"<plist>2</plist>\n")
+    watch_service._atomic_write(paths.manifest, manifest_only[0])
+    with pytest.raises(BackendError):
+        watch_service.replace_registration(paths, full, manifest_only)  # plist expected, absent
+    watch_service.replace_registration(paths, manifest_only, full)
+    assert watch_service.read_registration(paths) == full
+    watch_service.replace_registration(paths, full, manifest_only)
+    assert watch_service.read_registration(paths) == manifest_only
+    watch_service.retain_registration(paths, previous=manifest_only, candidate=full)
+    assert watch_service.read_retained_registration(paths) == {
+        "previous": manifest_only,
+        "candidate": full,
+    }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"[]", b'{"schema_version":2}', b'{"schema_version":1,"previous":{},"candidate":{}}', b"{"],
+)
+def test_invalid_retained_registration_is_refused(
+    registration_home: watch_service.ServicePaths, payload: bytes
+) -> None:
+    paths = registration_home
+    watch_service._atomic_write(paths.directory / watch_service.RETAINED_REGISTRATION, payload)
+    with pytest.raises(BackendError):
+        watch_service.read_retained_registration(paths)
+
+
+def test_atomic_write_and_replace_sync_their_directories(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
+    synced: list[Path] = []
+    monkeypatch.setattr(watch_service, "_sync_dir", lambda path: synced.append(path))
+    watch_service._atomic_write(paths.manifest, b"a")
+    watch_service.replace_registration(paths, (b"a", None), (b"b", b"p"))
+    watch_service.discard_retained_registration(paths)
+    watch_service.retain_registration(paths, previous=(b"b", b"p"), candidate=(b"c", b"q"))
+    watch_service.discard_retained_registration(paths)
+    assert synced.count(paths.directory) >= 4 and paths.plist.parent in synced
+
+
+@pytest.mark.asyncio
+async def test_uninstall_removes_the_plist_before_the_manifest(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
+    order: list[str] = []
+    original_unlink = Path.unlink
+
+    def unlink(self: Path, *args: object, **kwargs: object) -> None:
+        order.append(self.name)
+        return original_unlink(self, *args, **kwargs)
+
+    manifest, plist = watch_service._desired(
+        paths,
+        Config(
+            backend="hikerapi", hiker_token="offline-order-token", db_path=paths.home / "store.db"
+        ),
+        None,
+    )
+    watch_service._atomic_write(paths.manifest, manifest)
+    watch_service._atomic_write(paths.plist, plist)
+
+    async def missing(
+        arguments: list[str], *, timeout: float | None = None, deadline: float | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(arguments, 113, b"", b"Could not find service")
+
+    monkeypatch.setattr(watch_service, "_launchctl", missing)
+    monkeypatch.setattr(watch_service, "_require_macos", lambda: None)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    await watch_service.uninstall_service(home=paths.home)
+    assert order == [paths.plist.name, paths.manifest.name]
+
+
+@pytest.mark.asyncio
+async def test_uninstall_refuses_truncated_plist_without_native_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    home, paths, _ = _owned_artifacts(tmp_path, monkeypatch, plist=False)
+    paths.plist.write_bytes(
+        b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n'
+    )
+    paths.plist.chmod(0o600)
+    calls: list[list[str]] = []
+    monkeypatch.setattr(watch_service.subprocess, "run", lambda args, **_: calls.append(args))
+    with pytest.raises(BackendError, match="invalid LaunchAgent plist"):
+        await watch_service.uninstall_service(home=home)
+    assert calls == [] and paths.manifest.exists() and paths.plist.exists()

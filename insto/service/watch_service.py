@@ -30,6 +30,7 @@ from insto.exceptions import BackendError
 
 _MANAGED_BY = "insto-watch-service"
 _LAUNCHCTL = "/bin/launchctl"
+_READINESS_SECONDS = 10.0
 _MISSING_DIAGNOSTICS = (
     "could not find service",
     "service cannot be found",
@@ -661,7 +662,18 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
             result = await _launchctl(["bootout", target])
             if result.returncode != 0:
                 raise BackendError("launchctl could not unregister the LaunchAgent")
-            current = await _launchctl(["print", target])
+            # bootout returns before launchd has necessarily dropped the label.
+            # Poll for absence the way the lifecycle waits for a stop, bounded by
+            # one shared deadline so a hung launchctl cannot exceed the budget.
+            until = time.monotonic() + _READINESS_SECONDS
+            while True:
+                remaining = until - time.monotonic()
+                if remaining <= 0:
+                    break
+                current = await _launchctl(["print", target], deadline=until)
+                if _is_missing(current):
+                    break
+                await asyncio.sleep(min(0.05, remaining))
         if not _is_missing(current):
             raise BackendError("could not confirm LaunchAgent absence")
         # The plist goes first: a death between the two unlinks must never leave

@@ -126,6 +126,12 @@ async def migrate(profile: Profile) -> dict[str, Any]:
                 watch_service.discard_retained_registration(paths)
                 cleanup(profile, forward)
                 return _dto(state, running=running)
+    except RestartFailedError:
+        # F1: the rollback completed and nothing is pending; only the previous
+        # registration did not restart. Mapped here, not through `_error`, so the
+        # promised code cannot turn into `operation_timeout` when the forward
+        # budget happens to be spent by the time the rollback finishes.
+        raise DesktopError("service_error") from None
     except Exception as exc:
         raise _error(exc, forward) from None
 

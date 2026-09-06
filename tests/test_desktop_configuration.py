@@ -387,6 +387,36 @@ def test_database_inside_the_home_needs_no_extra_ancestry(tmp_path):
     )
 
 
+def test_a_parent_escaping_relative_database_is_judged_where_it_lands(tmp_path):
+    """C4: `..` must not buy the home's exemption. The untrusted ancestor that refuses
+    the absolute path refuses the relative one that lands in the same directory."""
+    from insto.desktop.configuration import parse_profile_config
+
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "private").mkdir(mode=0o700)
+    home = cli_home(
+        tmp_path,
+        b'db_path = "../shared/private/s.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n',
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    with pytest.raises(DesktopError, match="home_invalid"):
+        parse_profile_config(profile, profile.config.read_bytes())
+
+
+def test_a_relative_database_landing_back_inside_the_home_is_accepted(tmp_path):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(
+        tmp_path, b'db_path = "data/../store.db"\n[hikerapi]\ntoken = "offline-cli-secret"\n'
+    )
+    (home / "data").mkdir(mode=0o700)
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert Path(os.path.normpath(config.db_path)) == home / "store.db"
+
+
 @pytest.mark.parametrize("moment", ["before_recheck", "at_link"])
 def test_database_publication_keeps_a_concurrently_created_database(tmp_path, monkeypatch, moment):
     """C3: a writer that publishes between the absence check and the link (the CLI) wins;
@@ -442,6 +472,39 @@ def test_database_publication_refuses_an_incompatible_concurrent_winner(tmp_path
         configuration.initialize_database(target)
     with sqlite3.connect(target) as connection:
         assert connection.execute("SELECT value FROM _meta").fetchall() == [("999",)]
+
+
+def test_database_publication_repairs_its_own_stranded_stage_link(tmp_path):
+    """A death between the link and the stage unlink strands a two-link database that
+    every later open refuses; the next initialization drops only our own stage link."""
+    from insto.desktop import configuration
+    from insto.service.history import HistoryStore
+
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    target = home / "store.db"
+    stage = tmp_path / ".desktop-db-crashed"  # where initialize_database stages
+    stage.mkdir(mode=0o700)
+    staged = stage / "store.db"
+    os.close(os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    HistoryStore(staged).close()
+    os.link(staged, target)  # the process died here: the stage unlink never ran
+    other = tmp_path / ".desktop-db-live"
+    other.mkdir(mode=0o700)
+    foreign = other / "store.db"
+    foreign.write_bytes(b"another process is staging here")
+    foreign.chmod(0o600)
+    with pytest.raises(DesktopError, match="profile_ownership"):
+        configuration.check_database(target)
+
+    configuration.initialize_database(target)
+
+    assert configuration.check_database(target) is True
+    assert target.stat().st_nlink == 1 and stat_mode(target) == 0o600
+    # Only the duplicate link goes; the stage directory and every unrelated stage
+    # file (which may belong to a live process) are untouched.
+    assert not staged.exists() and stage.is_dir()
+    assert foreign.read_bytes() == b"another process is staging here"
 
 
 def stat_mode(path: Path) -> int:

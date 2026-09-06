@@ -359,6 +359,25 @@ async def test_failed_restart_of_the_old_registration_completes_the_rollback(wor
     assert launchd.events == [("stop", old[0]), ("start", new[0])]
 
 
+async def test_a_failed_restart_reports_service_error_whatever_the_budget_says(world, monkeypatch):
+    """F1's promised code is mapped explicitly, so a forward budget spent by the time
+    the rollback finishes cannot turn it into `operation_timeout`."""
+    from insto.desktop import migration
+
+    profile, launchd, paths, old, _new = world
+    monkeypatch.setattr(
+        migration, "_error", lambda exc, deadline: DesktopError("operation_timeout")
+    )
+    launchd.fail.add("start_new")
+    launchd.always_fail.add("start_old")
+    with pytest.raises(DesktopError) as info:
+        await migration.migrate(profile)
+    assert info.value.code == "service_error"
+    assert profile.read_journal() is None
+    assert watch_service.read_retained_registration(paths) is None
+    assert watch_service.read_registration(paths) == old
+
+
 @pytest.mark.parametrize("phase", ["rollback", "stopped"])
 async def test_repair_after_a_failed_restart_reports_service_error_once(world, phase):
     """Repair drives the same rollback: a permanently dead old service settles the journal."""
@@ -609,7 +628,7 @@ async def test_migrate_finishes_a_terminal_journal_before_its_noop(world):
     assert (await operations.inspect_profile(profile))["status"] == "running"
 
 
-async def test_uninstall_finishes_a_journal_at(world):
+async def test_uninstall_finishes_a_terminal_journal(world):
     from insto.desktop import migration
 
     profile, _launchd, paths, old, new = world

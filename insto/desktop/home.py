@@ -184,7 +184,10 @@ async def _stop_own(own: Profile, deadline: float) -> None:
             registered = ManagedService(
                 paths, config, deadline, artifacts=_lease_artifacts(paths, on_disk, on_disk)
             )
-            await registered.ensure_stopped()
+            try:
+                await registered.ensure_stopped()
+            finally:
+                registered._active = False
     if state["desired_service"] == "running":
         checkpoint(deadline)
         own.write_state(dict(state, desired_service="stopped"))
@@ -205,17 +208,23 @@ def _prepare_directories(target: Profile) -> None:
 def _finish_terminal_journal(own: Profile, current: Profile, deadline: float) -> None:
     """Complete a committed/rolled_back journal left by a death before cleanup.
 
-    `require_settled` already admitted it (terminal phases only). The own profile
-    is the leased object; an adopted current profile writes through `shared_lease`.
+    The journal is read under the lease it is finished under: for the own profile
+    the root lock already held, for an adopted current profile its `shared_lease`.
+    A pending journal that appeared since the unlocked `require_settled` is refused.
     """
-    journal = current.read_journal()
-    if journal is None:
-        return
     if current.adopted:
         with current.shared_lease(own):
-            finish_terminal(current, journal, deadline)
+            _settle(current, deadline)
     else:
-        finish_terminal(own, journal, deadline)
+        _settle(own, deadline)
+
+
+def _settle(profile: Profile, deadline: float) -> None:
+    """Under `profile`'s lease: refuse pending recovery, finish a terminal journal."""
+    require_settled(profile)
+    journal = profile.read_journal()
+    if journal is not None:
+        finish_terminal(profile, journal, deadline)
 
 
 def _own_config(own: Profile, deadline: float) -> Config | None:
@@ -274,9 +283,9 @@ async def select(profile: Profile, path: Path | None) -> dict[str, Any]:
             # target's home lock, service directories and database come first. Lock
             # order is root lock → target home lock → own management lock (acyclic).
             with target.shared_lease(own):
-                journal = target.read_journal()
-                if journal is not None:  # terminal: require_settled admitted it
-                    finish_terminal(target, journal, deadline)
+                # The unlocked check above admitted the target; a journal written by
+                # another root since is re-checked under the home's own lock.
+                _settle(target, deadline)
                 _prepare_directories(target)
                 if report["database"] == "missing":
                     checkpoint(deadline)

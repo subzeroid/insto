@@ -523,6 +523,63 @@ async def test_select_refuses_pending_recovery_of_the_current_profile(tmp_path, 
     assert info.value.code == "recovery_required"
 
 
+@pytest.mark.parametrize("which", ["target", "current"])
+async def test_select_refuses_a_journal_that_appears_under_the_home_lease(
+    tmp_path, own, launchd, monkeypatch, which
+):
+    """F2: the unlocked `require_settled` admitted the home; a pending journal another
+    root wrote before the home's lease was taken is refused under that lease, and
+    neither the journal nor its retained registration is discarded."""
+    from insto.desktop import home
+
+    first = cli_home(tmp_path, "first")
+    second = cli_home(tmp_path, "second")
+    register(first, python=str(tmp_path / "old" / "python3"))
+    if which == "current":
+        await home.select(own, first)
+        launchd.events.clear()
+    original = Profile.shared_lease
+    raced: list[Path] = []
+
+    @contextlib.contextmanager
+    def racing(self, holder):
+        with original(self, holder):
+            if self.home == first and not raced:
+                raced.append(self.home)
+                if self.read_state() is None:
+                    self.write_state(self.new_state(remaining=None, desired="stopped"))
+                self.write_journal(
+                    self.new_journal(
+                        kind="migrate",
+                        previous_state=self.read_state(),
+                        previous_running=False,
+                        remaining=None,
+                    )
+                )
+                watch_service.retain_registration(
+                    watch_service.service_paths(first),
+                    previous=(b"m", b"p"),
+                    candidate=(b"n", b"q"),
+                )
+            yield
+
+    monkeypatch.setattr(Profile, "shared_lease", racing)
+    with pytest.raises(DesktopError) as info:
+        await home.select(own, second if which == "current" else first)
+    assert info.value.code == "recovery_required" and raced == [first]
+    pending = Profile(own.root, home=first)
+    assert pending.read_journal()["phase"] == "prepared"
+    assert watch_service.read_retained_registration(watch_service.service_paths(first)) == {
+        "previous": (b"m", b"p"),
+        "candidate": (b"n", b"q"),
+    }
+    assert launchd.events == [] and not (second / "desktop-state.json").exists()
+    if which == "current":
+        assert json.loads(own.binding.read_bytes())["home"] == str(first)
+    else:
+        assert not own.binding.exists() and own.read_state()["desired_service"] == "running"
+
+
 async def test_unknown_own_registration_refuses_adoption(tmp_path, own, launchd):
     from insto.desktop import home
 

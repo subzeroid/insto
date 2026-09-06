@@ -20,6 +20,7 @@ from insto.desktop.operations import (
 )
 from insto.desktop.profile import Profile
 from insto.desktop.recovery import (
+    RestartFailedError,
     _lease_artifacts,
     checkpoint,
     cleanup,
@@ -83,10 +84,15 @@ async def migrate(profile: Profile) -> dict[str, Any]:
                     remaining=None,
                 )
                 checkpoint(forward)
-                if watch_service.read_retained_registration(paths) is not None:
-                    # Retained by a run that died before journaling: unreferenced
-                    # (require_settled proved there is no journal).
-                    watch_service.discard_retained_registration(paths)
+                try:
+                    if watch_service.read_retained_registration(paths) is not None:
+                        # Retained by a run that died before journaling: unreferenced
+                        # (require_settled proved there is no journal).
+                        watch_service.discard_retained_registration(paths)
+                except BackendError:
+                    # An unreadable retained document is what inspect_profile
+                    # reports as pending; Repair settles it, a migration does not.
+                    raise DesktopError("recovery_required") from None
                 watch_service.retain_registration(paths, previous=previous, candidate=desired)
                 checkpoint(forward)
                 profile.write_journal(journal)
@@ -106,11 +112,15 @@ async def migrate(profile: Profile) -> dict[str, Any]:
                 except BaseException as exc:
                     try:
                         await rollback_drained(profile, new, deadline)
-                    except BaseException:
+                    except BaseException as failure:
                         if not isinstance(exc, Exception):
                             # Cancellation or an interpreter interrupt, not an error:
                             # it propagates as itself; the journal awaits Repair.
                             raise exc from None
+                        if isinstance(failure, RestartFailedError):
+                            # Rolled back completely; only the previous registration
+                            # did not restart. Reported as service_error, retryable.
+                            raise failure from None
                         raise DesktopError("recovery_required") from None
                     raise
                 watch_service.discard_retained_registration(paths)
@@ -147,19 +157,25 @@ async def uninstall(profile: Profile) -> dict[str, Any]:
                 profile.write_state(state)
                 return _dto(state)
             try:
-                config = _manifest_config(watch_service.read_manifest(paths))
+                unlocked = watch_service.read_private_file(paths.manifest)
+                config = _manifest_config(watch_service.parse_manifest(paths, unlocked))
             except BackendError:
                 # A manifest that cannot prove ownership is what the facts call unknown.
                 raise DesktopError("service_ownership_unknown") from None
             with managed_service(home=profile.home, config=config, deadline=deadline):
                 # Verdict and removal share the management lock: the registration
                 # cannot change hands between the ownership check and the unlink.
+                on_disk = watch_service.read_registration(paths)
+                if on_disk[0] != unlocked:
+                    # Re-registered between the unlocked read and the lock: the lease
+                    # was derived from bytes that are gone. Refused before any native
+                    # action and before intent is persisted.
+                    raise DesktopError("service_ownership_unknown")
                 facts = await registration_facts(paths, deadline=deadline)
                 if facts["registration"] != "owned":
                     raise DesktopError("service_ownership_unknown")
                 checkpoint(deadline)
                 profile.write_state(state)
-                on_disk = watch_service.read_registration(paths)
                 registered = ManagedService(
                     paths, config, deadline, artifacts=_lease_artifacts(paths, on_disk, on_disk)
                 )

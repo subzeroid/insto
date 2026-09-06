@@ -25,7 +25,13 @@ def validate_path(value: Any, *, allow_none: bool) -> Path | None:
         or "\x00" in value
     ):
         raise DesktopError("invalid_params")
-    expanded = os.path.expanduser(value) if value == "~" or value.startswith("~/") else value
+    expanded = value
+    if value == "~" or value.startswith("~/"):
+        # An unset or empty HOME expands "~" to the filesystem root: no account home.
+        account = os.path.expanduser("~")
+        if not os.path.isabs(account) or account == "/":
+            raise DesktopError("home_invalid")
+        expanded = os.path.expanduser(value)
     path = Path(expanded)
     if not path.is_absolute() or os.path.normpath(expanded) != str(path):
         raise DesktopError("home_invalid")

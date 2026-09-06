@@ -429,3 +429,24 @@ async def test_framed_job_output_parses_as_owned_running(home, monkeypatch):
     facts = await registration_facts(paths, deadline=DEADLINE, expected=value)
     assert facts["registration"] == "owned" and facts["loaded"] is True
     assert facts["process"] == "running" and facts["settings"] == "matching"
+
+
+async def test_output_directory_alone_never_makes_settings_different(home, monkeypatch):
+    """R21: the CLI pins its default output directory against its install cwd; the
+    watch service never writes exports, so only the data-affecting pins are compared."""
+    from insto.desktop.service_facts import manifest_settings, registration_facts
+
+    value = registration(home)
+    launchctl(monkeypatch, returncode=113, stderr=b"Could not find service")
+    expected = dict(value, output_dir="/somewhere/else/output")
+    facts = await registration_facts(
+        watch_service.service_paths(home), deadline=DEADLINE, expected=expected
+    )
+    assert facts["registration"] == "owned" and facts["settings"] == "matching"
+    assert "output_dir" not in manifest_settings(value)
+    assert set(manifest_settings(value)) == {
+        "backend",
+        "db_path",
+        "aiograpi_session_path",
+        "env_file",
+    }

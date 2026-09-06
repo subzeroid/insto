@@ -72,69 +72,6 @@ async def test_exact_c2_capabilities():
     assert list(CAPABILITIES[-5:]) == C3_CAPABILITIES
 
 
-@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
-@pytest.mark.parametrize(
-    "params, code",
-    [
-        ({}, "invalid_params"),
-        ({"path": 5}, "invalid_params"),
-        ({"path": ""}, "invalid_params"),
-        ({"path": "/x", "token": "offline-sentinel"}, "invalid_params"),
-        ({"path": "relative"}, "home_invalid"),
-        ({"path": "/a/../b"}, "home_invalid"),
-        ({"path": "~alice/.insto"}, "home_invalid"),
-        ({"path": "/" + "a" * 1024}, "invalid_params"),
-    ],
-)
-async def test_home_params_are_validated_before_importing_home(
-    monkeypatch, operation, params, code
-):
-    forbid_import(monkeypatch, "home")
-    forbid_import(monkeypatch, "operations")
-    raw = await handle(wire(operation, params))
-    assert b"offline-sentinel" not in raw
-    assert json.loads(raw)["error"]["code"] == code
-
-
-async def test_home_inspect_rejects_a_null_path(monkeypatch):
-    forbid_import(monkeypatch, "home")
-    raw = await handle(wire("home.inspect", {"path": None}))
-    assert json.loads(raw)["error"]["code"] == "invalid_params"
-
-
-@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
-async def test_lone_surrogates_in_a_path_are_invalid_params(monkeypatch, operation):
-    """C9: a JSON escape that decodes to a lone surrogate has no UTF-8 form; it is
-    refused as a parameter, never as an internal error."""
-    forbid_import(monkeypatch, "home")
-    raw = (
-        f'{{"protocol_version": 1, "request_id": "c1", "operation": "{operation}", '
-        '"params": {"path": "/x/\\udc80"}}\n'
-    ).encode()
-    response = json.loads(await handle(raw))
-    assert response["request_id"] == "c1"
-    assert response["error"]["code"] == "invalid_params"
-
-
-@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
-async def test_symlink_loops_in_a_path_are_home_invalid(monkeypatch, tmp_path, operation):
-    """C9: resolve() reports a loop as RuntimeError (3.11/3.12) or OSError (later)."""
-    forbid_import(monkeypatch, "home")
-    (tmp_path / "a").symlink_to(tmp_path / "b")
-    (tmp_path / "b").symlink_to(tmp_path / "a")
-    raw = await handle(wire(operation, {"path": str(tmp_path / "a" / "home")}))
-    assert json.loads(raw)["error"]["code"] == "home_invalid"
-
-
-@pytest.mark.parametrize("operation", ["service.inspect", "service.migrate", "service.uninstall"])
-async def test_c3_service_operations_take_no_params(monkeypatch, operation):
-    forbid_import(monkeypatch, "operations")
-    forbid_import(monkeypatch, "migration")
-    raw = await handle(wire(operation, {"token": "offline-sentinel"}))
-    assert b"offline-sentinel" not in raw
-    assert json.loads(raw)["error"]["code"] == "invalid_params"
-
-
 async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):
     from insto.desktop import home, migration, operations
     from insto.desktop.profile import Profile
@@ -224,6 +161,71 @@ async def test_home_select_uses_the_own_profile_when_the_binding_is_broken(monke
     [(profile, path)] = calls
     assert isinstance(profile, Profile) and profile.root == root and not profile.adopted
     assert path is None
+
+
+# The C3 module-absence proofs sit below a test that imports `insto.desktop.home` for
+# real: the file order itself exercises their independence from earlier imports.
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+@pytest.mark.parametrize(
+    "params, code",
+    [
+        ({}, "invalid_params"),
+        ({"path": 5}, "invalid_params"),
+        ({"path": ""}, "invalid_params"),
+        ({"path": "/x", "token": "offline-sentinel"}, "invalid_params"),
+        ({"path": "relative"}, "home_invalid"),
+        ({"path": "/a/../b"}, "home_invalid"),
+        ({"path": "~alice/.insto"}, "home_invalid"),
+        ({"path": "/" + "a" * 1024}, "invalid_params"),
+    ],
+)
+async def test_home_params_are_validated_before_importing_home(
+    monkeypatch, operation, params, code
+):
+    forbid_import(monkeypatch, "home")
+    forbid_import(monkeypatch, "operations")
+    raw = await handle(wire(operation, params))
+    assert b"offline-sentinel" not in raw
+    assert json.loads(raw)["error"]["code"] == code
+
+
+async def test_home_inspect_rejects_a_null_path(monkeypatch):
+    forbid_import(monkeypatch, "home")
+    raw = await handle(wire("home.inspect", {"path": None}))
+    assert json.loads(raw)["error"]["code"] == "invalid_params"
+
+
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+async def test_lone_surrogates_in_a_path_are_invalid_params(monkeypatch, operation):
+    """C9: a JSON escape that decodes to a lone surrogate has no UTF-8 form; it is
+    refused as a parameter, never as an internal error."""
+    forbid_import(monkeypatch, "home")
+    raw = (
+        f'{{"protocol_version": 1, "request_id": "c1", "operation": "{operation}", '
+        '"params": {"path": "/x/\\udc80"}}\n'
+    ).encode()
+    response = json.loads(await handle(raw))
+    assert response["request_id"] == "c1"
+    assert response["error"]["code"] == "invalid_params"
+
+
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+async def test_symlink_loops_in_a_path_are_home_invalid(monkeypatch, tmp_path, operation):
+    """C9: resolve() reports a loop as RuntimeError (3.11/3.12) or OSError (later)."""
+    forbid_import(monkeypatch, "home")
+    (tmp_path / "a").symlink_to(tmp_path / "b")
+    (tmp_path / "b").symlink_to(tmp_path / "a")
+    raw = await handle(wire(operation, {"path": str(tmp_path / "a" / "home")}))
+    assert json.loads(raw)["error"]["code"] == "home_invalid"
+
+
+@pytest.mark.parametrize("operation", ["service.inspect", "service.migrate", "service.uninstall"])
+async def test_c3_service_operations_take_no_params(monkeypatch, operation):
+    forbid_import(monkeypatch, "operations")
+    forbid_import(monkeypatch, "migration")
+    raw = await handle(wire(operation, {"token": "offline-sentinel"}))
+    assert b"offline-sentinel" not in raw
+    assert json.loads(raw)["error"]["code"] == "invalid_params"
 
 
 @pytest.mark.parametrize("operation", ["setup.configure", "credentials.replace"])

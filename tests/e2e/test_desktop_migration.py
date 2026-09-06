@@ -4,6 +4,12 @@ Set INSTO_TEST_LAUNCHD=1 and INSTO_TEST_PYTHON=/path/to/installed/venv/bin/pytho
 "old" interpreter). The bridge runs under this pytest interpreter (the "new" one).
 Exactly one temporary user LaunchAgent, zero watches, an offline token and an
 unreachable proxy, so no provider request can ever leave the host.
+
+The old CLI installs from a foreign working directory (its default ``./output`` is
+pinned against that cwd), which is the realistic case the migration must accept.
+Each run leaves exactly one persistent launchd enable/disable override entry for its
+label in ``launchctl print gui/<uid>`` (a domain flag, not a job, a plist or a file);
+launchd keeps it forever and the cleanup never touches it.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
     old_python = os.environ.get("INSTO_TEST_PYTHON")
     if not old_python:
         pytest.skip("set INSTO_TEST_PYTHON to a wheel-installed interpreter")
+    old_python = os.path.abspath(old_python)  # the manifest and `ps` report absolute paths
     domain = f"gui/{os.getuid()}"
     probe = subprocess.run(["/bin/launchctl", "print", domain], capture_output=True, timeout=10)
     if probe.returncode:
@@ -65,12 +72,11 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
     assert not plist.exists(), "refusing to reuse an existing LaunchAgent"
 
     def cli(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-        # The CLI pins its default `./output` against its own cwd at install time;
-        # the bridge resolves the same default against the home. Installing from
-        # the home is the one cwd under which both pin the same directory.
+        # A foreign cwd: the CLI pins its default `./output` against it, and the
+        # bridge normalizes the output directory to the home on migration (R21).
         result = subprocess.run(
             [old_python, *flags, "-m", "insto", *args],
-            cwd=home,
+            cwd=tmp_path,
             env=env,
             capture_output=True,
             text=True,
@@ -173,7 +179,8 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
         gone = subprocess.run(
             ["/bin/launchctl", "print", f"{domain}/{label}"], capture_output=True, timeout=10
         )
-        assert gone.returncode != 0
+        diagnostic = (gone.stderr + gone.stdout).decode("utf-8", "replace").lower()
+        assert gone.returncode != 0 and "could not find service" in diagnostic, diagnostic
         returned = bridge("home.select", {"path": None})
         assert returned["configured"] is False
         assert not (root / "desktop-home.json").exists()
@@ -190,8 +197,12 @@ def native_cleanup(domain: str, label: str, plist: Path, manifest: Path, db: Pat
     """
     target = f"{domain}/{label}"
     loaded = subprocess.run(["/bin/launchctl", "print", target], capture_output=True, timeout=10)
+    bootout = b""
     if loaded.returncode == 0:
-        subprocess.run(["/bin/launchctl", "bootout", target], capture_output=True, timeout=30)
+        result = subprocess.run(
+            ["/bin/launchctl", "bootout", target], capture_output=True, timeout=30
+        )
+        bootout = result.stderr + result.stdout
     for path in (plist, manifest):
         if path.exists():
             path.unlink()
@@ -202,7 +213,10 @@ def native_cleanup(domain: str, label: str, plist: Path, manifest: Path, db: Pat
             break
         time.sleep(0.5)  # bootout of a live job returns before launchd drops the label
     diagnostic = (gone.stderr + gone.stdout).decode("utf-8", "replace").lower()
-    assert gone.returncode != 0 and "could not find service" in diagnostic, diagnostic
+    assert gone.returncode != 0 and "could not find service" in diagnostic, (
+        diagnostic,
+        bootout.decode("utf-8", "replace"),
+    )
     lock = Path(f"{db}.watch.lock")
     if lock.exists():
         with lock.open("rb") as stream:  # a still-running executor would hold this flock

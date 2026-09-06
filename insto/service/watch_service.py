@@ -36,6 +36,7 @@ _MISSING_DIAGNOSTICS = (
     "no such process",
 )
 RETAINED_REGISTRATION = "migration-registration.json"
+_RETAINED_MAX_BYTES = 262144
 
 
 @dataclass(frozen=True)
@@ -226,7 +227,12 @@ def _management_lock(paths: ServicePaths) -> Iterator[None]:
 
 
 def _sync_dir(path: Path) -> None:
-    """Make a directory's entries durable; publications are never claimed before this."""
+    """Make a directory's entries durable; publications are never claimed before this.
+
+    An ``OSError`` propagates raw in this layer (the desktop layer maps it). On
+    macOS ``fsync`` on a directory flushes to the drive cache; ``F_FULLFSYNC`` is
+    out of scope.
+    """
     descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(descriptor)
@@ -234,15 +240,31 @@ def _sync_dir(path: Path) -> None:
         os.close(descriptor)
 
 
-def _atomic_write(path: Path, content: bytes) -> None:
+def _durable_temp(path: Path, content: bytes) -> Path:
+    """Write a private, fsynced temporary sibling of ``path`` and return it."""
     fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     tmp = Path(raw_tmp)
     try:
         os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
+        stream = os.fdopen(fd, "wb")
+        fd = -1  # the stream owns and closes the descriptor from here on
+        with stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+    except Exception:
+        if fd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+    return tmp
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    tmp = _durable_temp(path, content)
+    try:
         # Linking a completed private temporary file publishes it atomically
         # while refusing to replace a target created after our preflight.
         os.link(tmp, path)
@@ -250,7 +272,16 @@ def _atomic_write(path: Path, content: bytes) -> None:
         _sync_dir(path.parent)
     except Exception:
         with contextlib.suppress(OSError):
-            os.close(fd)
+            tmp.unlink()
+        raise
+
+
+def _replace_file(path: Path, content: bytes) -> None:
+    tmp = _durable_temp(path, content)
+    try:
+        os.replace(tmp, path)
+        _sync_dir(path.parent)
+    except Exception:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
@@ -308,6 +339,8 @@ def retain_registration(
         },
         sort_keys=True,
     ).encode()
+    if len(payload) > _RETAINED_MAX_BYTES:
+        raise BackendError("retained migration registration is too large")
     _atomic_write(path, payload)
 
 
@@ -316,7 +349,7 @@ def read_retained_registration(paths: ServicePaths) -> dict[str, Registration] |
     if not os.path.lexists(path):
         return None
     try:
-        value = json.loads(read_private_file(path, max_bytes=262144).decode("utf-8"))
+        value = json.loads(read_private_file(path, max_bytes=_RETAINED_MAX_BYTES).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BackendError("retained migration registration is invalid") from exc
     if (
@@ -334,28 +367,9 @@ def read_retained_registration(paths: ServicePaths) -> dict[str, Registration] |
 def discard_retained_registration(paths: ServicePaths) -> None:
     path = paths.directory / RETAINED_REGISTRATION
     if os.path.lexists(path):
-        read_private_file(path, max_bytes=262144)
+        read_private_file(path, max_bytes=_RETAINED_MAX_BYTES)
         path.unlink()
         _sync_dir(paths.directory)
-
-
-def _replace_file(path: Path, content: bytes) -> None:
-    fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    tmp = Path(raw_tmp)
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(content)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(tmp, path)
-        _sync_dir(path.parent)
-    except Exception:
-        with contextlib.suppress(OSError):
-            os.close(fd)
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
 
 
 def replace_registration(
@@ -370,12 +384,17 @@ def replace_registration(
                 raise BackendError("watch service registration changed during migration")
         elif not _existing_matches(path, before):
             raise BackendError("watch service registration changed during migration")
-    for path, before, content in zip(targets, expected, desired, strict=True):
+    transitions = tuple(zip(targets, expected, desired, strict=True))
+    # Removals first and plist-first: a death mid-way must never leave an
+    # autostart plist without the manifest that proves its ownership.
+    for path, before, content in reversed(transitions):
+        if content is None and before is not None:
+            path.unlink()
+            _sync_dir(path.parent)
+    for path, before, content in transitions:
         if content is None:
-            if before is not None:
-                path.unlink()
-                _sync_dir(path.parent)
-        elif before is None:
+            continue
+        if before is None:
             _atomic_write(path, content)  # link-based: refuses a file that appeared meanwhile
         else:
             _replace_file(path, content)

@@ -854,11 +854,7 @@ def test_atomic_write_and_replace_sync_their_directories(
     assert synced.count(paths.directory) >= 4 and paths.plist.parent in synced
 
 
-@pytest.mark.asyncio
-async def test_uninstall_removes_the_plist_before_the_manifest(
-    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    paths = registration_home
+def _record_unlinks(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     order: list[str] = []
     original_unlink = Path.unlink
 
@@ -866,6 +862,82 @@ async def test_uninstall_removes_the_plist_before_the_manifest(
         order.append(self.name)
         return original_unlink(self, *args, **kwargs)
 
+    monkeypatch.setattr(Path, "unlink", unlink)
+    return order
+
+
+def test_replace_registration_removes_the_plist_before_the_manifest(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
+    watch_service._atomic_write(paths.manifest, b"m")
+    watch_service._atomic_write(paths.plist, b"p")
+    order = _record_unlinks(monkeypatch)
+    watch_service.replace_registration(paths, (b"m", b"p"), (None, None))
+    assert order == [paths.plist.name, paths.manifest.name]
+    assert watch_service.read_registration(paths) == (None, None)
+
+
+def test_replace_registration_removes_the_plist_before_replacing_the_manifest(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
+    watch_service._atomic_write(paths.manifest, b"m")
+    watch_service._atomic_write(paths.plist, b"p")
+    order = _record_unlinks(monkeypatch)
+    original_replace = watch_service._replace_file
+
+    def replace_file(path: Path, content: bytes) -> None:
+        order.append(f"replace:{path.name}")
+        original_replace(path, content)
+
+    monkeypatch.setattr(watch_service, "_replace_file", replace_file)
+    watch_service.replace_registration(paths, (b"m", b"p"), (b"m2", None))
+    assert order == [paths.plist.name, f"replace:{paths.manifest.name}"]
+    assert watch_service.read_registration(paths) == (b"m2", None)
+
+
+def test_publication_failure_never_closes_a_reused_descriptor(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
+    watch_service._atomic_write(paths.manifest, b"present")
+    reused: list[int] = []
+    original_link = os.link
+
+    def link(src: str, dst: str) -> None:
+        # Takes the descriptor number the temporary stream has just released.
+        reused.append(os.open(paths.directory, os.O_RDONLY))
+        original_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link)
+    with pytest.raises(FileExistsError):
+        watch_service._atomic_write(paths.manifest, b"new")
+    try:
+        os.fstat(reused[0])  # EBADF if the failure path closed a descriptor it no longer owned
+    finally:
+        os.close(reused[0])
+    assert sorted(path.name for path in paths.directory.iterdir()) == ["manifest.json"]
+    assert paths.manifest.read_bytes() == b"present"
+
+
+def test_retain_registration_refuses_an_unreadable_document(
+    registration_home: watch_service.ServicePaths,
+) -> None:
+    paths = registration_home
+    with pytest.raises(BackendError, match="too large"):
+        watch_service.retain_registration(
+            paths, previous=(None, None), candidate=(b"x" * 200_000, None)
+        )
+    assert watch_service.read_retained_registration(paths) is None
+    assert not (paths.directory / watch_service.RETAINED_REGISTRATION).exists()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_removes_the_plist_before_the_manifest(
+    registration_home: watch_service.ServicePaths, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = registration_home
     manifest, plist = watch_service._desired(
         paths,
         Config(
@@ -883,7 +955,7 @@ async def test_uninstall_removes_the_plist_before_the_manifest(
 
     monkeypatch.setattr(watch_service, "_launchctl", missing)
     monkeypatch.setattr(watch_service, "_require_macos", lambda: None)
-    monkeypatch.setattr(Path, "unlink", unlink)
+    order = _record_unlinks(monkeypatch)
     await watch_service.uninstall_service(home=paths.home)
     assert order == [paths.plist.name, paths.manifest.name]
 

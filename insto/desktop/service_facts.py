@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 from insto.desktop.errors import DesktopError
 from insto.exceptions import BackendError
@@ -19,7 +20,6 @@ _SETTINGS = ("backend", "db_path", "output_dir", "aiograpi_session_path", "env_f
 _PROCESS_STATES = {
     "running": "running",
     "xpcproxy": "running",  # starting
-    None: "stopped",
     "waiting": "stopped",
     "not running": "stopped",
     "exited": "stopped",
@@ -33,7 +33,11 @@ def manifest_settings(manifest: dict[str, Any]) -> dict[str, Any]:
 
 
 def _owned_files(paths: ServicePaths) -> tuple[dict[str, Any] | None, bytes | None]:
-    """(manifest, plist bytes) when the files prove insto ownership; (None, None) otherwise."""
+    """(manifest, plist bytes) when both files prove insto ownership.
+
+    (manifest, None) when the manifest is owned but the plist is absent; (None, None)
+    for anything foreign, corrupt or unreadable.
+    """
     if not os.path.lexists(paths.manifest):
         return None, None
     try:
@@ -45,7 +49,7 @@ def _owned_files(paths: ServicePaths) -> tuple[dict[str, Any] | None, bytes | No
     try:
         plist = watch_service.read_private_file(paths.plist)
         document = plistlib.loads(plist)
-    except (BackendError, plistlib.InvalidFileException, ValueError, OSError):
+    except (BackendError, ExpatError, plistlib.InvalidFileException, ValueError, OSError):
         return None, None
     if not watch_service._matches_owned_plist(paths, manifest, document):
         return None, None
@@ -65,6 +69,9 @@ def _job_matches(output: bytes, plist: bytes | None) -> bool:
 
 
 def _process(state: str | None) -> str:
+    # A loaded job whose output carries no state line is not provably stopped.
+    if state is None:
+        return "unknown"
     return _PROCESS_STATES.get(state, "unknown")
 
 
@@ -75,6 +82,7 @@ async def registration_facts(
 
     `expected` is the manifest this interpreter would write for the home's current
     configuration; when given, `settings` says whether the registered pins match it.
+    An `expected` missing any pinned key is an unknown expectation: `settings` stays None.
     """
     manifest, plist = _owned_files(paths)
     has_files = os.path.lexists(paths.manifest) or os.path.lexists(paths.plist)
@@ -110,17 +118,22 @@ async def registration_facts(
         }
     python = str(manifest["python"])
     settings = None
-    if expected is not None:
+    if expected is not None and all(key in expected for key in _SETTINGS):
         settings = (
             "matching"
             if manifest_settings(manifest) == manifest_settings(expected)
             else "different"
         )
+    try:
+        exists = Path(python).is_file()
+    except OSError:
+        # The manifest may point below a directory this user can no longer traverse.
+        exists = False
     return {
         "registration": "owned",
         "installation": "installed" if plist is not None else "incomplete",
         "interpreter": "current" if python == os.path.abspath(sys.executable) else "other",
-        "interpreter_exists": Path(python).is_file(),
+        "interpreter_exists": exists,
         "loaded": loaded,
         "process": process,
         "settings": settings,

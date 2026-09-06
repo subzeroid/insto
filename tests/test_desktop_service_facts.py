@@ -254,3 +254,85 @@ async def test_inspect_service_compares_the_home_configuration(home, monkeypatch
     assert result["registration"] == "owned" and result["interpreter"] == "other"
     assert result["settings"] == "matching" and result["loaded"] is False
     assert "installation" not in result and "process" not in result
+
+
+async def test_corrupt_plist_is_unknown_without_raising(home, monkeypatch):
+    from insto.desktop.service_facts import registration_facts
+
+    paths = watch_service.service_paths(home)
+    registration(home)
+    paths.plist.write_bytes(b"<?xml version='1.0'?><plist><dict><key>a</key>")
+    paths.plist.chmod(0o600)
+    launchctl(monkeypatch, returncode=113, stderr=b"Could not find service")
+    facts = await registration_facts(paths, deadline=DEADLINE)
+    assert facts["registration"] == "unknown" and facts["settings"] is None
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="permission bits do not bind root")
+async def test_interpreter_below_untraversable_directory_is_absent(home, monkeypatch, tmp_path):
+    from insto.desktop.service_facts import registration_facts
+
+    locked = tmp_path / "locked"
+    locked.mkdir(mode=0o700)
+    (locked / "python3").write_bytes(b"")
+    registration(home, python=str(locked / "python3"))
+    launchctl(monkeypatch, returncode=113, stderr=b"Could not find service")
+    locked.chmod(0)
+    try:
+        facts = await registration_facts(watch_service.service_paths(home), deadline=DEADLINE)
+    finally:
+        locked.chmod(0o700)
+    assert facts["registration"] == "owned" and facts["interpreter"] == "other"
+    assert facts["interpreter_exists"] is False
+
+
+async def test_partial_expected_leaves_settings_unknown(home, monkeypatch):
+    from insto.desktop.service_facts import registration_facts
+
+    registration(home)
+    launchctl(monkeypatch, returncode=113, stderr=b"Could not find service")
+    facts = await registration_facts(
+        watch_service.service_paths(home), deadline=DEADLINE, expected={"backend": "hikerapi"}
+    )
+    assert facts["registration"] == "owned" and facts["settings"] is None
+
+
+async def test_loaded_job_without_state_line_is_unknown_process(home, monkeypatch):
+    from insto.desktop.service_facts import registration_facts
+
+    value = registration(home)
+    stateless = b"\n".join(
+        line for line in job_output(value).splitlines() if not line.startswith(b"\tstate")
+    )
+    launchctl(monkeypatch, returncode=0, stdout=stateless)
+    facts = await registration_facts(watch_service.service_paths(home), deadline=DEADLINE)
+    assert facts["registration"] == "owned" and facts["loaded"] is True
+    assert facts["process"] == "unknown"
+
+
+async def test_malformed_job_output_is_unknown_ownership(home, monkeypatch):
+    from insto.desktop.service_facts import registration_facts
+
+    value = registration(home)
+    unterminated = job_output(value).replace(b"\t}\n", b"")
+    launchctl(monkeypatch, returncode=0, stdout=unterminated)
+    facts = await registration_facts(watch_service.service_paths(home), deadline=DEADLINE)
+    assert facts["registration"] == "unknown" and facts["loaded"] is True
+
+
+async def test_framed_job_output_parses_as_owned_running(home, monkeypatch):
+    from insto.desktop.service_facts import registration_facts
+
+    value = registration(home)
+    paths = watch_service.service_paths(home)
+    framed = b"".join(
+        [
+            f"gui/{os.getuid()}/{paths.label} = {{\n".encode(),
+            job_output(value),
+            b"\n\tproperties = {\n\t\tpartial import = 0\n\t}\n}\n",
+        ]
+    )
+    launchctl(monkeypatch, returncode=0, stdout=framed)
+    facts = await registration_facts(paths, deadline=DEADLINE, expected=value)
+    assert facts["registration"] == "owned" and facts["loaded"] is True
+    assert facts["process"] == "running" and facts["settings"] == "matching"

@@ -21,6 +21,7 @@ import fcntl
 import hashlib
 import json
 import os
+import plistlib
 import subprocess
 import sys
 import time
@@ -41,11 +42,13 @@ TOKEN = "isolated-migration-credential"
 # The runner's own readiness poll is ten seconds; a loaded host (or a CI runner)
 # needs headroom above that for two interpreter cold starts per transition.
 TRANSITION_SECONDS = 60
-# What `watch_service` records as the manifest's `python` (and therefore what launchd
-# execs and `ps` prints). Inside a venv built on a macOS framework Python this is the
-# framework binary rather than the venv's `bin/python`, and it also depends on the
-# spawning environment, so it can only be observed, never guessed.
+# What `watch_service` records as the manifest's `python` and writes as the plist's
+# `ProgramArguments[0]`. It depends on the spawning environment, so it can only be
+# observed, never guessed.
 IDENTITY_SOURCE = "import os, sys; print(os.path.abspath(sys.executable))"
+# The bridge always runs isolated and without bytecode, so the plist it writes on
+# migration carries exactly these interpreter flags.
+BRIDGE_FLAGS = ["-I", "-B"]
 
 
 def test_migration_through_the_bridge(tmp_path: Path) -> None:
@@ -104,7 +107,7 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
             "params": params,
         }
         result = subprocess.run(
-            [sys.executable, "-I", "-B", "-m", "insto.desktop"],
+            [sys.executable, *BRIDGE_FLAGS, "-m", "insto.desktop"],
             input=(json.dumps(request) + "\n").encode(),
             capture_output=True,
             timeout=150,
@@ -125,7 +128,7 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
         reports as its own executable.
         """
         return subprocess.run(
-            [sys.executable, "-I", "-B", "-c", IDENTITY_SOURCE],
+            [sys.executable, *BRIDGE_FLAGS, "-c", IDENTITY_SOURCE],
             capture_output=True,
             text=True,
             check=True,
@@ -149,7 +152,15 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
         pid = status()["process"]["pid"]
         return pid is not None and pid == executor_pid()
 
-    def verified_pid(interpreter: str) -> int:
+    def verified_pid(interpreter_flags: list[str]) -> int:
+        """The live PID, proven to be this test's runner under the given flags.
+
+        Only the command suffix is asserted: on a macOS framework build `bin/python`
+        is an app-bundle stub that re-execs `Python.app/Contents/MacOS/Python`, and
+        `ps -o command=` prints that re-exec'd binary rather than the path launchd was
+        given. Interpreter identity is therefore proven from the manifest and the
+        plist the product writes (see `registered_identity`), never from `ps`.
+        """
         pid = status()["process"]["pid"]
         assert isinstance(pid, int) and pid > 1, "no verified service PID"
         assert pid == executor_pid(), "service is not this test's executor"
@@ -160,9 +171,15 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
             check=True,
             timeout=5,
         ).stdout.rstrip()
-        assert command.startswith(f"{interpreter} "), command
-        assert command.endswith(f"-m insto.service.watch_service_runner {manifest}"), command
+        suffix = f" {' '.join(interpreter_flags)} -m insto.service.watch_service_runner {manifest}"
+        assert command.endswith(suffix), command
         return pid
+
+    def registered_identity(expected: str) -> None:
+        """Both files the product owns must name the same interpreter."""
+        assert json.loads(manifest.read_text())["python"] == expected
+        arguments = plistlib.loads(plist.read_bytes())["ProgramArguments"]
+        assert arguments[0] == expected, arguments
 
     try:
         cli("watch-service", "install")
@@ -176,7 +193,8 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
                 "INSTO_TEST_PYTHON resolves to the same interpreter as the bridge "
                 f"({new_identity}), so the smoke cannot prove a switch"
             )
-        old_pid = verified_pid(old_identity)
+        registered_identity(old_identity)
+        old_pid = verified_pid(flags)
         assert len(bridge("hello", {})["capabilities"]) == 24
         report = bridge("home.inspect", {"path": str(home)})
         assert report["adoptable"] and report["registration"] == "owned"
@@ -194,19 +212,20 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
         }
         migrated = bridge("service.migrate", {})
         assert migrated["status"] == "running" and migrated["service_running"] is True
-        new_pid = verified_pid(new_identity)
+        new_pid = verified_pid(BRIDGE_FLAGS)
         assert new_pid != old_pid
-        assert json.loads(manifest.read_text())["python"] == new_identity
+        registered_identity(new_identity)
         assert not retained.exists()
         assert not (home / "desktop-recovery.json").exists()
         assert TOKEN not in plist.read_text() and TOKEN not in manifest.read_text()
         assert bridge("service.inspect", {})["interpreter"] == "current"
         assert bridge("service.migrate", {})["status"] == "running"
-        assert verified_pid(new_identity) == new_pid, "no-op migration restarted the service"
+        assert verified_pid(BRIDGE_FLAGS) == new_pid, "no-op migration restarted the service"
         assert bridge("service.stop", {})["status"] == "stopped"
         _wait_for(lambda: status()["process"]["pid"] is None, seconds=TRANSITION_SECONDS)
         assert bridge("service.start", {})["status"] == "running"
-        verified_pid(new_identity)
+        verified_pid(BRIDGE_FLAGS)
+        registered_identity(new_identity)
         removed = bridge("service.uninstall", {})
         assert removed["status"] == "stopped" and removed["desired_service"] == "stopped"
         assert not plist.exists() and not manifest.exists()

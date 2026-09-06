@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -201,3 +202,87 @@ def test_database_publication_rechecks_sidecars_after_staging(tmp_path, monkeypa
         configuration.initialize_database(target)
     assert not target.exists()
     assert sidecar.read_bytes() == b"appeared during staging"
+
+
+def cli_home(tmp_path, toml: bytes) -> Path:
+    home = tmp_path / "cli-home"
+    home.mkdir(mode=0o700)
+    (home / "config.toml").write_bytes(toml)
+    (home / "config.toml").chmod(0o600)
+    return home
+
+
+def test_adopted_config_honours_cli_keys_and_registers_the_secret(tmp_path):
+    from insto._redact import redact_secrets
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(
+        tmp_path,
+        b'backend = "hikerapi"\ndb_path = "history.db"\n[hikerapi]\n'
+        b'token = "offline-cli-secret"\nproxy = "http://127.0.0.1:8118"\n',
+    )
+    profile = Profile(tmp_path / "desktop", home=home)
+    config = parse_profile_config(profile, profile.config.read_bytes())
+    assert config.backend == "hikerapi"
+    assert config.hiker_token == "offline-cli-secret"
+    assert config.hiker_proxy == "http://127.0.0.1:8118"
+    # A relative CLI path resolves against the home (the service's WorkingDirectory),
+    # never against the bridge's own working directory.
+    assert config.db_path == home / "history.db" and config.db_path.is_absolute()
+    assert config.output_dir == home / "output"
+    assert "offline-cli-secret" not in redact_secrets("token offline-cli-secret leaked")
+
+
+@pytest.mark.parametrize(
+    ("toml", "code"),
+    [
+        (
+            b'backend = "aiograpi"\n[aiograpi]\nusername = "u"\npassword = "p"\n',
+            "home_backend_unsupported",
+        ),
+        (b'backend = "fake"\n', "home_backend_unsupported"),
+        (b"backend = \n", "home_invalid"),
+        (b'backend = "hikerapi"\n', "home_invalid"),
+        (b'backend = "hikerapi"\n[hikerapi]\ntoken = "abc"\n', "home_invalid"),
+    ],
+)
+def test_adopted_config_rejections(tmp_path, toml, code):
+    from insto.desktop.configuration import parse_profile_config
+
+    home = cli_home(tmp_path, toml)
+    profile = Profile(tmp_path / "desktop", home=home)
+    with pytest.raises(DesktopError) as info:
+        parse_profile_config(profile, profile.config.read_bytes())
+    assert info.value.code == code
+
+
+def test_own_profile_config_stays_strict(tmp_path):
+    from insto.desktop.configuration import config_bytes, parse_profile_config
+
+    profile = Profile(tmp_path / "desktop")
+    config = parse_profile_config(profile, config_bytes(profile, "offline-desktop-token"))
+    assert config.hiker_token == "offline-desktop-token"
+    with pytest.raises(DesktopError):
+        parse_profile_config(
+            profile, b'backend = "hikerapi"\n[hikerapi]\ntoken = "offline-desktop-token"\n'
+        )
+
+
+def test_adopted_config_bytes_replaces_only_the_token(tmp_path):
+    import tomllib
+
+    from insto.desktop.configuration import adopted_config_bytes
+
+    original = (
+        b'backend = "hikerapi"\ntheme = "dark"\n[hikerapi]\n'
+        b'token = "offline-old-secret"\nproxy = "http://127.0.0.1:8118"\n'
+    )
+    updated = tomllib.loads(adopted_config_bytes(original, "offline-new-secret").decode())
+    assert updated["hikerapi"] == {"token": "offline-new-secret", "proxy": "http://127.0.0.1:8118"}
+    assert updated["theme"] == "dark" and updated["backend"] == "hikerapi"
+    legacy_toml = b'[hiker]\ntoken = "offline-old-secret"\n'
+    legacy = tomllib.loads(adopted_config_bytes(legacy_toml, "offline-new-secret").decode())
+    assert legacy == {"hiker": {"token": "offline-new-secret"}}
+    fresh_toml = b'backend = "hikerapi"\n'
+    fresh = tomllib.loads(adopted_config_bytes(fresh_toml, "offline-new-secret").decode())
+    assert fresh["hikerapi"]["token"] == "offline-new-secret"

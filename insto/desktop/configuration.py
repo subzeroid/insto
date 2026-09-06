@@ -14,11 +14,13 @@ from pathlib import Path
 import tomli_w
 
 from insto._redact import register_secret
-from insto.config import Config
+from insto.config import BACKEND_HIKERAPI, Config
 from insto.desktop.access import validate_token
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile, _directory, _sync_directory
+from insto.exceptions import BackendError
 from insto.service.history import _SCHEMA_VERSION, HistoryStore
+from insto.service.watch_service_runner import load_home_config
 
 
 def config_bytes(profile: Profile, token: str) -> bytes:
@@ -61,6 +63,50 @@ def parse_config(profile: Profile, payload: bytes) -> Config:
         aiograpi_session_path=profile.home / "aiograpi.session.json",
         watch_webhook_url=None,
     )
+
+
+def parse_profile_config(profile: Profile, payload: bytes) -> Config:
+    """Strict desktop shape for the own profile; the runner's resolver for an adopted home."""
+    if not profile.adopted:
+        return parse_config(profile, payload)
+    try:
+        data = tomllib.loads(payload.decode())
+        config = load_home_config(profile.home, data)
+    except (UnicodeDecodeError, ValueError, TypeError, BackendError):
+        # TypeError: a non-string path value such as `db_path = 5` reaches Path().
+        raise DesktopError("home_invalid") from None
+    if config.backend != BACKEND_HIKERAPI:
+        raise DesktopError("home_backend_unsupported")
+    token = config.hiker_token
+    if not isinstance(token, str):
+        raise DesktopError("home_invalid")
+    try:
+        validate_token(token)
+    except DesktopError:
+        raise DesktopError("home_invalid") from None
+    register_secret(token)
+    return config
+
+
+def adopted_config_bytes(payload: bytes, token: str) -> bytes:
+    """Rewrite only the HikerAPI token of an adopted home's TOML; other keys survive."""
+    validate_token(token)
+    try:
+        data = tomllib.loads(payload.decode())
+    except (UnicodeDecodeError, ValueError):
+        raise DesktopError("home_invalid") from None
+    section = data.get("hikerapi")
+    if not isinstance(section, dict):
+        legacy = data.get("hiker")
+        section = legacy if isinstance(legacy, dict) else data.setdefault("hikerapi", {})
+    section["token"] = token
+    return tomli_w.dumps(data).encode()
+
+
+def config_payload(profile: Profile, current: bytes | None, token: str) -> bytes:
+    if profile.adopted:
+        return adopted_config_bytes(current or b"", token)
+    return config_bytes(profile, token)
 
 
 def _database_file(path: Path) -> os.stat_result:

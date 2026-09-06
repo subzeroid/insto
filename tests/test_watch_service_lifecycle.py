@@ -15,6 +15,7 @@ import pytest
 from insto.config import Config
 from insto.exceptions import BackendError
 from insto.service import watch_service as legacy
+from insto.service.watch_service_lifecycle import ManagedService
 
 
 @pytest.mark.asyncio
@@ -718,3 +719,58 @@ async def test_native_outer_fields_are_unambiguous(
             assert all(call[0] == "print" for call in calls)
         finally:
             os.close(fd)
+
+
+def test_managed_service_accepts_explicit_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    config = Config(
+        backend="hikerapi", hiker_token="offline-artifacts-token", db_path=home / "store.db"
+    )
+    paths = legacy.service_paths(home)
+    explicit = (b"m", b"p")
+    lease = ManagedService(paths, config, deadline=1e12, artifacts=explicit)
+    assert (lease._manifest, lease._plist) == explicit and lease._config is config
+    default = ManagedService(paths, config, deadline=1e12)
+    assert default._manifest != b"m" and b"python" in default._manifest
+
+
+@pytest.mark.asyncio
+async def test_remove_registration_requires_an_unloaded_idle_service(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / "Library" / "LaunchAgents").mkdir(parents=True)
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    config = Config(
+        backend="hikerapi", hiker_token="offline-remove-token", db_path=home / "store.db"
+    )
+    paths = legacy.service_paths(home)
+    paths.directory.mkdir(parents=True, mode=0o700)
+    (home / "services").chmod(0o700)
+    manifest, plist = legacy._desired(paths, config, None)
+    legacy._atomic_write(paths.manifest, manifest)
+    legacy._atomic_write(paths.plist, plist)
+    outputs = {"print": (0, b"\tstate = running\n\tpid = 9\n")}
+
+    async def fake(
+        arguments: list[str], *, timeout: float | None = None, deadline: float | None = None
+    ) -> subprocess.CompletedProcess[bytes]:
+        code, out = outputs.get(arguments[0], (113, b"Could not find service"))
+        return subprocess.CompletedProcess(
+            arguments, code, out, b"" if code == 0 else b"Could not find service"
+        )
+
+    monkeypatch.setattr(legacy, "_launchctl", fake)
+    lease = ManagedService(paths, config, deadline=1e12)
+    with pytest.raises(BackendError):
+        await lease.remove_registration()  # still loaded
+    assert paths.manifest.exists() and paths.plist.exists()
+    outputs.clear()
+    await lease.remove_registration()
+    assert not paths.plist.exists() and not paths.manifest.exists()
+    await lease.remove_registration()  # idempotent

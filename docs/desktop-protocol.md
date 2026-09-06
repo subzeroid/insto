@@ -442,13 +442,13 @@ replacements leaves) — anything else is `service_ownership_unknown` and stays
 untouched. A retained document that is not a readable registration blocks
 every transition as `recovery_required`; when no journal references it,
 `service.repair` discards it (it can never serve a rollback), while a document
-the service layer refuses to read at all stays pending. A registration whose manifest, plist or loaded job (program,
-arguments and, when launchd reports it, the plist path) cannot be proven
-owned is `service_ownership_unknown` for every mutation, as is a
-registration that changed between an unlocked read and the management lock;
-reads still describe it. A manifest without its plist is owned but
-incomplete: migration completes it, uninstall removes it, and a loaded job
-without its plist is unknown.
+the service layer refuses to read at all stays pending. A registration whose
+manifest, plist or loaded job (program, arguments and, when launchd reports
+it, the plist path) cannot be proven owned is `service_ownership_unknown` for
+every mutation, as is a registration that changed between an unlocked read and
+the management lock; reads still describe it. A manifest without its plist is
+owned but incomplete: migration completes it, uninstall removes it, and a
+loaded job without its plist is unknown.
 
 Every mutation re-validates the binding after taking the profile lock: a
 request resolved against one home while another process selected a different

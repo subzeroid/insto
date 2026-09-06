@@ -30,6 +30,11 @@ def check_database_location(home: Path, db_path: Path) -> None:
     Raises `home_invalid`. Shared by the adopted config parser (every desktop open)
     and `home.inspect`, so inspection and later opens agree.
     """
+    # Normalise lexically first: `../shared/s.db` under the home is not inside it,
+    # and a purely textual containment test would skip both external checks. Never
+    # `resolve()`: a symlink must not decide which rule applies, and the rules below
+    # judge the path as written, exactly as the later open will use it.
+    db_path = Path(os.path.normpath(db_path))
     if db_path.parent == home or home in db_path.parents:
         return
     try:
@@ -236,9 +241,43 @@ def check_database(path: Path, *, deadline: float | None = None) -> bool:
         raise DesktopError("schema_mismatch") from None
 
 
+def _repair_stage_link(path: Path, stage_dir: Path | None) -> None:
+    """Drop a stage link our own interrupted publication left behind.
+
+    A death between `os.link` and the stage unlink leaves a database with two links,
+    which `_database_file` refuses as `profile_ownership` forever. Only a staged file
+    that is literally the same inode is unlinked, and only from a private owned stage
+    directory; stage directories are never swept or removed, because another process
+    may be staging into the same (possibly shared) external database directory.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        return
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 2 or info.st_uid != os.getuid():
+        return
+    root = stage_dir if stage_dir is not None else path.parent.parent
+    try:
+        staged_files = sorted(root.glob(".desktop-db-*/store.db"))
+    except OSError:
+        return
+    for staged in staged_files:
+        try:
+            _directory(staged.parent)
+            staged_info = staged.lstat()
+        except (DesktopError, OSError):
+            continue
+        if (staged_info.st_dev, staged_info.st_ino) != (info.st_dev, info.st_ino):
+            continue
+        with contextlib.suppress(OSError):
+            staged.unlink()  # the empty stage directory stays: it may still be leased
+        return
+
+
 def initialize_database(
     path: Path, *, deadline: float | None = None, stage_dir: Path | None = None
 ) -> None:
+    _repair_stage_link(path, stage_dir)
     if check_database(path, deadline=deadline):
         return
     # Stage outside the profile by default, so process death cannot strand a partial
@@ -267,7 +306,10 @@ def initialize_database(
         except FileExistsError:
             pass
         else:
-            staged.unlink()
+            # Another process may have repaired this link already (it sees the same
+            # two-link database); a vanished stage file means the work is done.
+            with contextlib.suppress(FileNotFoundError):
+                staged.unlink()
         _sync_directory(Path(temporary))
     _sync_directory(path.parent)
     check_database(path, deadline=deadline)

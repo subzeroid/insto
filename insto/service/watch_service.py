@@ -97,7 +97,8 @@ def parse_manifest(paths: ServicePaths, payload: bytes) -> dict[str, Any]:
     """Validate manifest bytes already read as this home's owned manifest."""
     try:
         value = json.loads(payload.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        # RecursionError: a deeply nested document within the byte limit.
         raise BackendError("invalid watch service manifest") from exc
     keys = {
         "schema_version",

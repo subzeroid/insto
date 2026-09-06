@@ -234,6 +234,19 @@ def test_read_manifest_rejects_malformed_or_non_strict_schema(
         watch_service.read_manifest(paths)
 
 
+def test_read_manifest_rejects_a_deeply_nested_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A document well within the byte limit can still exhaust the parser's recursion."""
+    monkeypatch.setattr(watch_service.Path, "home", lambda: tmp_path / "user")
+    paths = watch_service.service_paths(tmp_path / "config")
+    paths.directory.mkdir(parents=True)
+    paths.manifest.write_bytes(b"[" * 20000 + b"]" * 20000)
+    paths.manifest.chmod(0o600)
+    with pytest.raises(BackendError, match="invalid watch service manifest"):
+        watch_service.read_manifest(paths)
+
+
 def test_read_private_file_rejects_oversize_without_disclosing_contents(tmp_path: Path) -> None:
     path = tmp_path / "secret"
     path.write_bytes(b"super-secret-value")

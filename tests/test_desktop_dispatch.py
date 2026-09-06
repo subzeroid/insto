@@ -30,6 +30,19 @@ CAPABILITIES = [
     "snapshots.list",
     "snapshots.compare",
     "changes.list",
+    "service.inspect",
+    "service.migrate",
+    "service.uninstall",
+    "home.inspect",
+    "home.select",
+]
+
+C3_CAPABILITIES = [
+    "service.inspect",
+    "service.migrate",
+    "service.uninstall",
+    "home.inspect",
+    "home.select",
 ]
 
 
@@ -44,7 +57,84 @@ def wire(operation, params):
 
 async def test_exact_c2_capabilities():
     response = json.loads(await handle(wire("hello", {})))
-    assert response["result"]["capabilities"] == CAPABILITIES
+    assert response["result"]["capabilities"] == list(CAPABILITIES)
+    assert len(CAPABILITIES) == 24
+    assert list(CAPABILITIES[-5:]) == C3_CAPABILITIES
+
+
+@pytest.mark.parametrize("operation", ["home.inspect", "home.select"])
+@pytest.mark.parametrize(
+    "params, code",
+    [
+        ({}, "invalid_params"),
+        ({"path": 5}, "invalid_params"),
+        ({"path": ""}, "invalid_params"),
+        ({"path": "/x", "token": "offline-sentinel"}, "invalid_params"),
+        ({"path": "relative"}, "home_invalid"),
+        ({"path": "/a/../b"}, "home_invalid"),
+        ({"path": "~alice/.insto"}, "home_invalid"),
+        ({"path": "/" + "a" * 1024}, "invalid_params"),
+    ],
+)
+async def test_home_params_are_validated_before_importing_home(
+    monkeypatch, operation, params, code
+):
+    monkeypatch.setitem(sys.modules, "insto.desktop.home", None)
+    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
+    raw = await handle(wire(operation, params))
+    assert b"offline-sentinel" not in raw
+    assert json.loads(raw)["error"]["code"] == code
+
+
+async def test_home_inspect_rejects_a_null_path(monkeypatch):
+    monkeypatch.setitem(sys.modules, "insto.desktop.home", None)
+    raw = await handle(wire("home.inspect", {"path": None}))
+    assert json.loads(raw)["error"]["code"] == "invalid_params"
+
+
+@pytest.mark.parametrize("operation", ["service.inspect", "service.migrate", "service.uninstall"])
+async def test_c3_service_operations_take_no_params(monkeypatch, operation):
+    monkeypatch.setitem(sys.modules, "insto.desktop.operations", None)
+    monkeypatch.setitem(sys.modules, "insto.desktop.migration", None)
+    raw = await handle(wire(operation, {"token": "offline-sentinel"}))
+    assert b"offline-sentinel" not in raw
+    assert json.loads(raw)["error"]["code"] == "invalid_params"
+
+
+async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):
+    from insto.desktop import home, migration, operations
+
+    calls = []
+    monkeypatch.setenv("INSTO_DESKTOP_ROOT", str(tmp_path / "root"))
+
+    def record(name):
+        async def call(*args, **kwargs):
+            calls.append(name)
+            return {"ok": name}
+
+        return call
+
+    monkeypatch.setattr(operations, "inspect_service", record("service.inspect"))
+    monkeypatch.setattr(migration, "migrate", record("service.migrate"))
+    monkeypatch.setattr(migration, "uninstall", record("service.uninstall"))
+    monkeypatch.setattr(home, "inspect", record("home.inspect"))
+    monkeypatch.setattr(home, "select", record("home.select"))
+    for operation in ("service.inspect", "service.migrate", "service.uninstall"):
+        assert json.loads(await handle(wire(operation, {})))["result"] == {"ok": operation}
+    probe = str(tmp_path / "x")
+    assert json.loads(await handle(wire("home.inspect", {"path": probe})))["result"] == {
+        "ok": "home.inspect"
+    }
+    assert json.loads(await handle(wire("home.select", {"path": None})))["result"] == {
+        "ok": "home.select"
+    }
+    assert calls == [
+        "service.inspect",
+        "service.migrate",
+        "service.uninstall",
+        "home.inspect",
+        "home.select",
+    ]
 
 
 @pytest.mark.parametrize("operation", ["setup.configure", "credentials.replace"])

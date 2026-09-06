@@ -1,7 +1,9 @@
 """Opt-in native smoke: CLI-registered service → adopt → migrate → uninstall via the bridge.
 
 Set INSTO_TEST_LAUNCHD=1 and INSTO_TEST_PYTHON=/path/to/installed/venv/bin/python (the
-"old" interpreter). The bridge runs under this pytest interpreter (the "new" one).
+"old" interpreter). The bridge runs under this pytest interpreter (the "new" one);
+the two must be distinct interpreters or the smoke skips, since a migration between
+identical interpreters proves nothing.
 Exactly one temporary user LaunchAgent, zero watches, an offline token and an
 unreachable proxy, so no provider request can ever leave the host.
 
@@ -40,6 +42,23 @@ TOKEN = "isolated-migration-credential"
 TRANSITION_SECONDS = 60
 
 
+def _interpreter_identity(python: str, flags: list[str]) -> str:
+    """The absolute path a process started this way records for its own interpreter.
+
+    This is what ``watch_service`` writes into the manifest and what launchd then
+    execs, and it is not always the path used to invoke it: inside a venv built on
+    a macOS framework Python, ``sys.executable`` is the framework binary, not the
+    venv's ``bin/python``. Ask each interpreter instead of guessing.
+    """
+    return subprocess.run(
+        [python, *flags, "-c", "import os, sys; print(os.path.abspath(sys.executable))"],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout.strip()
+
+
 def test_migration_through_the_bridge(tmp_path: Path) -> None:
     old_python = os.environ.get("INSTO_TEST_PYTHON")
     if not old_python:
@@ -50,6 +69,13 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
     if probe.returncode:
         pytest.skip("macOS GUI launchd domain is unavailable")
     flags = _python_flags()
+    old_identity = _interpreter_identity(old_python, flags)
+    new_identity = _interpreter_identity(sys.executable, ["-I", "-B"])  # the bridge's own flags
+    if old_identity == new_identity:
+        pytest.skip(
+            "INSTO_TEST_PYTHON resolves to the same interpreter as the bridge "
+            f"({new_identity}), so the smoke cannot prove a switch"
+        )
     home = _create_test_home(tmp_path)
     root = tmp_path / "desktop-root"
     root.mkdir(mode=0o700)
@@ -140,8 +166,8 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
     try:
         cli("watch-service", "install")
         _wait_for(ready, seconds=TRANSITION_SECONDS)
-        old_pid = verified_pid(old_python)
-        assert json.loads(manifest.read_text())["python"] == old_python
+        old_pid = verified_pid(old_identity)
+        assert json.loads(manifest.read_text())["python"] == old_identity
         assert len(bridge("hello", {})["capabilities"]) == 24
         report = bridge("home.inspect", {"path": str(home)})
         assert report["adoptable"] and report["registration"] == "owned"
@@ -159,19 +185,19 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
         }
         migrated = bridge("service.migrate", {})
         assert migrated["status"] == "running" and migrated["service_running"] is True
-        new_pid = verified_pid(sys.executable)
+        new_pid = verified_pid(new_identity)
         assert new_pid != old_pid
-        assert json.loads(manifest.read_text())["python"] == os.path.abspath(sys.executable)
+        assert json.loads(manifest.read_text())["python"] == new_identity
         assert not retained.exists()
         assert not (home / "desktop-recovery.json").exists()
         assert TOKEN not in plist.read_text() and TOKEN not in manifest.read_text()
         assert bridge("service.inspect", {})["interpreter"] == "current"
         assert bridge("service.migrate", {})["status"] == "running"
-        assert verified_pid(sys.executable) == new_pid, "no-op migration restarted the service"
+        assert verified_pid(new_identity) == new_pid, "no-op migration restarted the service"
         assert bridge("service.stop", {})["status"] == "stopped"
         _wait_for(lambda: status()["process"]["pid"] is None, seconds=TRANSITION_SECONDS)
         assert bridge("service.start", {})["status"] == "running"
-        verified_pid(sys.executable)
+        verified_pid(new_identity)
         removed = bridge("service.uninstall", {})
         assert removed["status"] == "stopped" and removed["desired_service"] == "stopped"
         assert not plist.exists() and not manifest.exists()

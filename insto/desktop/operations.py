@@ -79,6 +79,12 @@ async def inspect_profile(profile: Profile) -> dict[str, Any]:
         if not profile.adopted and profile.home.exists() and any(profile.home.iterdir()):
             raise DesktopError("profile_ownership")
         return _dto(None)
+    try:
+        watch_service.read_retained_registration(watch_service.service_paths(profile.home))
+    except BackendError:
+        # An unreadable retained registration blocks every transition until it is
+        # dealt with: pending, like a journal, never a healthy profile.
+        return _dto(state, pending=True)
     if payload is None:
         raise DesktopError("recovery_required")
     config = parse_profile_config(profile, payload)

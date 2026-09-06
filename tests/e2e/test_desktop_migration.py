@@ -3,7 +3,8 @@
 Set INSTO_TEST_LAUNCHD=1 and INSTO_TEST_PYTHON=/path/to/installed/venv/bin/python (the
 "old" interpreter). The bridge runs under this pytest interpreter (the "new" one);
 the two must be distinct interpreters or the smoke skips, since a migration between
-identical interpreters proves nothing.
+identical interpreters proves nothing. That decision waits until the old service is
+installed, because only the manifest it wrote names the interpreter launchd execs.
 Exactly one temporary user LaunchAgent, zero watches, an offline token and an
 unreachable proxy, so no provider request can ever leave the host.
 
@@ -40,42 +41,23 @@ TOKEN = "isolated-migration-credential"
 # The runner's own readiness poll is ten seconds; a loaded host (or a CI runner)
 # needs headroom above that for two interpreter cold starts per transition.
 TRANSITION_SECONDS = 60
-
-
-def _interpreter_identity(python: str, flags: list[str]) -> str:
-    """The absolute path a process started this way records for its own interpreter.
-
-    This is what ``watch_service`` writes into the manifest and what launchd then
-    execs, and it is not always the path used to invoke it: inside a venv built on
-    a macOS framework Python, ``sys.executable`` is the framework binary, not the
-    venv's ``bin/python``. Ask each interpreter instead of guessing.
-    """
-    return subprocess.run(
-        [python, *flags, "-c", "import os, sys; print(os.path.abspath(sys.executable))"],
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    ).stdout.strip()
+# What `watch_service` records as the manifest's `python` (and therefore what launchd
+# execs and `ps` prints). Inside a venv built on a macOS framework Python this is the
+# framework binary rather than the venv's `bin/python`, and it also depends on the
+# spawning environment, so it can only be observed, never guessed.
+IDENTITY_SOURCE = "import os, sys; print(os.path.abspath(sys.executable))"
 
 
 def test_migration_through_the_bridge(tmp_path: Path) -> None:
     old_python = os.environ.get("INSTO_TEST_PYTHON")
     if not old_python:
         pytest.skip("set INSTO_TEST_PYTHON to a wheel-installed interpreter")
-    old_python = os.path.abspath(old_python)  # the manifest and `ps` report absolute paths
+    old_python = os.path.abspath(old_python)  # a foreign cwd resolves a relative path elsewhere
     domain = f"gui/{os.getuid()}"
     probe = subprocess.run(["/bin/launchctl", "print", domain], capture_output=True, timeout=10)
     if probe.returncode:
         pytest.skip("macOS GUI launchd domain is unavailable")
     flags = _python_flags()
-    old_identity = _interpreter_identity(old_python, flags)
-    new_identity = _interpreter_identity(sys.executable, ["-I", "-B"])  # the bridge's own flags
-    if old_identity == new_identity:
-        pytest.skip(
-            "INSTO_TEST_PYTHON resolves to the same interpreter as the bridge "
-            f"({new_identity}), so the smoke cannot prove a switch"
-        )
     home = _create_test_home(tmp_path)
     root = tmp_path / "desktop-root"
     root.mkdir(mode=0o700)
@@ -112,6 +94,8 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
             assert result.returncode == 0, result.stderr
         return result
 
+    bridge_env = {**env, "INSTO_DESKTOP_ROOT": str(root)}
+
     def bridge(operation: str, params: dict[str, Any]) -> dict[str, Any]:
         request = {
             "protocol_version": 1,
@@ -125,13 +109,30 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
             capture_output=True,
             timeout=150,
             cwd=tmp_path,
-            env={**env, "INSTO_DESKTOP_ROOT": str(root)},
+            env=bridge_env,
         )
         assert result.returncode == 0, result.stderr
         assert result.stderr == b"" and TOKEN.encode() not in result.stdout
         response = json.loads(result.stdout)
         assert "result" in response, response
         return response["result"]
+
+    def bridge_identity() -> str:
+        """The interpreter path a bridge process records for itself on migration.
+
+        Spawned exactly like ``bridge`` above — same interpreter, flags, cwd and
+        environment — because every one of those can change what a framework build
+        reports as its own executable.
+        """
+        return subprocess.run(
+            [sys.executable, "-I", "-B", "-c", IDENTITY_SOURCE],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+            cwd=tmp_path,
+            env=bridge_env,
+        ).stdout.strip()
 
     def status() -> dict[str, Any]:
         return json.loads(cli("watch-service", "status", "--json").stdout)
@@ -166,8 +167,16 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
     try:
         cli("watch-service", "install")
         _wait_for(ready, seconds=TRANSITION_SECONDS)
+        # The old CLI recorded the path launchd execs; the bridge reports the path it
+        # would record instead. Both are observed, so neither can drift from reality.
+        old_identity = str(json.loads(manifest.read_text())["python"])
+        new_identity = bridge_identity()
+        if old_identity == new_identity:
+            pytest.skip(
+                "INSTO_TEST_PYTHON resolves to the same interpreter as the bridge "
+                f"({new_identity}), so the smoke cannot prove a switch"
+            )
         old_pid = verified_pid(old_identity)
-        assert json.loads(manifest.read_text())["python"] == old_identity
         assert len(bridge("hello", {})["capabilities"]) == 24
         report = bridge("home.inspect", {"path": str(home)})
         assert report["adoptable"] and report["registration"] == "owned"

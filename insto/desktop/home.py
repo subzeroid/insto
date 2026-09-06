@@ -140,12 +140,22 @@ async def _inspect(path: Path, *, deadline: float) -> tuple[dict[str, Any], Conf
 
 async def inspect(path: Path, *, deadline: float) -> dict[str, Any]:
     """Report on an external home without creating, changing or locking anything."""
-    report, _ = await _inspect(path, deadline=deadline)
-    return report
+    try:
+        report, _ = await _inspect(path, deadline=deadline)
+        return report
+    except Exception as exc:
+        # The same mapping as every mutation: an exotic OSError from a probe is
+        # storage_error, an expired budget operation_timeout, never internal_error.
+        raise _error(exc, deadline) from None
 
 
 def _current(own: Profile) -> Profile | None:
-    """The bound profile, or None when the binding or its home is unusable."""
+    """The bound profile, or None when there is no usable current profile.
+
+    Any unreadable binding or state (`home_invalid`, `profile_ownership`) counts as
+    "no usable current profile": selection then treats the root as the own profile
+    and stops the own service before binding elsewhere.
+    """
     try:
         binding = own.read_binding()
         if binding is None:
@@ -266,6 +276,35 @@ def _adopted_config(current: Profile) -> Config | None:
         return None
 
 
+def _ensure_state(target: Profile, report: dict[str, Any], deadline: float) -> None:
+    """Under the target's lease: write the adopted home's intent when it has none.
+
+    Intent follows the home's registration as inspected: running only when its job
+    is loaded and running. An existing state file is never rewritten.
+    """
+    if target.read_state() is None:
+        desired = "running" if report["loaded"] and report["process"] == "running" else "stopped"
+        checkpoint(deadline)
+        target.write_state(target.new_state(remaining=None, desired=desired))
+
+
+async def _reselect(own: Profile, current: Profile, deadline: float) -> dict[str, Any]:
+    """The no-op selection of the bound home; a deleted desktop-state.json is recreated.
+
+    Without state the DTO would say unconfigured for a home that is still bound, so
+    the state is re-derived from a fresh inspection under the home's own lease.
+    """
+    if current.read_state() is not None:
+        return await _profile_dto(current, _adopted_config(current), deadline)
+    report, config = await _inspect(current.home, deadline=deadline)
+    if not report["adoptable"] or config is None:
+        raise DesktopError(report["reason"] or "home_invalid")
+    with current.shared_lease(own):
+        _settle(current, deadline)
+        _ensure_state(current, report, deadline)
+    return await _profile_dto(current, config, deadline)
+
+
 async def select(profile: Profile, path: Path | None) -> dict[str, Any]:
     """Bind the desktop to an adopted home, or back to its own profile, under the root lock."""
     deadline = time.monotonic() + OPERATION_SECONDS
@@ -277,15 +316,10 @@ async def select(profile: Profile, path: Path | None) -> dict[str, Any]:
             if current is not None:
                 require_settled(current)
                 _finish_terminal_journal(own, current, deadline)
-                same_own = path is None and not current.adopted
-                same_adopted = path is not None and current.adopted and current.home == path
-                if same_own or same_adopted:
-                    config = (
-                        _adopted_config(current)
-                        if current.adopted
-                        else _own_config(current, deadline)
-                    )
-                    return await _profile_dto(current, config, deadline)
+                if path is None and not current.adopted:
+                    return await _profile_dto(current, _own_config(current, deadline), deadline)
+                if path is not None and current.adopted and current.home == path:
+                    return await _reselect(own, current, deadline)
             target = own if path is None else Profile(own.root, home=path)
             adoption: tuple[dict[str, Any], Config] | None = None
             if path is not None:
@@ -321,14 +355,7 @@ async def select(profile: Profile, path: Path | None) -> dict[str, Any]:
                 # The new home's state is durable before the binding points at it: a
                 # crash in between leaves a stale state file, never a bound home without
                 # intent; a refused stop leaves no state file behind at all.
-                if target.read_state() is None:
-                    desired = (
-                        "running"
-                        if report["loaded"] and report["process"] == "running"
-                        else "stopped"
-                    )
-                    checkpoint(deadline)
-                    target.write_state(target.new_state(remaining=None, desired=desired))
+                _ensure_state(target, report, deadline)
             checkpoint(deadline)
             own.write_binding(target.home)
             return await _profile_dto(target, config, deadline)

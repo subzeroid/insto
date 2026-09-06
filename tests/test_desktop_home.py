@@ -827,3 +827,59 @@ async def test_external_database_parent_must_be_owned_and_private(
     else:
         assert report["config"] == "invalid" and report["backend"] is None
         assert report["adoptable"] is False and report["reason"] == "home_invalid"
+
+
+async def test_reselecting_the_bound_home_recreates_a_deleted_state(tmp_path, own, launchd):
+    """F6: the no-op selection of the current binding restores a deleted intent file
+    from a fresh inspection instead of reporting the bound home as unconfigured."""
+    from insto.desktop import home
+
+    path = cli_home(tmp_path)
+    launchd.facts[path] = RUNNING
+    register(path, python=str(tmp_path / "old" / "python3"))
+    await home.select(own, path)
+    launchd.events.clear()
+    binding = own.binding.read_bytes()
+    (path / "desktop-state.json").unlink()
+    result = await home.select(own, path)
+    assert launchd.events == [] and own.binding.read_bytes() == binding
+    state = json.loads((path / "desktop-state.json").read_bytes())
+    assert state["desired_service"] == "running" and state["quota_remaining"] is None
+    assert result["configured"] and result["desired_service"] == "running"
+    launchd.facts[path] = dict(RUNNING, loaded=False, process="stopped")
+    (path / "desktop-state.json").unlink()
+    assert (await home.select(own, path))["desired_service"] == "stopped"
+    assert launchd.events == []
+
+
+async def test_reselecting_a_bound_home_that_became_unadoptable_is_refused(tmp_path, own, launchd):
+    from insto.desktop import home
+
+    path = cli_home(tmp_path)
+    await home.select(own, path)
+    (path / "desktop-state.json").unlink()
+    write_private(path / "config.toml", b'backend = "fake"\n')
+    with pytest.raises(DesktopError) as info:
+        await home.select(own, path)
+    assert info.value.code == "home_backend_unsupported"
+    assert not (path / "desktop-state.json").exists()
+    assert json.loads(own.binding.read_bytes())["home"] == str(path)
+
+
+async def test_inspect_maps_exotic_os_errors_to_storage_error(
+    tmp_path, launch_agents, launchd, monkeypatch
+):
+    """F11: the read shares the mutations' error mapping; nothing is an internal error."""
+    from insto.desktop import home
+
+    path = cli_home(tmp_path)
+
+    def failing(db_path, *, deadline=None):
+        raise PermissionError("EPERM from a probe")
+
+    monkeypatch.setattr(home, "check_database", failing)
+    with pytest.raises(DesktopError) as info:
+        await home.inspect(path, deadline=time.monotonic() + 10)
+    assert info.value.code == "storage_error"
+    with pytest.raises(DesktopError, match="operation_timeout"):
+        await home.inspect(path, deadline=time.monotonic() - 1)

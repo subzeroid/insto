@@ -16,7 +16,10 @@ from insto.service import watch_service
 from insto.service.watch_service import ServicePaths
 from insto.service.watch_service_lifecycle import _outer_fields
 
-_SETTINGS = ("backend", "db_path", "output_dir", "aiograpi_session_path", "env_file")
+# `output_dir` is deliberately not a pin: the CLI resolves its default `./output` against
+# the install cwd, the watch service never writes exports, and a migration normalizes it
+# to the home (ruling R21 after the native proof).
+_SETTINGS = ("backend", "db_path", "aiograpi_session_path", "env_file")
 _PROCESS_STATES = {
     "running": "running",
     "xpcproxy": "running",  # starting
@@ -28,7 +31,11 @@ _PROCESS_STATES = {
 
 
 def manifest_settings(manifest: dict[str, Any]) -> dict[str, Any]:
-    """The operational pins a migration must keep byte-for-byte."""
+    """The data-affecting pins a migration must keep byte-for-byte.
+
+    Backend, database, session and env-file paths decide what the service reads and
+    writes; the output directory does not (see `_SETTINGS`).
+    """
     return {key: manifest[key] for key in _SETTINGS}
 
 

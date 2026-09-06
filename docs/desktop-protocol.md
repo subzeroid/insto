@@ -358,7 +358,7 @@ or later.
 
 | Operation | Exact params | Budget | Effect |
 | --- | --- | --- | --- |
-| `service.inspect` | `{}` | read, 10 s | Registration facts for the current profile: `registration` (none/owned/unknown), `interpreter` (current/other/null), `interpreter_exists`, `loaded`, `settings` (matching/different/null: whether the registered pins equal what this interpreter would register for the home's configuration). Never changes files or jobs. |
+| `service.inspect` | `{}` | read, 10 s | Registration facts for the current profile: `registration` (none/owned/unknown), `interpreter` (current/other/null), `interpreter_exists`, `loaded`, `settings` (matching/different/null: whether the registered pins equal what this interpreter would register for the home's configuration). Reported even before the desktop has intent for the home (`settings` null without a parseable config); without state and without registration files everything is none/null. Never changes files or jobs. |
 | `service.migrate` | `{}` | mutation, 120 s | Rewrite an owned registration into exactly the form this interpreter would register (interpreter and launch form), with rollback; no-op when the registration already is that form, or nothing is registered. Returns the profile DTO. |
 | `service.uninstall` | `{}` | mutation, 120 s | Persist stopped intent, then remove the exact owned registration (plist first, then manifest) once the job is unloaded and no executor runs; config, database, state and history are kept. Needs no credentials or database. |
 | `home.inspect` | `{"path":"..."}` | read, 10 s | Read-only report on an external home (below). Never creates, changes or locks anything. |
@@ -373,13 +373,25 @@ directory and never touches its other files; `home.select` creates only
 `desktop-state.json` (quota fields null, `desired_service` running when the
 home's registration is loaded and running), `.desktop.lock` (the home's own
 lease, so two desktop roots never write one home at once), a missing database
-with the current schema, and the `services/watch` directories the service
-controller needs (the same ones the CLI's install creates). An adopted home
-must sit under trusted parents (owned by root or the user, not world-writable
-unless sticky), exactly like the desktop root. Relative paths in the home's
+with the current schema (published without replacing a database another
+writer, such as the CLI, created meanwhile: that one is kept and its schema
+decides), and the `services/watch` directories the service controller needs
+(the same ones the CLI's install creates). An adopted home must sit under
+trusted parents (owned by root or the user, not world-writable unless
+sticky), exactly like the desktop root. The own profile of any desktop root
+(a directory whose parent carries `desktop-state.json`, `desktop-home.json`
+or `.desktop.lock`, a root mid-setup included) is never adoptable: two roots
+sharing it would fork intent across different locks and state files, so
+`home.inspect` reports it `private` but `adoptable` false with reason
+`home_invalid`, and `home.select` refuses it. Relative paths in the home's
 config resolve against the home, the service's working directory; an absolute
-`db_path` outside the home is honoured (the CLI's own semantics) and its file
-must pass the same private-file checks as any profile database.
+`db_path` outside the home is honoured (the CLI's own semantics), its file
+must pass the same private-file checks as any profile database, and it must
+sit in an existing owned private directory under trusted parents, exactly
+like the home — otherwise the config is `invalid` on inspection and
+`home_invalid` on every later open. Inside the home, a database whose parent
+directory is missing or not private is `unreadable` (reason `storage_error`),
+because selection would stage the database beside it.
 Configured adopted profiles report null quota fields until the next credential
 validation; `quota_exhausted` applies only to a saved zero.
 
@@ -398,7 +410,10 @@ the profile reader accepts later (regular, owned, mode 0600, one link),
 otherwise `config` is `invalid`. Tokens never appear in the report.
 
 `home.select` refuses `recovery_required` while the current profile has a
-pending journal or backup, and is a no-op for the current binding. Before
+pending journal or backup (re-checked under the home's own lease, so a journal
+another root wrote meanwhile is never discarded), and is a no-op for the
+current binding; re-selecting the bound home recreates a deleted
+`desktop-state.json` from a fresh inspection. Before
 switching away from the own profile it stops the desktop-owned service and
 persists stopped intent; an adopted home's service is never touched by
 selection, so a CLI-registered service keeps running until `service.migrate`
@@ -410,23 +425,35 @@ the registration, the old job is stopped, the registration is replaced with
 the calling interpreter's, and the job is started only when saved intent is
 running. Every publication and removal is followed by a directory fsync, so a
 durable journal phase never claims a file that did not survive. A migration
-keeps every operational pin (backend, database, output, session and env-file
+keeps every data-affecting pin (backend, database, session and env-file
 paths) byte-for-byte; a registration whose pins differ from the home's
 current configuration is refused with `service_config_mismatch` before
-anything is stopped. Any failure or crash rolls back to the retained bytes and
-the previous intent; `service.repair` finishes an interrupted rollback and
-never completes a migration forward, and it touches only bytes recorded by the
-migration (previous, candidate, or the mixed pair a death between the two file
+anything is stopped. The output directory is not a pin: the CLI resolves
+its default against the install working directory, the watch service never
+writes exports, and a migration normalizes it to the home. Any failure or
+crash rolls back to the retained bytes and the previous intent; a previous
+registration that will not start again after the rollback (its interpreter
+may be gone) still completes the rollback and is reported as `service_error`
+with nothing pending, so a later `service.migrate` can retry.
+`service.repair` finishes an interrupted rollback and never completes a
+migration forward, and it touches only bytes recorded by the migration
+(previous, candidate, or the mixed pair a death between the two file
 replacements leaves) — anything else is `service_ownership_unknown` and stays
-untouched. A registration whose manifest, plist or loaded job (program and
-arguments) cannot be proven owned is `service_ownership_unknown` for every
-mutation; reads still describe it. A manifest without its plist is owned but
+untouched. A retained document that is not a readable registration blocks
+every transition as `recovery_required`; when no journal references it,
+`service.repair` discards it (it can never serve a rollback), while a document
+the service layer refuses to read at all stays pending. A registration whose manifest, plist or loaded job (program,
+arguments and, when launchd reports it, the plist path) cannot be proven
+owned is `service_ownership_unknown` for every mutation, as is a
+registration that changed between an unlocked read and the management lock;
+reads still describe it. A manifest without its plist is owned but
 incomplete: migration completes it, uninstall removes it, and a loaded job
 without its plist is unknown.
 
-Every operation re-validates the binding after taking the profile lock: a
+Every mutation re-validates the binding after taking the profile lock: a
 request resolved against one home while another process selected a different
 one fails with `profile_busy` (retryable) instead of acting on the wrong home.
+Reads act on the binding as resolved.
 
 `setup.inspect`/`settings.inspect` keep their C1 meaning: while the
 registration names another interpreter (a CLI-registered service, or a
@@ -437,7 +464,8 @@ owned lifecycle cannot manage that registration; `service.inspect` shows
 once the journal is settled. `home.inspect` inspects a WAL-backed database
 through a private disposable copy inside its 10-second budget; a very large
 uncheckpointed store can therefore report `operation_timeout`, which is not
-an adoption verdict.
+an adoption verdict. `home.inspect` and `service.inspect` map an unexpected
+storage failure to `storage_error`, never to `internal_error`.
 
 New static codes: `home_invalid`, `home_backend_unsupported`,
 `service_ownership_unknown` and `service_config_mismatch` (none retryable).

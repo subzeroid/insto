@@ -127,25 +127,33 @@ def launchd(monkeypatch):
             self._manifest, self._plist = artifacts or watch_service._desired(paths, config, None)
 
         def _installation(self):
+            """Like ``ManagedService._artifacts``: from the files on disk."""
+            exists = []
             for path, desired in (
                 (self._paths.manifest, self._manifest),
                 (self._paths.plist, self._plist),
             ):
-                if os.path.lexists(path) and not watch_service._existing_matches(path, desired):
+                present = os.path.lexists(path)
+                if present and not watch_service._existing_matches(path, desired):
                     raise BackendError("watch service artifacts do not match the owned runtime")
+                exists.append(present)
+            return "installed" if all(exists) else "incomplete" if any(exists) else "not_installed"
 
         async def inspect_owned(self):
-            self._installation()
-            running = launchd.state(self._paths.home)["process"] == "running"
+            installation = self._installation()
+            facts = launchd.state(self._paths.home)
+            if facts["loaded"] and installation != "installed":
+                raise BackendError("refusing a loaded service with incomplete ownership")
+            running = facts["process"] == "running"
             return {
-                "installation": "installed",
+                "installation": installation,
                 "registration": "loaded" if running else "unloaded",
                 "process": {"state": "running" if running else None, "pid": 3 if running else None},
                 "executor": {"state": "busy" if running else "idle", "pid": 3 if running else None},
             }
 
         async def ensure_stopped(self):
-            self._installation()
+            await self.inspect_owned()  # a loaded job is refused unless its files prove it
             launchd.events.append(("stop", self._paths.home))
             launchd.facts[self._paths.home] = dict(
                 launchd.state(self._paths.home), loaded=False, process="stopped"
@@ -883,3 +891,34 @@ async def test_inspect_maps_exotic_os_errors_to_storage_error(
     assert info.value.code == "storage_error"
     with pytest.raises(DesktopError, match="operation_timeout"):
         await home.inspect(path, deadline=time.monotonic() - 1)
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+async def test_incomplete_own_registration_is_stopped_only_when_its_files_prove_it(
+    tmp_path, own, launchd, loaded
+):
+    """F13: the own manifest without its plist. A loaded job is refused (service_error,
+    nothing changed); an unloaded one is stopped and the adoption proceeds."""
+    from insto.desktop import home
+
+    watch_service.service_paths(own.home).plist.unlink()
+    launchd.facts[own.home] = dict(
+        RUNNING,
+        interpreter="current",
+        installation="incomplete",
+        loaded=loaded,
+        process="running" if loaded else "stopped",
+    )
+    path = cli_home(tmp_path)
+    if loaded:
+        with pytest.raises(DesktopError) as info:
+            await home.select(own, path)
+        assert info.value.code == "service_error"
+        assert launchd.events == [] and not own.binding.exists()
+        assert own.read_state()["desired_service"] == "running"
+        assert not (path / "desktop-state.json").exists()
+        return
+    result = await home.select(own, path)
+    assert result["configured"] and launchd.events == [("stop", own.home)]
+    assert json.loads(own.binding.read_bytes())["home"] == str(path)
+    assert own.read_state()["desired_service"] == "stopped"

@@ -51,7 +51,9 @@ def registration(home: Path, *, python: str | None = None, plist: bool = True) -
     return value
 
 
-def job_output(value: dict, *, state: str = "running", program: str | None = None) -> bytes:
+def job_output(
+    value: dict, *, state: str = "running", program: str | None = None, path: str | None = None
+) -> bytes:
     arguments = [
         program or value["python"],
         "-I",
@@ -63,6 +65,8 @@ def job_output(value: dict, *, state: str = "running", program: str | None = Non
     lines = [f"\tprogram = {arguments[0]}", "\targuments = {"]
     lines += [f"\t\t{argument}" for argument in arguments]
     lines += ["\t}", f"\tstate = {state}", "\tpid = 41" if state == "running" else ""]
+    if path is not None:
+        lines.append(f"\tpath = {path}")
     return "\n".join(lines).encode()
 
 
@@ -184,6 +188,36 @@ async def test_unknown_ownership_cases(home, monkeypatch, case, tmp_path):
     facts = await registration_facts(paths, deadline=DEADLINE)
     assert facts["registration"] == "unknown" and facts["interpreter"] is None
     assert facts["settings"] is None
+
+
+@pytest.mark.parametrize("own_path", [True, False])
+async def test_loaded_job_path_is_part_of_the_provenance(home, monkeypatch, tmp_path, own_path):
+    """F4/C6: a job loaded from another plist file with identical arguments is not this
+    registration, exactly as the lifecycle's `_process` decides."""
+    from insto.desktop.service_facts import registration_facts
+
+    paths = watch_service.service_paths(home)
+    value = registration(home)
+    path = str(paths.plist) if own_path else str(tmp_path / "elsewhere" / paths.plist.name)
+    launchctl(monkeypatch, returncode=0, stdout=job_output(value, path=path))
+    facts = await registration_facts(paths, deadline=DEADLINE, expected=value)
+    if own_path:
+        assert facts["registration"] == "owned" and facts["settings"] == "matching"
+    else:
+        assert facts["registration"] == "unknown" and facts["settings"] is None
+    assert facts["loaded"] is True and facts["process"] == "running"
+
+
+def test_job_matches_refuses_a_malformed_plist_by_itself(home):
+    """Parked 2: the predicate stays self-contained, whatever plist bytes reach it."""
+    from insto.desktop.service_facts import _job_matches
+
+    paths = watch_service.service_paths(home)
+    value = registration(home)
+    truncated = b"<?xml version='1.0'?><plist><dict><key>a</key>"
+    assert _job_matches(paths, job_output(value), truncated) is False
+    assert _job_matches(paths, job_output(value), None) is False
+    assert _job_matches(paths, job_output(value), paths.plist.read_bytes()) is True
 
 
 async def test_unknown_launchctl_output_is_unknown_not_stopped(home, monkeypatch):

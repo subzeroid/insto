@@ -829,7 +829,22 @@ def test_replace_registration_handles_absent_components(
 
 @pytest.mark.parametrize(
     "payload",
-    [b"[]", b'{"schema_version":2}', b'{"schema_version":1,"previous":{},"candidate":{}}', b"{"],
+    [
+        b"[]",
+        b'{"schema_version":2}',
+        b'{"schema_version":1,"previous":{},"candidate":{}}',
+        b"{",
+        # Parked 9: only the integer 1 is schema version 1 (JSON true and 1.0 compare equal).
+        b'{"schema_version":true,"previous":{"manifest":null,"plist":null},'
+        b'"candidate":{"manifest":null,"plist":null}}',
+        b'{"schema_version":1.0,"previous":{"manifest":null,"plist":null},'
+        b'"candidate":{"manifest":null,"plist":null}}',
+        # Parked 3: nesting deep enough for json to give up, within the byte limit.
+        b"[" * 100_000 + b"]" * 100_000,
+        # C8: non-ASCII base64 raises ValueError, not binascii.Error.
+        '{"schema_version":1,"previous":{"manifest":"é","plist":null},'
+        '"candidate":{"manifest":null,"plist":null}}'.encode(),
+    ],
 )
 def test_invalid_retained_registration_is_refused(
     registration_home: watch_service.ServicePaths, payload: bytes

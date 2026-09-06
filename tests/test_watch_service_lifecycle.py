@@ -732,11 +732,33 @@ def test_managed_service_accepts_explicit_artifacts(
         backend="hikerapi", hiker_token="offline-artifacts-token", db_path=home / "store.db"
     )
     paths = legacy.service_paths(home)
-    explicit = (b'{"m":1}\n', plistlib.dumps({"ProgramArguments": ["/x"]}))
+    db = home / "store.db"
+    explicit = (
+        b'{"m":1,"db_path":"%s"}\n' % str(db).encode(),
+        plistlib.dumps({"ProgramArguments": ["/x"]}),
+    )
     lease = ManagedService(paths, config, deadline=1e12, artifacts=explicit)
     assert (lease._manifest, lease._plist) == explicit and lease._config is config
     default = ManagedService(paths, config, deadline=1e12)
     assert default._manifest != explicit[0] and b"python" in default._manifest
+
+
+def test_explicit_artifacts_guard_the_executor_of_their_own_registration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C5: after config drift, Repair's lease over retained bytes must take the executor
+    lock of the database those bytes pin, not of the database the config names now."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    home = tmp_path / "home"
+    home.mkdir(mode=0o700)
+    paths = legacy.service_paths(home)
+    pinned = Config(backend="hikerapi", hiker_token="offline-pin-token", db_path=home / "old.db")
+    manifest, plist = legacy._desired(paths, pinned, None)
+    drifted = Config(backend="hikerapi", hiker_token="offline-pin-token", db_path=home / "new.db")
+    lease = ManagedService(paths, drifted, deadline=1e12, artifacts=(manifest, plist))
+    assert lease._db_path == home / "old.db"
+    assert lease._lock_path == Path(f"{home / 'old.db'}.watch.lock")
+    assert ManagedService(paths, drifted, deadline=1e12)._db_path == home / "new.db"
 
 
 @pytest.mark.parametrize(
@@ -744,6 +766,10 @@ def test_managed_service_accepts_explicit_artifacts(
     [
         (b"not json", plistlib.dumps({"ProgramArguments": ["/x"]})),
         (b"\xff", plistlib.dumps({"ProgramArguments": ["/x"]})),
+        (b"{}", plistlib.dumps({"ProgramArguments": ["/x"]})),  # no db_path pin
+        (b'{"db_path":"relative.db"}', plistlib.dumps({"ProgramArguments": ["/x"]})),
+        (b'{"db_path":5}', plistlib.dumps({"ProgramArguments": ["/x"]})),
+        (b'["/x"]', plistlib.dumps({"ProgramArguments": ["/x"]})),
         (b"{}", b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n'),
         (b"{}", b"bplist00garbage"),
         (b"{}", plistlib.dumps({"Label": "x"})),
@@ -847,4 +873,51 @@ async def test_remove_registration_refuses_a_busy_executor(
     finally:
         os.close(fd)
     await lease.remove_registration()  # the executor is idle once the lock is released
+    assert not paths.plist.exists() and not paths.manifest.exists()
+
+
+@pytest.mark.asyncio
+async def test_remove_registration_holds_the_executor_lock_across_the_unlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C7: a runner that takes the executor after the inspection is refused, and while
+    the files are unlinked nobody else can take the executor."""
+    paths, config = _registered_home(tmp_path, monkeypatch)
+    _fake_launchctl(monkeypatch, {})
+    lease = ManagedService(paths, config, deadline=1e12)
+    idle = await lease.inspect_owned()
+    assert idle["executor"]["state"] == "missing"
+    fd = os.open(lease._lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    os.write(fd, b"123\n")
+    fcntl.flock(fd, fcntl.LOCK_EX)
+
+    async def stale_inspection() -> dict[str, Any]:
+        return idle  # the executor became busy after this report was taken
+
+    monkeypatch.setattr(lease, "inspect_owned", stale_inspection)
+    try:
+        with pytest.raises(BackendError, match="still registered or running"):
+            await lease.remove_registration()
+        assert paths.manifest.exists() and paths.plist.exists()
+    finally:
+        os.close(fd)
+    contended: list[bool] = []
+    original_unlink = Path.unlink
+
+    def unlink(self: Path, *args: object, **kwargs: object) -> None:
+        probe = os.open(lease._lock_path, os.O_RDWR)
+        try:
+            fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            contended.append(True)
+        else:
+            contended.append(False)
+            fcntl.flock(probe, fcntl.LOCK_UN)
+        finally:
+            os.close(probe)
+        original_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", unlink)
+    await lease.remove_registration()
+    assert contended == [True, True]
     assert not paths.plist.exists() and not paths.manifest.exists()

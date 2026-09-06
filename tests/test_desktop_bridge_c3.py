@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 
 from insto.desktop.configuration import initialize_database
+from tests.test_desktop_entrypoint import EXACT_CAPABILITIES
 
 TOKEN = "offline-bridge-token"
 DARWIN = sys.platform == "darwin"
@@ -68,7 +69,8 @@ def seed_home(tmp_path: Path, name: str = "cli-home", *, database: bool = True) 
 
 def test_hello_lists_24_capabilities(tmp_path: Path) -> None:
     response = bridge(tmp_path, tmp_path / "root", "hello", {})
-    assert len(response["result"]["capabilities"]) == 24
+    assert len(EXACT_CAPABILITIES) == 24
+    assert response["result"]["capabilities"] == EXACT_CAPABILITIES
     assert not (tmp_path / "root").exists()
 
 
@@ -107,40 +109,57 @@ def test_home_inspect_rejects_bad_params(tmp_path: Path, params: dict[str, Any],
 def test_home_inspect_reports_a_seeded_cli_home(tmp_path: Path) -> None:
     home = seed_home(tmp_path)
     report = bridge(tmp_path, tmp_path / "root", "home.inspect", {"path": str(home)})["result"]
-    assert report["exists"] and report["private"] and report["config"] == "ok"
-    assert report["backend"] == "hikerapi" and report["database"] == "ok"
-    assert report["registration"] == "none" and report["adoptable"] is True
+    assert report["exists"] is True
+    assert report["private"] is True
+    assert report["config"] == "ok"
+    assert report["backend"] == "hikerapi"
+    assert report["database"] == "ok"
+    assert report["registration"] == "none"
+    assert report["adoptable"] is True
     assert report["reason"] is None
     assert sorted(p.name for p in home.iterdir()) == ["config.toml", "store.db"]
     absent = bridge(tmp_path, tmp_path / "root", "home.inspect", {"path": str(tmp_path / "no")})
-    assert absent["result"]["exists"] is False and absent["result"]["reason"] == "home_invalid"
+    assert absent["result"]["exists"] is False
+    assert absent["result"]["reason"] == "home_invalid"
 
 
 def test_adoption_round_trip(tmp_path: Path) -> None:
     root = tmp_path / "root"
     home = seed_home(tmp_path, database=False)
+    binding = root / "desktop-home.json"
+    state = home / "desktop-state.json"
     selected = bridge(tmp_path, root, "home.select", {"path": str(home)})["result"]
-    assert selected["configured"] is True and selected["desired_service"] == "stopped"
-    assert selected["quota_remaining"] is None and selected["quota_checked_at"] is None
-    assert json.loads((root / "desktop-home.json").read_bytes())["home"] == str(home)
-    assert (home / "desktop-state.json").exists() and (home / "store.db").exists()
+    assert selected["configured"] is True
+    assert selected["desired_service"] == "stopped"
+    assert selected["quota_remaining"] is None
+    assert selected["quota_checked_at"] is None
+    assert json.loads(binding.read_bytes())["home"] == str(home)
+    assert state.exists()
+    assert (home / "store.db").exists()
     inspected = bridge(tmp_path, root, "settings.inspect", {})["result"]
-    assert inspected["configured"] is True and inspected["quota_remaining"] is None
+    assert inspected["configured"] is True
+    assert inspected["quota_remaining"] is None
     if DARWIN:
         # On Linux the lifecycle needs launchd and reports service_error instead.
         assert inspected["status"] == "stopped"
     facts = bridge(tmp_path, root, "service.inspect", {})["result"]
     assert facts["registration"] == "none"
+    # macOS: launchctl reports the label as missing; Linux has no launchctl to ask.
+    assert facts["loaded"] is (False if DARWIN else None)
+    persisted = (binding.read_bytes(), state.read_bytes())
     noop = bridge(tmp_path, root, "home.select", {"path": str(home)})["result"]
     assert noop["configured"] is True
+    assert (binding.read_bytes(), state.read_bytes()) == persisted
     if DARWIN:
         for operation in ("service.migrate", "service.uninstall"):
             dto = bridge(tmp_path, root, operation, {})["result"]
-            assert dto["configured"] is True and dto["status"] == "stopped"
+            assert dto["configured"] is True, operation
+            assert dto["status"] == "stopped", operation
         assert not (home / "desktop-recovery.json").exists()
     back = bridge(tmp_path, root, "home.select", {"path": None})["result"]
-    assert back["configured"] is False and back["status"] == "unconfigured"
-    assert not (root / "desktop-home.json").exists()
+    assert back["configured"] is False
+    assert back["status"] == "unconfigured"
+    assert not binding.exists()
     # Adoption locks the home in place (`.desktop.lock`) and creates the service
     # directories plus a missing database; nothing else is left behind.
     assert sorted(p.name for p in home.iterdir()) == [
@@ -151,6 +170,10 @@ def test_adoption_round_trip(tmp_path: Path) -> None:
         "store.db",
     ]
     assert not any((tmp_path / "fake-user-home" / "Library" / "LaunchAgents").iterdir())
+    # The token is persisted exactly once: in the adopted home's own config.
+    for path in (*root.rglob("*"), *home.rglob("*")):
+        if path.is_file():
+            assert (TOKEN.encode() in path.read_bytes()) == (path == home / "config.toml"), path
 
 
 def test_select_refuses_a_fake_backend_home(tmp_path: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -22,13 +23,29 @@ from insto.desktop.recovery import (
     _lease_artifacts,
     checkpoint,
     cleanup,
+    finish_terminal,
     phase,
     require_settled,
     rollback_drained,
 )
 from insto.desktop.service_facts import registration_facts
+from insto.exceptions import BackendError
 from insto.service import watch_service
 from insto.service.watch_service_lifecycle import ManagedService, managed_service
+
+
+def _settled_state(profile: Profile, deadline: float) -> dict[str, Any]:
+    """Refuse pending recovery, finish a terminal journal, and return the profile state."""
+    require_settled(profile)
+    journal = profile.read_journal()
+    if journal is not None:
+        # Terminal by require_settled: a death between its last phase and cleanup
+        # must not outlive this transition's early returns.
+        finish_terminal(profile, journal, deadline)
+    state = profile.read_state()
+    if state is None:
+        raise DesktopError("not_configured")
+    return state
 
 
 async def migrate(profile: Profile) -> dict[str, Any]:
@@ -38,10 +55,7 @@ async def migrate(profile: Profile) -> dict[str, Any]:
     try:
         with profile.locked():
             checkpoint(forward)
-            require_settled(profile)
-            state = profile.read_state()
-            if state is None:
-                raise DesktopError("not_configured")
+            state = _settled_state(profile, forward)
             config = _config(profile, deadline=forward)
             with managed_service(home=profile.home, config=config, deadline=forward) as new:
                 paths = new._paths
@@ -122,25 +136,35 @@ async def uninstall(profile: Profile) -> dict[str, Any]:
     try:
         with profile.locked():
             checkpoint(deadline)
-            require_settled(profile)
-            state = profile.read_state()
-            if state is None:
-                raise DesktopError("not_configured")
+            state = dict(_settled_state(profile, deadline), desired_service="stopped")
             paths = watch_service.service_paths(profile.home)
-            facts = await registration_facts(paths, deadline=deadline)
-            if facts["registration"] == "unknown":
-                raise DesktopError("service_ownership_unknown")
-            state = dict(state, desired_service="stopped")
-            profile.write_state(state)
-            if facts["registration"] == "owned":
+            if not os.path.lexists(paths.manifest):
+                # Without a manifest no lease can be built; a plist-only or loaded
+                # job is still refused, read-only, exactly as the facts classify it.
+                facts = await registration_facts(paths, deadline=deadline)
+                if facts["registration"] != "none":
+                    raise DesktopError("service_ownership_unknown")
+                profile.write_state(state)
+                return _dto(state)
+            try:
                 config = _manifest_config(watch_service.read_manifest(paths))
-                with managed_service(home=profile.home, config=config, deadline=deadline):
-                    on_disk = watch_service.read_registration(paths)
-                    registered = ManagedService(
-                        paths, config, deadline, artifacts=_lease_artifacts(paths, on_disk, on_disk)
-                    )
-                    await registered.ensure_stopped()
-                    await registered.remove_registration()
-            return _dto(state, running=False)
+            except BackendError:
+                # A manifest that cannot prove ownership is what the facts call unknown.
+                raise DesktopError("service_ownership_unknown") from None
+            with managed_service(home=profile.home, config=config, deadline=deadline):
+                # Verdict and removal share the management lock: the registration
+                # cannot change hands between the ownership check and the unlink.
+                facts = await registration_facts(paths, deadline=deadline)
+                if facts["registration"] != "owned":
+                    raise DesktopError("service_ownership_unknown")
+                checkpoint(deadline)
+                profile.write_state(state)
+                on_disk = watch_service.read_registration(paths)
+                registered = ManagedService(
+                    paths, config, deadline, artifacts=_lease_artifacts(paths, on_disk, on_disk)
+                )
+                await registered.ensure_stopped()
+                await registered.remove_registration()
+            return _dto(state)
     except Exception as exc:
         raise _error(exc, deadline) from None

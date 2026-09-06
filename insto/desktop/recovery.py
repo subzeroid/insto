@@ -44,6 +44,27 @@ def require_settled(profile: Profile) -> None:
         raise DesktopError("recovery_required")
 
 
+def finish_terminal(profile: Profile, journal: dict[str, Any], deadline: float) -> None:
+    """Complete a journal that reached a terminal phase before its cleanup ran."""
+    checkpoint(deadline)
+    if journal["kind"] == "migrate":
+        watch_service.discard_retained_registration(watch_service.service_paths(profile.home))
+    cleanup(profile, deadline)
+
+
+def _discard_unreferenced(profile: Profile) -> bool:
+    """Drop a retained registration that no journal references; True when one was dropped.
+
+    The document sits beside the home's manifest, so locating it needs nothing from
+    the lease, whose own paths derive from the same home.
+    """
+    paths = watch_service.service_paths(profile.home)
+    if watch_service.read_retained_registration(paths) is None:
+        return False
+    watch_service.discard_retained_registration(paths)
+    return True
+
+
 async def reconcile(profile: Profile, service: ManagedService, deadline: float) -> bool:
     """Finish terminal cleanup or undo an uncommitted credential replacement or migration.
 
@@ -53,24 +74,20 @@ async def reconcile(profile: Profile, service: ManagedService, deadline: float) 
     checkpoint(deadline)
     journal = profile.read_journal()
     backup = profile.read_backup()
-    # A retained registration sits beside the home's manifest; locating it needs
-    # nothing from the lease, whose own paths derive from the same home.
-    paths = watch_service.service_paths(profile.home)
     if journal is None:
+        changed = False
         if backup is not None:
             if backup != profile.read_config():
                 raise DesktopError("recovery_required")
             profile.remove_backup()
-            return True
-        if watch_service.read_retained_registration(paths) is not None:
-            # Retained before its journal was written: nothing references it.
-            watch_service.discard_retained_registration(paths)
-            return True
-        return False
+            changed = True
+        # Retained before its journal was written: nothing references it. One
+        # Repair settles it together with a stray backup.
+        if _discard_unreferenced(profile):
+            changed = True
+        return changed
     if journal["phase"] in {"committed", "rolled_back"}:
-        if journal["kind"] == "migrate":
-            watch_service.discard_retained_registration(paths)
-        cleanup(profile, deadline)
+        finish_terminal(profile, journal, deadline)
         return True
     if journal["kind"] == "migrate":
         await _rollback_migration(profile, service, journal, deadline)
@@ -151,6 +168,11 @@ async def _rollback_migration(
     for index in (0, 1):
         if on_disk[index] not in {previous[index], candidate[index]}:
             raise DesktopError("service_ownership_unknown")
+    if journal["previous_running"] and previous[1] is None:
+        # The lifecycle refuses a loaded job whose plist is missing, so a running
+        # previous registration always retained its real plist: the restart below
+        # never starts a derived one. Unreachable by construction; refused untouched.
+        raise DesktopError("recovery_required")
     phase(profile, journal, "rollback", deadline)
     current = ManagedService(
         paths, service._config, deadline, artifacts=_lease_artifacts(paths, on_disk, previous)

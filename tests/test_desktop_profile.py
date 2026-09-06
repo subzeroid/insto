@@ -19,6 +19,7 @@ def test_missing_inspection_has_no_side_effect(tmp_path, monkeypatch):
     profile = Profile.from_environment()
     assert profile.root == root
     assert profile.home == root / "profile"
+    assert not profile.adopted and profile.home_lock_path is None
     assert profile.read_state() is None
     assert profile.read_config() is None
     assert profile.read_journal() is None
@@ -557,3 +558,70 @@ def test_migrate_journal_shape(tmp_path):
                 )
             )
     assert profile.read_journal()["kind"] == "migrate"
+
+
+def test_adopted_home_is_validated_before_a_fresh_root_is_created(tmp_path):
+    from insto.desktop.errors import DesktopError
+    from insto.desktop.profile import Profile
+
+    root = tmp_path / "desktop"
+    home = tmp_path / "cli-home"
+    home.mkdir(mode=0o755)
+    profile = Profile(root, home=home)
+    with (
+        pytest.raises(DesktopError, match="home_invalid"),
+        profile.locked(initialize=True, verify_binding=False),
+    ):
+        pass
+    assert not (home / ".desktop.lock").exists()
+    assert not root.exists()
+
+
+@pytest.mark.parametrize(
+    "select",
+    [lambda root: root, lambda root: root / "inside", lambda root: root.parent],
+    ids=["root", "inside_root", "parent_of_root"],
+)
+def test_home_may_not_overlap_the_root(tmp_path, select):
+    from insto.desktop.errors import DesktopError
+    from insto.desktop.profile import Profile
+
+    root = tmp_path / "desktop"
+    root.mkdir(mode=0o700)
+    home = select(root)
+    with pytest.raises(DesktopError) as info:
+        Profile(root, home=home)
+    assert info.value.code == "home_invalid"
+    binding = root / "desktop-home.json"
+    binding.write_text(
+        json.dumps(
+            {"schema_version": 1, "managed_by": "insto-gui", "uid": os.getuid(), "home": str(home)}
+        )
+    )
+    binding.chmod(0o600)
+    with pytest.raises(DesktopError) as info:
+        Profile(root).read_binding()
+    assert info.value.code == "home_invalid"
+
+
+def test_symlinked_adopted_home_lock_is_refused(tmp_path):
+    from insto.desktop.errors import DesktopError
+    from insto.desktop.profile import Profile
+
+    root = tmp_path / "desktop"
+    home = tmp_path / "cli-home"
+    home.mkdir(mode=0o700)
+    own = Profile(root)
+    with own.locked(initialize=True):
+        own.write_binding(home)
+    other = tmp_path / "other"
+    other.write_text("")
+    other.chmod(0o600)
+    (home / ".desktop.lock").symlink_to(other)
+    profile = Profile(root, home=home)
+    with (
+        pytest.raises(DesktopError, match="storage_error"),
+        profile.locked(initialize=True, verify_binding=False),
+    ):
+        pass
+    assert (home / ".desktop.lock").is_symlink()

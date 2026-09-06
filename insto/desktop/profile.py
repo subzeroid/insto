@@ -65,6 +65,17 @@ def _file(info: os.stat_result) -> None:
         raise DesktopError("profile_ownership")
 
 
+def _valid_home(root: Path, home: Path) -> bool:
+    """An adopted home is absolute, resolved, and disjoint from the desktop root."""
+    return (
+        home.is_absolute()
+        and home.resolve() == home
+        and home != root
+        and root not in home.parents
+        and home not in root.parents
+    )
+
+
 def _trusted_ancestors(path: Path) -> None:
     for ancestor in path.parents:
         try:
@@ -93,9 +104,7 @@ class Profile:
     def __init__(self, root: Path, home: Path | None = None) -> None:
         if not root.is_absolute() or root.resolve() != root:
             raise DesktopError("profile_ownership")
-        if home is not None and (
-            not home.is_absolute() or home.resolve() != home or home == root / "profile"
-        ):
+        if home is not None and not _valid_home(root, home):
             raise DesktopError("home_invalid")
         self.root = root
         self.adopted = home is not None
@@ -136,12 +145,10 @@ class Profile:
         if self.root.resolve() != self.root:
             raise DesktopError("profile_ownership")
         _trusted_ancestors(self.root)
-        if not os.path.lexists(self.root):
-            return False
-        _directory(self.root)
         if self.adopted:
-            # The own profile may not exist yet; an adopted home must, and it
-            # gets the same ancestry rule as the root.
+            # An adopted home must already exist under the same ancestry rule as
+            # the root, whether or not the root exists yet: nothing is created
+            # inside a home that has not been checked.
             if not os.path.lexists(self.home):
                 raise DesktopError("home_invalid")
             try:
@@ -149,7 +156,10 @@ class Profile:
                 _directory(self.home)
             except DesktopError:
                 raise DesktopError("home_invalid") from None
-        elif os.path.lexists(self.home):
+        if not os.path.lexists(self.root):
+            return False
+        _directory(self.root)
+        if not self.adopted and os.path.lexists(self.home):
             _directory(self.home)
         return True
 
@@ -280,8 +290,7 @@ class Profile:
             or not isinstance(value["home"], str)
         ):
             raise DesktopError("home_invalid")
-        home = Path(value["home"])
-        if not home.is_absolute() or home.resolve() != home or home == self.root / "profile":
+        if not _valid_home(self.root, Path(value["home"])):
             raise DesktopError("home_invalid")
         return value
 
@@ -445,7 +454,7 @@ class Profile:
                     raise DesktopError("profile_busy")
             if self.home_lock_path is not None:
                 self._flock(self.home_lock_path, descriptors, acquired)
-            if not self.home.exists():
+            if not self.adopted and not self.home.exists():
                 self.home.mkdir(mode=0o700)
                 _sync_directory(self.root)
             _directory(self.home)
@@ -469,7 +478,7 @@ class Profile:
         finally:
             if acquired:
                 self._leased = False
-            for descriptor in acquired:
+            for descriptor in reversed(acquired):
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             for descriptor in descriptors:
                 os.close(descriptor)

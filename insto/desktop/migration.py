@@ -1,0 +1,146 @@
+"""Journaled service migration to the current interpreter, and registration removal."""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any
+
+from insto.config import Config
+from insto.desktop.errors import DesktopError
+from insto.desktop.operations import (
+    OPERATION_SECONDS,
+    ROLLBACK_SECONDS,
+    _config,
+    _dto,
+    _error,
+    _running,
+)
+from insto.desktop.profile import Profile
+from insto.desktop.recovery import (
+    _lease_artifacts,
+    checkpoint,
+    cleanup,
+    phase,
+    require_settled,
+    rollback_drained,
+)
+from insto.desktop.service_facts import registration_facts
+from insto.service import watch_service
+from insto.service.watch_service_lifecycle import ManagedService, managed_service
+
+
+async def migrate(profile: Profile) -> dict[str, Any]:
+    """Move the owned registration to this interpreter; roll back on any failure."""
+    deadline = time.monotonic() + OPERATION_SECONDS
+    forward = deadline - ROLLBACK_SECONDS
+    try:
+        with profile.locked():
+            checkpoint(forward)
+            require_settled(profile)
+            state = profile.read_state()
+            if state is None:
+                raise DesktopError("not_configured")
+            config = _config(profile, deadline=forward)
+            with managed_service(home=profile.home, config=config, deadline=forward) as new:
+                paths = new._paths
+                desired = (new._manifest, new._plist)
+                facts = await registration_facts(
+                    paths, deadline=forward, expected=json.loads(new._manifest)
+                )
+                if facts["registration"] == "unknown":
+                    raise DesktopError("service_ownership_unknown")
+                if facts["registration"] == "none":
+                    return _dto(state)
+                previous = watch_service.read_registration(paths)
+                if previous == desired:
+                    return _dto(state, running=_running(await new.inspect_owned()))
+                if facts["settings"] != "matching":
+                    raise DesktopError("service_config_mismatch")
+                old = ManagedService(
+                    paths, config, forward, artifacts=_lease_artifacts(paths, previous, previous)
+                )
+                previous_running = _running(await old.inspect_owned())
+                journal = profile.new_journal(
+                    kind="migrate",
+                    previous_state=state,
+                    previous_running=previous_running,
+                    remaining=None,
+                )
+                checkpoint(forward)
+                if watch_service.read_retained_registration(paths) is not None:
+                    # Retained by a run that died before journaling: unreferenced
+                    # (require_settled proved there is no journal).
+                    watch_service.discard_retained_registration(paths)
+                watch_service.retain_registration(paths, previous=previous, candidate=desired)
+                checkpoint(forward)
+                profile.write_journal(journal)
+                running = False
+                try:
+                    await old.ensure_stopped()
+                    phase(profile, journal, "stopped", forward)
+                    with new.idle_executor():
+                        checkpoint(forward)
+                        watch_service.replace_registration(paths, previous, desired)
+                    phase(profile, journal, "published", forward)
+                    running = state["desired_service"] == "running"
+                    if running:
+                        await new.ensure_running()
+                        phase(profile, journal, "started", forward)
+                    phase(profile, journal, "committed", forward)
+                except BaseException as exc:
+                    try:
+                        await rollback_drained(profile, new, deadline)
+                    except BaseException:
+                        if not isinstance(exc, Exception):
+                            # Cancellation or an interpreter interrupt, not an error:
+                            # it propagates as itself; the journal awaits Repair.
+                            raise exc from None
+                        raise DesktopError("recovery_required") from None
+                    raise
+                watch_service.discard_retained_registration(paths)
+                cleanup(profile, forward)
+                return _dto(state, running=running)
+    except Exception as exc:
+        raise _error(exc, forward) from None
+
+
+def _manifest_config(manifest: dict[str, Any]) -> Config:
+    """A lease configuration from the registration's own pins: removal needs no credentials."""
+    return Config(
+        backend=str(manifest["backend"]),
+        db_path=Path(manifest["db_path"]),
+        output_dir=Path(manifest["output_dir"]),
+        aiograpi_session_path=Path(manifest["aiograpi_session_path"]),
+    )
+
+
+async def uninstall(profile: Profile) -> dict[str, Any]:
+    """Remove the exact owned registration; config, database and state stay."""
+    deadline = time.monotonic() + OPERATION_SECONDS
+    try:
+        with profile.locked():
+            checkpoint(deadline)
+            require_settled(profile)
+            state = profile.read_state()
+            if state is None:
+                raise DesktopError("not_configured")
+            paths = watch_service.service_paths(profile.home)
+            facts = await registration_facts(paths, deadline=deadline)
+            if facts["registration"] == "unknown":
+                raise DesktopError("service_ownership_unknown")
+            state = dict(state, desired_service="stopped")
+            profile.write_state(state)
+            if facts["registration"] == "owned":
+                config = _manifest_config(watch_service.read_manifest(paths))
+                with managed_service(home=profile.home, config=config, deadline=deadline):
+                    on_disk = watch_service.read_registration(paths)
+                    registered = ManagedService(
+                        paths, config, deadline, artifacts=_lease_artifacts(paths, on_disk, on_disk)
+                    )
+                    await registered.ensure_stopped()
+                    await registered.remove_registration()
+            return _dto(state, running=False)
+    except Exception as exc:
+        raise _error(exc, deadline) from None

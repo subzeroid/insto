@@ -143,6 +143,12 @@ async def _recover(profile: Profile, service: ManagedService, deadline: float) -
         return await reconcile(profile, service, deadline)
     except asyncio.CancelledError:
         raise
+    except DesktopError as exc:
+        if exc.code == "service_ownership_unknown":
+            # Registration bytes that no journaled migration wrote: Repair refuses
+            # to touch them, and that verdict must reach the user as itself.
+            raise
+        raise DesktopError("recovery_required") from None
     except Exception:
         raise DesktopError("recovery_required") from None
 
@@ -307,7 +313,15 @@ async def change_service(profile: Profile, action: str) -> dict[str, Any]:
                 if state is None:
                     raise DesktopError("not_configured")
                 if recovered and action == "repair":
-                    return _dto(state, running=_running(await service.inspect_owned()))
+                    try:
+                        return _dto(state, running=_running(await service.inspect_owned()))
+                    except BackendError:
+                        # A rolled-back migration restored a registration that names
+                        # another interpreter; the repair succeeded, the lease cannot
+                        # manage that registration. Same shape as inspect_profile.
+                        result = _dto(state)
+                        result["status"] = "service_error"
+                        return result
                 checkpoint(deadline)
                 if action in {"start", "stop"}:
                     state = dict(

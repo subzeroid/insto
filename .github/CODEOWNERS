@@ -1,0 +1,7 @@
+# The workflows below hold the release identity: PyPI trusted publishing and the
+# token release-please runs with. Changes to them must not land unreviewed.
+# This file only takes effect once branch protection on main requires review
+# from code owners.
+/.github/workflows/ @subzeroid
+/.github/CODEOWNERS @subzeroid
+/.github/dependabot.yml @subzeroid

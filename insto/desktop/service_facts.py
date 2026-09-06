@@ -56,16 +56,31 @@ def _owned_files(paths: ServicePaths) -> tuple[dict[str, Any] | None, bytes | No
     return manifest, plist
 
 
-def _job_matches(output: bytes, plist: bytes | None) -> bool:
-    """The loaded job runs exactly the owned plist's program and arguments."""
+def _job_matches(paths: ServicePaths, output: bytes, plist: bytes | None) -> bool:
+    """The loaded job runs exactly the owned plist's program and arguments, from its path.
+
+    The same provenance predicate as the lifecycle's `_process`: a job loaded from
+    another plist file with identical arguments is not this registration.
+    """
     if plist is None:
         return False
     try:
         fields, arguments = _outer_fields(output)
         expected = plistlib.loads(plist)["ProgramArguments"]
-    except (BackendError, KeyError, TypeError, ValueError, plistlib.InvalidFileException):
+    except (
+        BackendError,
+        ExpatError,
+        KeyError,
+        TypeError,
+        ValueError,
+        plistlib.InvalidFileException,
+    ):
         return False
-    return bool(fields.get("program") == expected[0] and arguments == expected)
+    return bool(
+        fields.get("program") == expected[0]
+        and arguments == expected
+        and ("path" not in fields or fields["path"] == str(paths.plist))
+    )
 
 
 def _process(state: str | None) -> str:
@@ -105,7 +120,7 @@ async def registration_facts(
         process = _process(watch_service._parse_launchctl_print(job)["state"])
     elif result is not None and watch_service._is_missing(result):
         loaded, process = False, "stopped"
-    owned = manifest is not None and (not loaded or _job_matches(job or b"", plist))
+    owned = manifest is not None and (not loaded or _job_matches(paths, job or b"", plist))
     if manifest is None or not owned:
         return {
             "registration": "unknown" if has_files or loaded else "none",

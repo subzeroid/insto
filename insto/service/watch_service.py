@@ -322,7 +322,8 @@ def _decode_registration(value: object) -> Registration:
         elif isinstance(raw, str):
             try:
                 decoded.append(base64.b64decode(raw, validate=True))
-            except binascii.Error as exc:
+            except (binascii.Error, ValueError) as exc:
+                # ValueError: non-ASCII text is refused before validation.
                 raise BackendError("retained migration registration is invalid") from exc
         else:
             raise BackendError("retained migration registration is invalid")
@@ -355,11 +356,13 @@ def read_retained_registration(paths: ServicePaths) -> dict[str, Registration] |
         return None
     try:
         value = json.loads(read_private_file(path, max_bytes=_RETAINED_MAX_BYTES).decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        # RecursionError: a deeply nested document within the byte limit.
         raise BackendError("retained migration registration is invalid") from exc
     if (
         not isinstance(value, dict)
         or set(value) != {"schema_version", "previous", "candidate"}
+        or type(value["schema_version"]) is not int  # refuses true and 1.0
         or value["schema_version"] != 1
     ):
         raise BackendError("retained migration registration is invalid")

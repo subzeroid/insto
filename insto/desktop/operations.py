@@ -17,7 +17,14 @@ from insto.desktop.configuration import (
 )
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
-from insto.desktop.recovery import checkpoint, cleanup, phase, reconcile, rollback_drained
+from insto.desktop.recovery import (
+    RestartFailedError,
+    checkpoint,
+    cleanup,
+    phase,
+    reconcile,
+    rollback_drained,
+)
 from insto.desktop.service_facts import registration_facts
 from insto.exceptions import BackendError
 from insto.service import watch_service
@@ -149,6 +156,10 @@ async def _recover(profile: Profile, service: ManagedService, deadline: float) -
         return await reconcile(profile, service, deadline)
     except asyncio.CancelledError:
         raise
+    except RestartFailedError:
+        # The rollback settled the profile; the restored registration names a
+        # service this lease cannot start. The caller's own inspection reports it.
+        return True
     except DesktopError as exc:
         if exc.code == "service_ownership_unknown":
             # Registration bytes that no journaled migration wrote: Repair refuses

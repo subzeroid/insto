@@ -90,8 +90,13 @@ def read_private_file(path: Path, *, max_bytes: int = 65536) -> bytes:
 
 
 def read_manifest(paths: ServicePaths) -> dict[str, Any]:
+    return parse_manifest(paths, read_private_file(paths.manifest))
+
+
+def parse_manifest(paths: ServicePaths, payload: bytes) -> dict[str, Any]:
+    """Validate manifest bytes already read as this home's owned manifest."""
     try:
-        value = json.loads(read_private_file(paths.manifest).decode("utf-8"))
+        value = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise BackendError("invalid watch service manifest") from exc
     keys = {

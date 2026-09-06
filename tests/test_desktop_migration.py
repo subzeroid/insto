@@ -22,8 +22,15 @@ class Launchd:
 
     def __init__(self):
         self.loaded_with = None  # manifest bytes of the loaded registration
-        self.fail = set()  # {"stop_old", "start_new", "start_old"}
+        self.fail = set()  # one-shot: {"stop_old", "stop_new", "start_new", "start_old"}
+        self.always_fail = set()  # the same keys, failing on every attempt
         self.events = []
+
+    def _refuse(self, key):
+        if key in self.fail:
+            self.fail.discard(key)
+            return True
+        return key in self.always_fail
 
     def service(self, paths, config, artifacts):
         launchd = self
@@ -70,8 +77,7 @@ class Launchd:
             async def ensure_stopped(self):
                 self._installation()
                 launchd.events.append(("stop", self._manifest))
-                if "stop_old" in launchd.fail:
-                    launchd.fail.discard("stop_old")
+                if launchd._refuse("stop_new" if b"NEW" in self._manifest else "stop_old"):
                     raise BackendError("stop failed")
                 if launchd.loaded_with == self._manifest:
                     launchd.loaded_with = None
@@ -80,9 +86,7 @@ class Launchd:
             async def ensure_running(self):
                 self._installation()
                 launchd.events.append(("start", self._manifest))
-                key = "start_new" if b"NEW" in self._manifest else "start_old"
-                if key in launchd.fail:
-                    launchd.fail.discard(key)
+                if launchd._refuse("start_new" if b"NEW" in self._manifest else "start_old"):
                     raise BackendError("start failed")
                 launchd.loaded_with = self._manifest
                 return await self.inspect_owned()
@@ -314,7 +318,7 @@ async def test_rollback_failure_leaves_recovery_required_then_repair_finishes(wo
     from insto.desktop import migration, operations
 
     profile, launchd, paths, old, _new = world
-    launchd.fail.update({"start_new", "start_old"})
+    launchd.fail.update({"start_new", "stop_new"})  # the rollback's own stop fails
     with pytest.raises(DesktopError) as info:
         await migration.migrate(profile)
     assert info.value.code == "recovery_required"
@@ -328,6 +332,50 @@ async def test_rollback_failure_leaves_recovery_required_then_repair_finishes(wo
     assert watch_service.read_registration(paths) == old and launchd.loaded_with == old[0]
     assert profile.read_journal() is None
     assert watch_service.read_retained_registration(paths) is None
+    assert (await operations.inspect_profile(profile))["status"] == "service_error"
+
+
+async def test_failed_restart_of_the_old_registration_completes_the_rollback(world):
+    """F1: an old interpreter that will not start must not hold the journal forever."""
+    from insto.desktop import migration, operations
+
+    profile, launchd, paths, old, new = world
+    state = profile.read_state()
+    launchd.fail.add("start_new")
+    launchd.always_fail.add("start_old")
+    with pytest.raises(DesktopError) as info:
+        await migration.migrate(profile)
+    assert info.value.code == "service_error"
+    assert profile.read_journal() is None
+    assert watch_service.read_retained_registration(paths) is None
+    assert watch_service.read_registration(paths) == old and launchd.loaded_with is None
+    assert profile.read_state() == state
+    assert launchd.events[-1] == ("start", old[0])
+    assert (await operations.inspect_profile(profile))["status"] == "service_error"
+    # Nothing is pending: a second migration retries from the previous registration.
+    launchd.events.clear()
+    result = await migration.migrate(profile)
+    assert result["status"] == "running" and launchd.loaded_with == new[0]
+    assert launchd.events == [("stop", old[0]), ("start", new[0])]
+
+
+@pytest.mark.parametrize("phase", ["rollback", "stopped"])
+async def test_repair_after_a_failed_restart_reports_service_error_once(world, phase):
+    """Repair drives the same rollback: a permanently dead old service settles the journal."""
+    from insto.desktop import operations
+
+    profile, launchd, paths, old, new = world
+    launchd.loaded_with = None
+    watch_service.replace_registration(paths, old, new)
+    _journal_at(profile, phase)
+    watch_service.retain_registration(paths, previous=old, candidate=new)
+    launchd.always_fail.add("start_old")
+    repaired = await operations.change_service(profile, "repair")
+    assert repaired["status"] == "service_error" and repaired["configured"] is True
+    assert profile.read_journal() is None
+    assert watch_service.read_retained_registration(paths) is None
+    assert watch_service.read_registration(paths) == old and launchd.loaded_with is None
+    assert ("start", old[0]) in launchd.events
     assert (await operations.inspect_profile(profile))["status"] == "service_error"
 
 
@@ -518,7 +566,7 @@ async def test_pending_journal_blocks_migration_and_uninstall(world):
         assert info.value.code == "recovery_required"
 
 
-def _terminal_journal(profile, phase):
+def _journal_at(profile, phase):
     with profile.locked():
         journal = profile.new_journal(
             kind="migrate",
@@ -535,7 +583,7 @@ async def test_repair_finishes_a_terminal_migration_without_native_actions(world
     from insto.desktop import operations
 
     profile, launchd, paths, old, new = world
-    _terminal_journal(profile, phase)
+    _journal_at(profile, phase)
     watch_service.retain_registration(paths, previous=old, candidate=new)
     assert (await operations.inspect_profile(profile))["status"] == "recovery_required"
     await operations.change_service(profile, "repair")
@@ -550,7 +598,7 @@ async def test_migrate_finishes_a_terminal_journal_before_its_noop(world):
 
     profile, launchd, paths, old, new = world
     await migration.migrate(profile)
-    _terminal_journal(profile, "committed")
+    _journal_at(profile, "committed")
     watch_service.retain_registration(paths, previous=old, candidate=new)
     launchd.events.clear()
     assert (await operations.inspect_profile(profile))["status"] == "recovery_required"
@@ -561,11 +609,11 @@ async def test_migrate_finishes_a_terminal_journal_before_its_noop(world):
     assert (await operations.inspect_profile(profile))["status"] == "running"
 
 
-async def test_uninstall_finishes_a_terminal_journal(world):
+async def test_uninstall_finishes_a_journal_at(world):
     from insto.desktop import migration
 
     profile, _launchd, paths, old, new = world
-    _terminal_journal(profile, "rolled_back")
+    _journal_at(profile, "rolled_back")
     watch_service.retain_registration(paths, previous=old, candidate=new)
     result = await migration.uninstall(profile)
     assert result["status"] == "stopped"
@@ -574,18 +622,58 @@ async def test_uninstall_finishes_a_terminal_journal(world):
     assert not paths.manifest.exists() and not paths.plist.exists()
 
 
-async def test_unreadable_retention_is_pending_and_never_repaired_silently(world):
-    from insto.desktop import operations
+@pytest.mark.parametrize("refused", [False, True], ids=["private_garbage", "refused_file"])
+async def test_unreadable_unreferenced_retention_is_pending_until_repair_discards_it(
+    world, refused
+):
+    """F7: a private file that is not a retained registration can never serve a rollback;
+    without a journal Repair discards it. A file the service layer refuses to read at
+    all is never touched, and stays pending."""
+    from insto.desktop import migration, operations
 
     profile, launchd, paths, _old, _new = world
     garbage = paths.directory / watch_service.RETAINED_REGISTRATION
     garbage.write_bytes(b"garbage")
-    garbage.chmod(0o600)
+    garbage.chmod(0o644 if refused else 0o600)
     assert (await operations.inspect_profile(profile))["status"] == "recovery_required"
+    with pytest.raises(DesktopError) as info:
+        await migration.migrate(profile)  # agrees with inspect_profile: Repair settles it
+    assert info.value.code == "recovery_required"
+    assert garbage.read_bytes() == b"garbage" and launchd.events == []
+    if refused:
+        with pytest.raises(DesktopError) as info:
+            await operations.change_service(profile, "repair")
+        assert info.value.code == "recovery_required"
+        assert garbage.read_bytes() == b"garbage" and launchd.events == []
+        assert (await operations.inspect_profile(profile))["status"] == "recovery_required"
+        return
+    repaired = await operations.change_service(profile, "repair")
+    assert repaired["status"] == "service_error" and repaired["configured"] is True
+    assert not garbage.exists() and launchd.events == []
+    assert (await operations.inspect_profile(profile))["status"] == "service_error"
+
+
+async def test_terminal_journal_with_a_refused_retention_stays_pending(world):
+    """Parked 5: a retained document the service layer refuses keeps the journal, and
+    migrate, uninstall and Repair agree with inspect_profile on `recovery_required`."""
+    from insto.desktop import migration, operations
+
+    profile, launchd, paths, old, new = world
+    _journal_at(profile, "committed")
+    watch_service.retain_registration(paths, previous=old, candidate=new)
+    retained = paths.directory / watch_service.RETAINED_REGISTRATION
+    retained.chmod(0o644)
+    journal = profile.read_journal()
+    assert (await operations.inspect_profile(profile))["status"] == "recovery_required"
+    for action in (migration.migrate, migration.uninstall):
+        with pytest.raises(DesktopError) as info:
+            await action(profile)
+        assert info.value.code == "recovery_required"
     with pytest.raises(DesktopError) as info:
         await operations.change_service(profile, "repair")
     assert info.value.code == "recovery_required"
-    assert garbage.read_bytes() == b"garbage" and launchd.events == []
+    assert profile.read_journal() == journal and retained.exists()
+    assert launchd.events == [] and watch_service.read_registration(paths) == old
 
 
 async def test_repair_discards_a_stray_backup_and_unreferenced_retention_together(world):
@@ -608,7 +696,7 @@ async def test_rollback_refuses_to_start_an_incomplete_previous_registration(wor
     profile, launchd, paths, old, new = world
     launchd.loaded_with = None
     paths.plist.unlink()
-    _terminal_journal(profile, "stopped")
+    _journal_at(profile, "stopped")
     watch_service.retain_registration(paths, previous=(old[0], None), candidate=new)
     with pytest.raises(DesktopError) as info:
         await operations.change_service(profile, "repair")
@@ -666,4 +754,27 @@ async def test_uninstall_refuses_a_manifest_that_cannot_prove_ownership(world):
         await migration.uninstall(profile)
     assert info.value.code == "service_ownership_unknown"
     assert watch_service.read_registration(paths) == (b'{"foreign":1}\n', old[1])
+    assert launchd.events == [] and profile.read_state()["desired_service"] == "running"
+
+
+async def test_uninstall_refuses_a_manifest_replaced_before_the_lock(world, monkeypatch):
+    """Parked 4: the lease was derived from bytes read outside the management lock; a
+    registration that changed meanwhile is refused before any native action or intent."""
+    from insto.desktop import migration
+
+    profile, launchd, paths, old, new = world
+    launchd.loaded_with = None
+    original = migration.managed_service
+
+    @contextlib.contextmanager
+    def reregistered_meanwhile(**kwargs):
+        watch_service._replace_file(paths.manifest, new[0])
+        with original(**kwargs) as lease:
+            yield lease
+
+    monkeypatch.setattr(migration, "managed_service", reregistered_meanwhile)
+    with pytest.raises(DesktopError) as info:
+        await migration.uninstall(profile)
+    assert info.value.code == "service_ownership_unknown"
+    assert watch_service.read_registration(paths) == (new[0], old[1])
     assert launchd.events == [] and profile.read_state()["desired_service"] == "running"

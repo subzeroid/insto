@@ -12,9 +12,20 @@ from typing import Any
 from insto.desktop.configuration import initialize_database, parse_profile_config
 from insto.desktop.errors import DesktopError
 from insto.desktop.profile import Profile
+from insto.exceptions import BackendError
 from insto.service import watch_service
 from insto.service.watch_service import Registration, ServicePaths
 from insto.service.watch_service_lifecycle import ManagedService
+
+TERMINAL_PHASES = frozenset({"committed", "rolled_back"})
+
+
+class RestartFailedError(BackendError):
+    """A rollback completed, but the restored registration could not be started.
+
+    Bytes, intent and journal are settled; only the previous service is down. Callers
+    report it as `service_error` instead of holding the profile in recovery.
+    """
 
 
 def checkpoint(deadline: float) -> None:
@@ -38,17 +49,28 @@ def cleanup(profile: Profile, deadline: float) -> None:
 def require_settled(profile: Profile) -> None:
     """Refuse a new transition while a journal or stray backup awaits Repair."""
     journal = profile.read_journal()
-    if journal is not None and journal["phase"] not in {"committed", "rolled_back"}:
+    if journal is not None and journal["phase"] not in TERMINAL_PHASES:
         raise DesktopError("recovery_required")
     if journal is None and profile.read_backup() is not None:
         raise DesktopError("recovery_required")
 
 
 def finish_terminal(profile: Profile, journal: dict[str, Any], deadline: float) -> None:
-    """Complete a journal that reached a terminal phase before its cleanup ran."""
+    """Complete a journal that reached a terminal phase before its cleanup ran.
+
+    The phase is checked here, under the lease the caller holds: a journal read
+    before the lease may have been replaced by a pending one since.
+    """
+    if journal["phase"] not in TERMINAL_PHASES:
+        raise DesktopError("recovery_required")
     checkpoint(deadline)
     if journal["kind"] == "migrate":
-        watch_service.discard_retained_registration(watch_service.service_paths(profile.home))
+        try:
+            watch_service.discard_retained_registration(watch_service.service_paths(profile.home))
+        except BackendError:
+            # A retained document the service layer refuses to touch keeps the
+            # journal: Repair reports it, exactly like inspect_profile does.
+            raise DesktopError("recovery_required") from None
     cleanup(profile, deadline)
 
 
@@ -56,11 +78,17 @@ def _discard_unreferenced(profile: Profile) -> bool:
     """Drop a retained registration that no journal references; True when one was dropped.
 
     The document sits beside the home's manifest, so locating it needs nothing from
-    the lease, whose own paths derive from the same home.
+    the lease, whose own paths derive from the same home. A private file that is not
+    a retained registration can never serve a rollback; without a journal it is
+    dropped too, so one Repair settles it (a file the service layer refuses to read
+    at all stays, and Repair keeps reporting it).
     """
     paths = watch_service.service_paths(profile.home)
-    if watch_service.read_retained_registration(paths) is None:
-        return False
+    try:
+        if watch_service.read_retained_registration(paths) is None:
+            return False
+    except BackendError:
+        pass
     watch_service.discard_retained_registration(paths)
     return True
 
@@ -86,7 +114,7 @@ async def reconcile(profile: Profile, service: ManagedService, deadline: float) 
         if _discard_unreferenced(profile):
             changed = True
         return changed
-    if journal["phase"] in {"committed", "rolled_back"}:
+    if journal["phase"] in TERMINAL_PHASES:
         finish_terminal(profile, journal, deadline)
         return True
     if journal["kind"] == "migrate":
@@ -184,11 +212,28 @@ async def _rollback_migration(
             watch_service.replace_registration(paths, on_disk, previous)
     checkpoint(deadline)
     profile.write_state(journal["previous_state"])
-    if journal["previous_running"]:
-        old = ManagedService(
-            paths, service._config, deadline, artifacts=_lease_artifacts(paths, previous, previous)
-        )
-        await old.ensure_running()
+    try:
+        if journal["previous_running"]:
+            old = ManagedService(
+                paths,
+                service._config,
+                deadline,
+                artifacts=_lease_artifacts(paths, previous, previous),
+            )
+            await old.ensure_running()
+    except BackendError as exc:
+        # Bytes and intent are already the previous ones. A previous registration
+        # that will not start (its interpreter may be gone for good) must not hold
+        # the journal at `rollback` forever: the rollback completes and the restart
+        # failure is reported on its own.
+        _finish_rollback(profile, paths, journal, deadline)
+        raise RestartFailedError("the restored watch service registration did not start") from exc
+    _finish_rollback(profile, paths, journal, deadline)
+
+
+def _finish_rollback(
+    profile: Profile, paths: ServicePaths, journal: dict[str, Any], deadline: float
+) -> None:
     phase(profile, journal, "rolled_back", deadline)
     watch_service.discard_retained_registration(paths)
     cleanup(profile, deadline)

@@ -353,7 +353,8 @@ new schema version or additional index in C2b.
 ## C3 migration and adoption
 
 Capabilities become the 19 C2 names plus service.inspect, service.migrate,
-service.uninstall, home.inspect and home.select (24). The core is insto 0.7.22.
+service.uninstall, home.inspect and home.select (24). The core is insto 0.7.22
+or later.
 
 | Operation | Exact params | Budget | Effect |
 | --- | --- | --- | --- |
@@ -391,10 +392,10 @@ ok, `backend` hikerapi and `database` ok or missing. Nothing inside a
 non-private path is read: such a report says invalid, unreadable and unknown.
 Paths are absolute or `~`/`~/…` (this account's home, expanded by the core),
 at most 1024 UTF-8 bytes, no NUL, normalized and free of symlinks; anything
-else is `home_invalid` (`invalid_params` for a wrong type, empty or oversized
-value) before any read. The config file must be exactly what the profile
-reader accepts later (regular, owned, mode 0600, one link), otherwise
-`config` is `invalid`. Tokens never appear in the report.
+else is `home_invalid` (`invalid_params` for a wrong type, an empty, oversized
+or NUL-containing value) before any read. The config file must be exactly what
+the profile reader accepts later (regular, owned, mode 0600, one link),
+otherwise `config` is `invalid`. Tokens never appear in the report.
 
 `home.select` refuses `recovery_required` while the current profile has a
 pending journal or backup, and is a no-op for the current binding. Before

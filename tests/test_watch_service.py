@@ -8,6 +8,7 @@ import sqlite3
 import stat
 import subprocess
 import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1003,3 +1004,58 @@ async def test_uninstall_refuses_truncated_plist_without_native_calls(
     with pytest.raises(BackendError, match="invalid LaunchAgent plist"):
         await watch_service.uninstall_service(home=home)
     assert calls == [] and paths.manifest.exists() and paths.plist.exists()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_polls_until_launchd_drops_the_label(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    home, paths, _ = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    calls: list[list[str]] = []
+
+    def launchctl(args: list[str], **_: object) -> SimpleNamespace:
+        calls.append(args[1:])
+        if args[1] != "print":
+            return _result(0)
+        # bootout returns before launchd has necessarily dropped the label:
+        # the first probe after it still finds the job, the next does not.
+        if len([call for call in calls if call[0] == "print"]) <= 2:
+            return _result(0, out=b"state = running")
+        return _result(1, err=b"Could not find service")
+
+    monkeypatch.setattr(watch_service.subprocess, "run", launchctl)
+    result = await watch_service.uninstall_service(home=home)
+    assert result["installation"] == "not_installed" and result["registration"] == "unloaded"
+    assert [call[0] for call in calls] == ["print", "bootout", "print", "print"]
+    assert not paths.manifest.exists() and not paths.plist.exists()
+
+
+@pytest.mark.asyncio
+async def test_uninstall_absence_poll_stays_inside_the_readiness_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(watch_service.sys, "platform", "darwin")
+    monkeypatch.setattr(watch_service, "_READINESS_SECONDS", 0.15)
+    home, paths, _ = _owned_artifacts(tmp_path, monkeypatch, plist=True)
+    calls: list[list[str]] = []
+    limits: list[object] = []
+
+    def launchctl(args: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append(args[1:])
+        limits.append(kwargs.get("timeout"))
+        return _result(0, out=b"state = running")
+
+    monkeypatch.setattr(watch_service.subprocess, "run", launchctl)
+    started = time.monotonic()
+    with pytest.raises(BackendError, match=r"\Acould not confirm LaunchAgent absence\Z"):
+        await watch_service.uninstall_service(home=home)
+    elapsed = time.monotonic() - started
+    probes = [call for call in calls if call[0] == "print"]
+    assert [call[0] for call in calls].count("bootout") == 1
+    # The poll retries, but the readiness budget stops it spinning forever.
+    assert 2 <= len(probes) <= 12 and elapsed < 3
+    # Every polled probe inherits the shared deadline, so a hung launchctl
+    # cannot outlast the budget either.
+    assert all(isinstance(limit, float) and limit <= 0.15 for limit in limits[2:])
+    assert paths.manifest.exists() and paths.plist.exists()

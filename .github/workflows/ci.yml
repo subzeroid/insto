@@ -68,7 +68,7 @@ jobs:
         env:
           INSTO_TEST_LAUNCHD: "1"
         run: |
-          INSTO_TEST_PYTHON="$RUNNER_TEMP/insto-service-venv/bin/python" uv run --frozen pytest tests/e2e/test_watch_service.py -q -rs
+          INSTO_TEST_PYTHON="$RUNNER_TEMP/insto-service-venv/bin/python" uv run --frozen pytest tests/e2e/test_watch_service.py tests/e2e/test_desktop_migration.py -q -rs
 
   live-test:
     # Live aiograpi end-to-end through the real CLI entrypoint, driven by

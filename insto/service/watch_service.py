@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import fcntl
 import hashlib
@@ -21,17 +23,21 @@ from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
 from typing import Any, Protocol, cast
+from xml.parsers.expat import ExpatError
 
 from insto.config import Config, config_dir
 from insto.exceptions import BackendError
 
 _MANAGED_BY = "insto-watch-service"
 _LAUNCHCTL = "/bin/launchctl"
+_READINESS_SECONDS = 10.0
 _MISSING_DIAGNOSTICS = (
     "could not find service",
     "service cannot be found",
     "no such process",
 )
+RETAINED_REGISTRATION = "migration-registration.json"
+_RETAINED_MAX_BYTES = 262144
 
 
 @dataclass(frozen=True)
@@ -85,9 +91,15 @@ def read_private_file(path: Path, *, max_bytes: int = 65536) -> bytes:
 
 
 def read_manifest(paths: ServicePaths) -> dict[str, Any]:
+    return parse_manifest(paths, read_private_file(paths.manifest))
+
+
+def parse_manifest(paths: ServicePaths, payload: bytes) -> dict[str, Any]:
+    """Validate manifest bytes already read as this home's owned manifest."""
     try:
-        value = json.loads(read_private_file(paths.manifest).decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        # RecursionError: a deeply nested document within the byte limit.
         raise BackendError("invalid watch service manifest") from exc
     keys = {
         "schema_version",
@@ -221,25 +233,181 @@ def _management_lock(paths: ServicePaths) -> Iterator[None]:
         os.close(fd)
 
 
-def _atomic_write(path: Path, content: bytes) -> None:
+def _sync_dir(path: Path) -> None:
+    """Make a directory's entries durable; publications are never claimed before this.
+
+    An ``OSError`` propagates raw in this layer (the desktop layer maps it). On
+    macOS ``fsync`` on a directory flushes to the drive cache; ``F_FULLFSYNC`` is
+    out of scope.
+    """
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _durable_temp(path: Path, content: bytes) -> Path:
+    """Write a private, fsynced temporary sibling of ``path`` and return it."""
     fd, raw_tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     tmp = Path(raw_tmp)
     try:
         os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as stream:
+        stream = os.fdopen(fd, "wb")
+        fd = -1  # the stream owns and closes the descriptor from here on
+        with stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
+    except Exception:
+        if fd >= 0:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+    return tmp
+
+
+def _atomic_write(path: Path, content: bytes) -> None:
+    tmp = _durable_temp(path, content)
+    try:
         # Linking a completed private temporary file publishes it atomically
         # while refusing to replace a target created after our preflight.
         os.link(tmp, path)
         tmp.unlink()
+        _sync_dir(path.parent)
     except Exception:
-        with contextlib.suppress(OSError):
-            os.close(fd)
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+def _replace_file(path: Path, content: bytes) -> None:
+    tmp = _durable_temp(path, content)
+    try:
+        os.replace(tmp, path)
+        _sync_dir(path.parent)
+    except Exception:
+        with contextlib.suppress(OSError):
+            tmp.unlink()
+        raise
+
+
+Registration = tuple[bytes | None, bytes | None]
+
+
+def _read_component(path: Path) -> bytes | None:
+    return read_private_file(path) if os.path.lexists(path) else None
+
+
+def read_registration(paths: ServicePaths) -> Registration:
+    """Exact on-disk manifest and plist bytes; None for an absent component."""
+    return _read_component(paths.manifest), _read_component(paths.plist)
+
+
+def _encode_registration(pair: Registration) -> dict[str, str | None]:
+    return {
+        "manifest": base64.b64encode(pair[0]).decode() if pair[0] is not None else None,
+        "plist": base64.b64encode(pair[1]).decode() if pair[1] is not None else None,
+    }
+
+
+def _decode_registration(value: object) -> Registration:
+    if not isinstance(value, dict) or set(value) != {"manifest", "plist"}:
+        raise BackendError("retained migration registration is invalid")
+    decoded: list[bytes | None] = []
+    for key in ("manifest", "plist"):
+        raw = value[key]
+        if raw is None:
+            decoded.append(None)
+        elif isinstance(raw, str):
+            try:
+                decoded.append(base64.b64decode(raw, validate=True))
+            except (binascii.Error, ValueError) as exc:
+                # ValueError: non-ASCII text is refused before validation.
+                raise BackendError("retained migration registration is invalid") from exc
+        else:
+            raise BackendError("retained migration registration is invalid")
+    return decoded[0], decoded[1]
+
+
+def retain_registration(
+    paths: ServicePaths, *, previous: Registration, candidate: Registration
+) -> None:
+    """Retain both sides of a migration in one durable document; never overwrites."""
+    path = paths.directory / RETAINED_REGISTRATION
+    if os.path.lexists(path):
+        raise BackendError("a migration registration is already retained")
+    payload = json.dumps(
+        {
+            "schema_version": 1,
+            "previous": _encode_registration(previous),
+            "candidate": _encode_registration(candidate),
+        },
+        sort_keys=True,
+    ).encode()
+    if len(payload) > _RETAINED_MAX_BYTES:
+        raise BackendError("retained migration registration is too large")
+    _atomic_write(path, payload)
+
+
+def read_retained_registration(paths: ServicePaths) -> dict[str, Registration] | None:
+    path = paths.directory / RETAINED_REGISTRATION
+    if not os.path.lexists(path):
+        return None
+    try:
+        value = json.loads(read_private_file(path, max_bytes=_RETAINED_MAX_BYTES).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+        # RecursionError: a deeply nested document within the byte limit.
+        raise BackendError("retained migration registration is invalid") from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "previous", "candidate"}
+        or type(value["schema_version"]) is not int  # refuses true and 1.0
+        or value["schema_version"] != 1
+    ):
+        raise BackendError("retained migration registration is invalid")
+    return {
+        "previous": _decode_registration(value["previous"]),
+        "candidate": _decode_registration(value["candidate"]),
+    }
+
+
+def discard_retained_registration(paths: ServicePaths) -> None:
+    path = paths.directory / RETAINED_REGISTRATION
+    if os.path.lexists(path):
+        read_private_file(path, max_bytes=_RETAINED_MAX_BYTES)
+        path.unlink()
+        _sync_dir(paths.directory)
+
+
+def replace_registration(
+    paths: ServicePaths, expected: Registration, desired: Registration
+) -> None:
+    """Publish `desired` over a registration that is exactly `expected` (None = absent)."""
+    targets = (paths.manifest, paths.plist)
+    for path, before in zip(targets, expected, strict=True):
+        present = os.path.lexists(path)
+        if before is None:
+            if present:
+                raise BackendError("watch service registration changed during migration")
+        elif not _existing_matches(path, before):
+            raise BackendError("watch service registration changed during migration")
+    transitions = tuple(zip(targets, expected, desired, strict=True))
+    # Removals first and plist-first: a death mid-way must never leave an
+    # autostart plist without the manifest that proves its ownership.
+    for path, before, content in reversed(transitions):
+        if content is None and before is not None:
+            path.unlink()
+            _sync_dir(path.parent)
+    for path, before, content in transitions:
+        if content is None:
+            continue
+        if before is None:
+            _atomic_write(path, content)  # link-based: refuses a file that appeared meanwhile
+        else:
+            _replace_file(path, content)
 
 
 def _run_launchctl(
@@ -482,7 +650,7 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
         if plist_exists:
             try:
                 actual_plist = plistlib.loads(read_private_file(paths.plist))
-            except plistlib.InvalidFileException as exc:
+            except (plistlib.InvalidFileException, ExpatError) as exc:
                 raise BackendError("invalid LaunchAgent plist") from exc
             if not _matches_owned_plist(paths, manifest, actual_plist):
                 raise BackendError("LaunchAgent plist ownership mismatch")
@@ -494,12 +662,27 @@ async def uninstall_service(*, home: Path | None = None) -> dict[str, Any]:
             result = await _launchctl(["bootout", target])
             if result.returncode != 0:
                 raise BackendError("launchctl could not unregister the LaunchAgent")
-            current = await _launchctl(["print", target])
+            # bootout returns before launchd has necessarily dropped the label.
+            # Poll for absence the way the lifecycle waits for a stop, bounded by
+            # one shared deadline so a hung launchctl cannot exceed the budget.
+            until = time.monotonic() + _READINESS_SECONDS
+            while True:
+                remaining = until - time.monotonic()
+                if remaining <= 0:
+                    break
+                current = await _launchctl(["print", target], deadline=until)
+                if _is_missing(current):
+                    break
+                await asyncio.sleep(min(0.05, remaining))
         if not _is_missing(current):
             raise BackendError("could not confirm LaunchAgent absence")
-        paths.manifest.unlink()
+        # The plist goes first: a death between the two unlinks must never leave
+        # an autostart plist without the manifest that proves its ownership.
         if plist_exists:
             paths.plist.unlink()
+            _sync_dir(paths.plist.parent)
+        paths.manifest.unlink()
+        _sync_dir(paths.directory)
         return _operation_report(
             paths,
             changed=True,

@@ -30,6 +30,16 @@ MESSAGES: dict[str, tuple[str, bool]] = {
         False,
     ),
     "snapshot_identity_mismatch": ("Select snapshots from the same saved account history.", False),
+    "home_invalid": ("The selected home cannot be used safely.", False),
+    "home_backend_unsupported": ("The selected home uses an unsupported backend.", False),
+    "service_ownership_unknown": (
+        "The service registration has unknown ownership; only reading is allowed.",
+        False,
+    ),
+    "service_config_mismatch": (
+        "The registered service uses settings that differ from the home's configuration.",
+        False,
+    ),
 }
 
 

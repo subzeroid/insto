@@ -162,6 +162,11 @@ def resolve_service_config(
         if key in pins:
             setattr(config, key, Path(str(pins[key])))
 
+    _validate_resolved_config(config)
+    return config
+
+
+def _validate_resolved_config(config: Config) -> None:
     if config.backend == BACKEND_HIKERAPI and not config.hiker_token:
         raise BackendError("required HikerAPI credential is not configured")
     if config.backend == BACKEND_AIOGRAPI and (
@@ -174,6 +179,29 @@ def resolve_service_config(
         from insto.service.watch_webhook import validate_webhook_url
 
         validate_webhook_url(config.watch_webhook_url)
+
+
+def load_home_config(home: Path, toml_data: dict[str, Any] | None = None) -> Config:
+    """Resolve a home's configuration like the service runner, without env-file secrets.
+
+    Relative paths resolve against the home, which is the service's WorkingDirectory;
+    the bridge's own working directory is never a base for a CLI home's paths. The
+    one exception is an explicit relative ``aiograpi.session_path``: ``load_config``
+    already resolves it against the process cwd before this function sees it
+    (pre-existing runner behaviour, irrelevant for hikerapi homes).
+    """
+    with _temporary_service_environment(home, {}):
+        data = (
+            _secure_toml(home / "config.toml", missing_ok=False) if toml_data is None else toml_data
+        )
+        _validate_config_credentials(data)
+        config = load_config(toml_data=data)
+    _validate_resolved_config(config)
+    for key in ("db_path", "output_dir", "aiograpi_session_path"):
+        value = getattr(config, key)
+        if isinstance(value, Path):
+            expanded = value.expanduser()
+            setattr(config, key, expanded if expanded.is_absolute() else home / expanded)
     return config
 
 
@@ -346,6 +374,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "close_service_logging",
+    "load_home_config",
     "main",
     "read_service_env",
     "resolve_service_config",

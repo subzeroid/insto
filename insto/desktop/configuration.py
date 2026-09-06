@@ -14,11 +14,34 @@ from pathlib import Path
 import tomli_w
 
 from insto._redact import register_secret
-from insto.config import Config
+from insto.config import BACKEND_HIKERAPI, Config, normalize_backend
 from insto.desktop.access import validate_token
 from insto.desktop.errors import DesktopError
-from insto.desktop.profile import Profile, _directory, _sync_directory
+from insto.desktop.profile import Profile, _directory, _sync_directory, _trusted_ancestors
+from insto.exceptions import BackendError
 from insto.service.history import _SCHEMA_VERSION, HistoryStore
+from insto.service.watch_service_runner import load_home_config
+
+
+def check_database_location(home: Path, db_path: Path) -> None:
+    """An external database sits in an existing owned private directory under trusted
+    parents, like the home itself; inside the home the home's own checks cover it.
+
+    Raises `home_invalid`. Shared by the adopted config parser (every desktop open)
+    and `home.inspect`, so inspection and later opens agree.
+    """
+    # Normalise lexically first: `../shared/s.db` under the home is not inside it,
+    # and a purely textual containment test would skip both external checks. Never
+    # `resolve()`: a symlink must not decide which rule applies, and the rules below
+    # judge the path as written, exactly as the later open will use it.
+    db_path = Path(os.path.normpath(db_path))
+    if db_path.parent == home or home in db_path.parents:
+        return
+    try:
+        _trusted_ancestors(db_path)
+        _directory(db_path.parent)
+    except (DesktopError, OSError):
+        raise DesktopError("home_invalid") from None
 
 
 def config_bytes(profile: Profile, token: str) -> bytes:
@@ -61,6 +84,66 @@ def parse_config(profile: Profile, payload: bytes) -> Config:
         aiograpi_session_path=profile.home / "aiograpi.session.json",
         watch_webhook_url=None,
     )
+
+
+def parse_profile_config(profile: Profile, payload: bytes) -> Config:
+    """Strict desktop shape for the own profile; the runner's resolver for an adopted home."""
+    if not profile.adopted:
+        return parse_config(profile, payload)
+    try:
+        data = tomllib.loads(payload.decode())
+    except (UnicodeDecodeError, ValueError):
+        raise DesktopError("home_invalid") from None
+    # Name the backend before the runner's credential checks: an aiograpi home
+    # without credentials is unsupported here, not invalid.
+    backend = data.get("backend")
+    if isinstance(backend, str) and normalize_backend(backend) != BACKEND_HIKERAPI:
+        raise DesktopError("home_backend_unsupported")
+    try:
+        config = load_home_config(profile.home, data)
+    except (ValueError, TypeError, BackendError):
+        # TypeError: a non-string path value such as `db_path = 5` reaches Path().
+        raise DesktopError("home_invalid") from None
+    if config.backend != BACKEND_HIKERAPI:
+        # An absent key still defaults through load_config; the resolved value rules.
+        raise DesktopError("home_backend_unsupported")
+    check_database_location(profile.home, config.db_path)
+    token = config.hiker_token
+    if not isinstance(token, str):
+        raise DesktopError("home_invalid")
+    try:
+        validate_token(token)
+    except DesktopError:
+        raise DesktopError("home_invalid") from None
+    register_secret(token)
+    return config
+
+
+def adopted_config_bytes(payload: bytes, token: str) -> bytes:
+    """Rewrite only the HikerAPI token of an adopted home's TOML; other keys survive.
+
+    The file is re-serialised from its parsed tables, so TOML comments and layout
+    are not preserved (as the design documents).
+    """
+    validate_token(token)
+    try:
+        data = tomllib.loads(payload.decode())
+    except (UnicodeDecodeError, ValueError):
+        raise DesktopError("home_invalid") from None
+    hikerapi, legacy = data.get("hikerapi"), data.get("hiker")
+    if any(value is not None and not isinstance(value, dict) for value in (hikerapi, legacy)):
+        raise DesktopError("home_invalid")
+    section = hikerapi if hikerapi is not None else legacy
+    if section is None:
+        section = data.setdefault("hikerapi", {})
+    section["token"] = token
+    return tomli_w.dumps(data).encode()
+
+
+def config_payload(profile: Profile, current: bytes | None, token: str) -> bytes:
+    if profile.adopted:
+        return adopted_config_bytes(current or b"", token)
+    return config_bytes(profile, token)
 
 
 def _database_file(path: Path) -> os.stat_result:
@@ -158,12 +241,51 @@ def check_database(path: Path, *, deadline: float | None = None) -> bool:
         raise DesktopError("schema_mismatch") from None
 
 
-def initialize_database(path: Path, *, deadline: float | None = None) -> None:
+def _repair_stage_link(path: Path, stage_dir: Path | None) -> None:
+    """Drop a stage link our own interrupted publication left behind.
+
+    A death between `os.link` and the stage unlink leaves a database with two links,
+    which `_database_file` refuses as `profile_ownership` forever. Only a staged file
+    that is literally the same inode is unlinked, and only from a private owned stage
+    directory; stage directories are never swept or removed, because another process
+    may be staging into the same (possibly shared) external database directory.
+    """
+    try:
+        info = path.lstat()
+    except OSError:
+        return
+    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 2 or info.st_uid != os.getuid():
+        return
+    root = stage_dir if stage_dir is not None else path.parent.parent
+    try:
+        staged_files = sorted(root.glob(".desktop-db-*/store.db"))
+    except OSError:
+        return
+    for staged in staged_files:
+        try:
+            _directory(staged.parent)
+            staged_info = staged.lstat()
+        except (DesktopError, OSError):
+            continue
+        if (staged_info.st_dev, staged_info.st_ino) != (info.st_dev, info.st_ino):
+            continue
+        with contextlib.suppress(OSError):
+            staged.unlink()  # the empty stage directory stays: it may still be leased
+        return
+
+
+def initialize_database(
+    path: Path, *, deadline: float | None = None, stage_dir: Path | None = None
+) -> None:
+    _repair_stage_link(path, stage_dir)
     if check_database(path, deadline=deadline):
         return
-    # Stage outside the profile, so process death cannot strand a partial final
-    # database or turn a not-yet-bound profile into a populated foreign profile.
-    with tempfile.TemporaryDirectory(prefix=".desktop-db-", dir=path.parent.parent) as temporary:
+    # Stage outside the profile by default, so process death cannot strand a partial
+    # final database or turn a not-yet-bound profile into a populated foreign profile.
+    # An adopted home stages beside its database (same filesystem, private temp dir).
+    with tempfile.TemporaryDirectory(
+        prefix=".desktop-db-", dir=stage_dir if stage_dir is not None else path.parent.parent
+    ) as temporary:
         staged = Path(temporary) / "store.db"
         descriptor = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         os.close(descriptor)
@@ -172,11 +294,22 @@ def initialize_database(path: Path, *, deadline: float | None = None) -> None:
         check_database(staged, deadline=deadline)
         with staged.open("rb") as stream:
             os.fsync(stream.fileno())
+        # A concurrent writer (the CLI) may have published first: its database is
+        # kept and its schema decides; sidecars that appeared meanwhile are refused
+        # by the same check. The link never replaces a file that won the race.
         if check_database(path, deadline=deadline):
-            raise DesktopError("profile_ownership")
+            return
         if deadline is not None and time.monotonic() >= deadline:
             raise DesktopError("operation_timeout")
-        os.replace(staged, path)
+        try:
+            os.link(staged, path)
+        except FileExistsError:
+            pass
+        else:
+            # Another process may have repaired this link already (it sees the same
+            # two-link database); a vanished stage file means the work is done.
+            with contextlib.suppress(FileNotFoundError):
+                staged.unlink()
         _sync_directory(Path(temporary))
     _sync_directory(path.parent)
     check_database(path, deadline=deadline)

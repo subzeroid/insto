@@ -62,13 +62,13 @@ jobs:
       - name: Build and install wheel for native smoke
         run: |
           uv build --wheel --out-dir "$RUNNER_TEMP/insto-service-dist"
-          uv venv "$RUNNER_TEMP/insto-service-venv"
+          uv venv --python 3.11 "$RUNNER_TEMP/insto-service-venv"
           uv pip install --python "$RUNNER_TEMP/insto-service-venv/bin/python" "$RUNNER_TEMP"/insto-service-dist/*.whl
       - name: Native LaunchAgent smoke (explicit skip without GUI domain)
         env:
           INSTO_TEST_LAUNCHD: "1"
         run: |
-          INSTO_TEST_PYTHON="$RUNNER_TEMP/insto-service-venv/bin/python" uv run --frozen pytest tests/e2e/test_watch_service.py -q -rs
+          INSTO_TEST_PYTHON="$RUNNER_TEMP/insto-service-venv/bin/python" uv run --frozen pytest tests/e2e/test_watch_service.py tests/e2e/test_desktop_migration.py -q -rs
 
   live-test:
     # Live aiograpi end-to-end through the real CLI entrypoint, driven by

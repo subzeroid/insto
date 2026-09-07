@@ -1,4 +1,8 @@
+# Agent-facing working notes: never published, in any repository.
 docs/superpowers/
+.github/plans/
+AGENTS.md
+SKILL.md
 docs/plans/
 docs/internal/
 .context/

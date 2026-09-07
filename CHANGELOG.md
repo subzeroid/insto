@@ -2,6 +2,13 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.22](https://github.com/subzeroid/insto/compare/v0.7.21...v0.7.22) (2026-09-06)
+
+
+### Added
+
+* adopt existing homes and migrate the desktop service ([#59](https://github.com/subzeroid/insto/issues/59)) ([d36a3fd](https://github.com/subzeroid/insto/commit/d36a3fd55f2a5991d74716772b4b821bc7851b23))
+
 ## [0.7.21](https://github.com/subzeroid/insto/compare/v0.7.20...v0.7.21) (2026-09-05)
 
 

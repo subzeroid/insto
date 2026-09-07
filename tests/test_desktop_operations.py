@@ -257,11 +257,11 @@ async def test_validation_consumes_forward_budget_before_any_mutation(environmen
     from insto.desktop import operations
 
     profile, _ = environment
-    monkeypatch.setattr(operations, "OPERATION_SECONDS", 0.04)
-    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 0.02)
+    monkeypatch.setattr(operations, "OPERATION_SECONDS", 0.4)
+    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 0.2)
 
     async def validate(token):
-        await asyncio.sleep(0.025)
+        await asyncio.sleep(0.25)
         return 8
 
     monkeypatch.setattr(operations, "validate_candidate", validate)
@@ -276,8 +276,8 @@ async def test_expired_forward_budget_uses_reserved_rollback(configured, monkeyp
 
     profile, service = configured
     old = profile.read_config()
-    monkeypatch.setattr(operations, "OPERATION_SECONDS", 0.15)
-    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 0.10)
+    monkeypatch.setattr(operations, "OPERATION_SECONDS", 1.5)
+    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 1.0)
     original_start = service.ensure_running
     calls = 0
 
@@ -286,7 +286,7 @@ async def test_expired_forward_budget_uses_reserved_rollback(configured, monkeyp
         calls += 1
         if calls == 1:
             service.running = True
-            await asyncio.sleep(0.06)
+            await asyncio.sleep(0.6)
         return await original_start()
 
     service.ensure_running = start
@@ -346,12 +346,12 @@ async def test_expired_rollback_keeps_durable_recovery(configured, monkeypatch):
     from insto.desktop import operations
 
     profile, service = configured
-    monkeypatch.setattr(operations, "OPERATION_SECONDS", 0.035)
-    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 0.015)
+    monkeypatch.setattr(operations, "OPERATION_SECONDS", 0.35)
+    monkeypatch.setattr(operations, "ROLLBACK_SECONDS", 0.15)
 
     async def start():
         service.running = True
-        await asyncio.sleep(0.04)
+        await asyncio.sleep(0.4)
         raise BackendError("late readiness")
 
     service.ensure_running = start

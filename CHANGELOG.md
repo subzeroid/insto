@@ -2,6 +2,38 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.23](https://github.com/subzeroid/insto/compare/v0.7.22...v0.7.23) (2026-09-21)
+
+
+### Added
+
+* **backends:** let a caller refuse rate-limit retries ([933df32](https://github.com/subzeroid/insto/commit/933df3283b479f0a38f6d66fb8805a4850cc35b8))
+* **desktop:** add the lookup.profile and lookup.activity reads ([5dfdc33](https://github.com/subzeroid/insto/commit/5dfdc33e9592439f13903d44a22d96a7b7f61050))
+* **desktop:** add the snapshots.read operation ([86862bf](https://github.com/subzeroid/insto/commit/86862bf340c1117729426c7859cb5d3ca770c342))
+* **desktop:** lookup.profile and lookup.activity ([e871ea3](https://github.com/subzeroid/insto/commit/e871ea3e207cb78891b812480aa0a092d02d8402))
+* **desktop:** prompt first check in the headless daemon and snapshots.read ([51103f2](https://github.com/subzeroid/insto/commit/51103f275ea1ac1881f7aacef76f9ba685334890))
+* **service:** check a new registration right away in the headless daemon ([3ed449a](https://github.com/subzeroid/insto/commit/3ed449ab18f158697382b0039e935135f9d4e28e))
+
+
+### Fixed
+
+* **desktop:** cap the paid page requests one lookup can make ([56f2d35](https://github.com/subzeroid/insto/commit/56f2d3513f456aa48123ac697ea9dffc3eee7280))
+* **desktop:** stop calling a bare provider 403 a private account ([2c782bb](https://github.com/subzeroid/insto/commit/2c782bbb1c43c69005bdd5f63136782945526d3e))
+* **history:** identify media by path segment, not the signed CDN URL ([8aa118d](https://github.com/subzeroid/insto/commit/8aa118d1c3fd78ecc767c67872cae59ab941e6f6))
+* **history:** stop reporting a profile-picture change on every check ([2dc187a](https://github.com/subzeroid/insto/commit/2dc187a905a0620bfc322a08bb66d380a5c07df7))
+* **history:** tag each snapshot with the algorithm that hashed its media ([3f3800a](https://github.com/subzeroid/insto/commit/3f3800aa09bfb88648c8d367c20a2721d07326f7))
+* **service:** grant the immediate first check once per registration ([b4eb0b3](https://github.com/subzeroid/insto/commit/b4eb0b386c03a0e7ea044f442b523040df33f883))
+
+
+### Documentation
+
+* describe the lookup operations and the network read budget ([1144139](https://github.com/subzeroid/insto/commit/11441392100eb9f89ec5c89ca22535e179788e6c))
+* describe the per-row media-hash algorithm and ungated reads ([66c4dff](https://github.com/subzeroid/insto/commit/66c4dff4ba43edd68360c56a10b06e3eafadbea4))
+* rewrap the lookup.profile paragraph ([7ba6a9d](https://github.com/subzeroid/insto/commit/7ba6a9d13d9c4eb92b12c4a0515599a66694be8d))
+* rewrap the snapshots.read and changes.list paragraphs ([978422c](https://github.com/subzeroid/insto/commit/978422c901412e8fd281aa4395ef1ff70de99f59))
+* say what avatar and banner change detection compares ([310cd18](https://github.com/subzeroid/insto/commit/310cd1832534d28bbc512b9d78e4eb41c5912237))
+* state the lookup request ceilings, the new codes and the activity gate ([3aca34f](https://github.com/subzeroid/insto/commit/3aca34f8fe134062d62a0ee8ca1477eb3e8b75da))
+
 ## [0.7.22](https://github.com/subzeroid/insto/compare/v0.7.21...v0.7.22) (2026-09-06)
 
 

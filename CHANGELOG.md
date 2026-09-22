@@ -2,6 +2,20 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## [0.7.24](https://github.com/subzeroid/insto/compare/v0.7.23...v0.7.24) (2026-09-22)
+
+
+### Added
+
+* **desktop:** read a looked-up profile in one request ([8082161](https://github.com/subzeroid/insto/commit/8082161964f565a2eb35f7b4e9c5816d4b32ce03))
+* **desktop:** read a looked-up profile in one request ([19fac39](https://github.com/subzeroid/insto/commit/19fac39bfb75f65454f25d8349894f059b7225be))
+
+
+### Fixed
+
+* **desktop:** keep impossible coordinates and radii off the lookup wire ([c140466](https://github.com/subzeroid/insto/commit/c140466ac2049c4c4e883968cb36c29df1dd8b89))
+* **desktop:** keep impossible coordinates and radii off the lookup wire ([3f64d40](https://github.com/subzeroid/insto/commit/3f64d40f7678815219e2b57ed125ffce54fd7c93))
+
 ## [0.7.23](https://github.com/subzeroid/insto/compare/v0.7.22...v0.7.23) (2026-09-21)
 
 

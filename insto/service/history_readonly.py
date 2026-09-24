@@ -77,6 +77,7 @@ class SavedSnapshot:
     fields: dict[str, Any]
     avatar: str | None
     banner: str | None
+    posts: tuple[str, ...] = ()
 
 
 def metadata(row: sqlite3.Row) -> Metadata:
@@ -181,7 +182,31 @@ def snapshot(row: sqlite3.Row, check: Check) -> SavedSnapshot:
         except UnicodeError:
             raise HistoryReadError() from None
     check()
-    return SavedSnapshot(meta, fields, row["avatar"], row["banner"])
+    return SavedSnapshot(meta, fields, row["avatar"], row["banner"], tuple(posts))
+
+
+def new_posts(old: SavedSnapshot, new: SavedSnapshot) -> dict[str, Any] | None:
+    """Posts in the newer window published after everything the older window held.
+
+    Each check stores the pks of the account's most recent posts. Instagram
+    media pks grow with publication time, so a post counts as new only when it
+    is absent from the older window and its pk is greater than every pk there;
+    an old post that entered the window because it was pinned, or because a
+    newer one was deleted, is not new. Nothing is claimed about a post that
+    left the window: it may have been deleted, archived or merely pushed out.
+    An empty window on either side (no posts, or a provider that answered a
+    private account with an empty page) or a pk that is not a canonical
+    decimal makes the pair not comparable: the result is None, not "no posts".
+    `window_full` means every post in the newer window is new, so more may
+    have been published beyond it.
+    """
+    if not old.posts or not new.posts:
+        return None
+    if any(_PK.fullmatch(pk) is None for pk in (*old.posts, *new.posts)):
+        return None
+    newest = max(int(pk) for pk in old.posts)
+    added = list(dict.fromkeys(pk for pk in new.posts if int(pk) > newest))
+    return {"added": added, "window_full": len(added) == len(set(new.posts))}
 
 
 def comparison(old: SavedSnapshot, new: SavedSnapshot, check: Check) -> dict[str, Any]:
@@ -218,6 +243,7 @@ def comparison(old: SavedSnapshot, new: SavedSnapshot, check: Check) -> dict[str
         "newer": new.meta.dto(),
         "changes": changes,
         "unknown_fields": unknown,
+        "posts": new_posts(old, new),
     }
 
 

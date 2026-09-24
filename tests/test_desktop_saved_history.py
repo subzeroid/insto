@@ -847,3 +847,57 @@ def test_comparing_never_writes_into_the_store(monitoring_profile, monkeypatch):
     request(p, "changes.list", {"target_pk": "7"})
     with closing(sqlite3.connect(p.home / "store.db")) as db:
         assert db.execute("SELECT COUNT(*) FROM _meta").fetchone()[0] == before
+
+
+def _posts_pair(profile, older, newer):
+    old = insert(profile, stamp=5, payload=stable(), posts=json.dumps(older))
+    new = insert(profile, stamp=9, payload=stable(), posts=json.dumps(newer))
+    params = {"target_pk": "7", "older_id": old, "newer_id": new}
+    return request(profile, "snapshots.compare", params)["posts"]
+
+
+@pytest.mark.parametrize(
+    ("older", "newer", "expected"),
+    [
+        # Two posts published since: the oldest one merely left the window.
+        (["30", "20", "10"], ["50", "40", "30"], {"added": ["50", "40"], "window_full": False}),
+        # A pinned old post entering the window is not new.
+        (["100", "90"], ["5", "110", "100"], {"added": ["110"], "window_full": False}),
+        # A deleted post letting an older one back in is not new either.
+        (["30", "20"], ["30", "10"], {"added": [], "window_full": False}),
+        # Every post in the newer window is new: more may lie beyond it.
+        (["1"], ["3", "2"], {"added": ["3", "2"], "window_full": True}),
+        (["1"], ["3", "3"], {"added": ["3"], "window_full": True}),
+        (["2", "1"], ["2", "1"], {"added": [], "window_full": False}),
+    ],
+)
+def test_compare_reports_posts_published_after_the_older_window(
+    monitoring_profile, older, newer, expected
+):
+    assert _posts_pair(monitoring_profile, older, newer) == expected
+
+
+@pytest.mark.parametrize(
+    ("older", "newer"),
+    [
+        ([], ["2", "1"]),
+        (["2", "1"], []),
+        (["01"], ["2"]),
+        (["1"], ["2_12345"]),
+    ],
+)
+def test_posts_are_not_comparable_without_two_canonical_windows(monitoring_profile, older, newer):
+    assert _posts_pair(monitoring_profile, older, newer) is None
+
+
+def test_feed_lists_a_pair_whose_only_difference_is_a_new_post(monitoring_profile):
+    p = monitoring_profile
+    insert(p, stamp=1, payload=stable(), posts='["10"]')
+    same = insert(p, stamp=2, payload=stable(), posts='["10"]')
+    published = insert(p, stamp=3, payload=stable(), posts='["20","10"]')
+    feed = request(p, "changes.list", {"target_pk": "7"})
+    assert [item["kind"] for item in feed["items"]] == ["comparison", "baseline"]
+    item = feed["items"][0]
+    assert item["older"]["id"] == same and item["newer"]["id"] == published
+    assert item["changes"] == []
+    assert item["posts"] == {"added": ["20"], "window_full": False}

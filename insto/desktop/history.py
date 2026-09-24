@@ -132,7 +132,12 @@ def _pages(reader: Reader, operation: str, params: dict[str, Any], check: Check)
                         item = {"kind": "baseline", "snapshot": current_meta.dto()}
                     else:
                         difference = comparison(snapshot(previous, check), current, check)
-                        if difference["changes"] or difference["unknown_fields"]:
+                        posts = difference["posts"]
+                        if (
+                            difference["changes"]
+                            or difference["unknown_fields"]
+                            or (posts is not None and posts["added"])
+                        ):
                             item = difference
                             if difference["unknown_fields"]:
                                 item["kind"] = "incomplete"

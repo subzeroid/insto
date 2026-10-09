@@ -293,7 +293,7 @@ diagnostic for an unreadable saved record. Profile fields are checked within
 the raw byte cap but are not included in list items. An empty list means no
 retained snapshots for that PK; one snapshot is an initial retained baseline.
 
-`snapshots.compare` returns `{kind:"comparison",older,newer,changes,unknown_fields}`.
+`snapshots.compare` returns `{kind:"comparison",older,newer,changes,unknown_fields,posts}`.
 `changes` contains `{field,old,new}` for known values that differ. The field set
 is the existing tracked profile fields plus `avatar` and `banner` stored hashes.
 Absent fields are listed in `unknown_fields`; explicit JSON null is a known
@@ -308,6 +308,21 @@ either a picture swap or missing data. Missing selected IDs return
 `snapshot_unavailable`, prompting a list refresh. A different PK returns
 `snapshot_identity_mismatch`; reversed/equal pair ordering returns
 `invalid_params`. The API does not manufacture a prior snapshot from null.
+
+`posts` reports posts published between the two checks, from the recent-post
+pks every check already stores; it costs no request. It is
+`{added,window_full}`: `added` lists, in the newer row's order and without
+repeats, the pks of the newer window that are absent from the older window and
+greater than every pk in it. Instagram media pks grow with publication time, so
+an old post that enters the window because it was pinned, or because a newer
+one was deleted, is not reported. Nothing is said about a post that left the
+window: it may have been deleted, archived or pushed out by newer posts.
+`window_full` is true when every post in the newer window is new, so more may
+have been published beyond it. `posts` is null, not an empty `added`, when
+either window is empty (an account without posts, or a provider that answered
+a private account with an empty page) or holds a pk that is not a canonical
+positive decimal: the pair is then not comparable for posts. It never makes a
+comparison `incomplete`.
 
 `snapshots.read` returns one selected snapshot as
 `{kind:"snapshot_fields",snapshot,fields,unknown_fields}`. `snapshot` is the same
@@ -329,7 +344,7 @@ record over the raw byte cap or a response over the wire budget returns
 `changes.list` compares each candidate with its immediately preceding retained
 snapshot within the same PK and initial ID ceiling. Its earliest retained
 snapshot is `{kind:"baseline",snapshot}`. Fully known unchanged comparisons
-are omitted, and so is a pair whose only difference would be an avatar or
+with no new post are omitted, and so is a pair whose only difference would be an avatar or
 banner hash that `snapshots.compare` would not report as a picture change:
 it yields no item at all, exactly like an unchanged pair. A comparison with
 any unknown field has `kind:"incomplete"` and the same

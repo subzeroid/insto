@@ -1,15 +1,15 @@
-"""On-demand provider reads: one bounded, fail-fast request budget, no writes.
+"""On-demand provider reads with bounded requests and shared attempt accounting.
 
 These two operations are the only desktop capabilities that ask the provider
 about an account the user just typed, and they are deliberately the narrowest
 possible network surface:
 
-- **Nothing local is touched.** The profile's `config.toml` is read for the
-  token; no database is opened, no `cli_history` row is written, no snapshot is
-  saved and nothing is created under `output/`. A lookup therefore runs happily
-  beside a watch daemon owned by the same profile: neither takes a lock.
-- **A ceiling on paid requests, not only on time.** `lookup.profile` buys 2
-  requests (4 if both are retried once); `lookup.activity` buys at most
+- **History and exports are untouched.** The profile's `config.toml` supplies
+  the token; no `cli_history` row or snapshot is saved and nothing is created
+  under `output/`. A separate usage ledger reserves each HTTP attempt, shared
+  with the watch daemon without taking its service or profile lock.
+- **A ceiling on paid requests, not only on time.** `lookup.profile` buys 1
+  request (2 if retried once); `lookup.activity` buys at most
   `MAX_PAGE_REQUESTS` pages however long the provider's cursor goes on, and
   answers with what it already paid for rather than spending past the cap.
 - **One budget, fail fast.** 60 seconds covers the whole request including the
@@ -31,6 +31,7 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from insto.backends._retry import with_retry
+from insto.config import Config
 from insto.desktop.access import RetryDecorator, _await_worker, _close, access_code, make_backend
 from insto.desktop.configuration import parse_profile_config
 from insto.desktop.errors import DesktopError
@@ -38,16 +39,19 @@ from insto.desktop.history_params import _PK, MAX_TIME
 from insto.desktop.profile import Profile
 from insto.exceptions import (
     Banned,
+    DailyBudgetReached,
     PageBudgetExceeded,
     ProfileDeleted,
     ProfileNotFound,
     ProfilePrivate,
     SchemaDrift,
+    UsageStorageError,
 )
 from insto.models import Post, Quota
 from insto.models import Profile as ProfileDTO
 from insto.service import analytics
 from insto.service.history import _PROFILE_TRACKED_FIELDS
+from insto.service.usage import install_usage_ledger
 
 # The budget class of this module: a "network read". One attempt at the whole
 # operation, close included, and no second chance at the provider's expense.
@@ -105,8 +109,8 @@ def _fail_fast() -> RetryDecorator:
     )
 
 
-def _credentials(profile: Profile) -> tuple[str, str | None]:
-    """The profile's own token and proxy; no database and no service are opened."""
+def _credentials(profile: Profile) -> Config:
+    """The profile's own settings; no history database or service is opened."""
     payload = profile.read_config()
     if payload is None:
         raise DesktopError("not_configured")
@@ -114,13 +118,17 @@ def _credentials(profile: Profile) -> tuple[str, str | None]:
     token = config.hiker_token
     if not isinstance(token, str):
         raise DesktopError("not_configured")
-    return token, config.hiker_proxy
+    return config
 
 
 def _failure(exc: BaseException) -> DesktopError:
     """Name the provider's answer without ever forwarding its text."""
     if isinstance(exc, DesktopError):
         return exc
+    if isinstance(exc, DailyBudgetReached):
+        return DesktopError("daily_budget_reached")
+    if isinstance(exc, UsageStorageError):
+        return DesktopError("storage_error")
     if isinstance(exc, (ProfileNotFound, ProfileDeleted)):
         return DesktopError("target_not_found")
     if isinstance(exc, ProfilePrivate):
@@ -148,17 +156,19 @@ async def run(profile: Profile, operation: str, params: dict[str, Any]) -> dict[
     # credential validation does; the deadline is the whole request's, not the
     # provider call's, so a slow close cannot extend it.
     request_deadline = deadline - min(CLOSE_RESERVE_SECONDS, NETWORK_READ_SECONDS / 2)
-    token, proxy = _credentials(profile)
+    config = _credentials(profile)
+    assert config.hiker_token is not None
     backend: LookupBackend | None = None
     failure: BaseException | None = None
     result: dict[str, Any] | None = None
     try:
         backend = make_backend(
-            token,
-            proxy=proxy,
+            config.hiker_token,
+            proxy=config.hiker_proxy,
             retry_decorator=_fail_fast(),
             max_pages=MAX_PAGE_REQUESTS,
         )
+        install_usage_ledger(backend, config.db_path)
         result = await _await_worker(
             asyncio.create_task(_read(backend, operation, params)),
             request_deadline,
@@ -274,6 +284,9 @@ async def _activity(backend: LookupBackend, target_pk: str, window: int) -> dict
             ],
         },
         "timeline": {
+            "weekday_hours": [
+                [_count(value) for value in row[:24]] for row in timeline.weekday_hours[:7]
+            ],
             "hour_of_day": [_count(value) for value in timeline.hour_of_day[:24]],
             "day_of_week": [_count(value) for value in timeline.day_of_week[:7]],
             "first_post_at": _moment(timeline.first_post_ts),

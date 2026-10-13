@@ -332,6 +332,10 @@ async def test_activity_analyses_one_window_of_posts(lookup_profile, constructed
     assert 0.0 <= geo["radius_km"] < 5.0
     assert [place["name"] for place in geo["places"]] == ["Cafe Zero", "Museum"]
     timeline = result["timeline"]
+    assert len(timeline["weekday_hours"]) == 7
+    assert all(len(row) == 24 for row in timeline["weekday_hours"])
+    assert sum(map(sum, timeline["weekday_hours"])) == 4
+    assert timeline["weekday_hours"][1][10] == 1
     assert sum(timeline["hour_of_day"]) == 4 and timeline["hour_of_day"][10] == 4
     assert len(timeline["hour_of_day"]) == 24 and len(timeline["day_of_week"]) == 7
     assert timeline["day_of_week"][1] == 1  # the window starts on a Tuesday
@@ -366,6 +370,7 @@ async def test_activity_of_an_account_without_posts_is_the_same_shape(lookup_pro
             "places": [],
         },
         "timeline": {
+            "weekday_hours": [[0] * 24 for _ in range(7)],
             "hour_of_day": [0] * 24,
             "day_of_week": [0] * 7,
             "first_post_at": None,
@@ -377,6 +382,26 @@ async def test_activity_of_an_account_without_posts_is_the_same_shape(lookup_pro
         "likes": {"total": 0, "average": 0.0, "top_posts": []},
         "quota_remaining": None,
     }
+
+
+async def test_activity_heatmap_preserves_joint_utc_buckets(lookup_profile, constructed):
+    constructed(
+        FakeBackend(
+            posts=[
+                make_post(0, when=int(datetime(2026, 10, 12, 23, 59, tzinfo=UTC).timestamp())),
+                make_post(1, when=int(datetime(2026, 10, 13, 0, 1, tzinfo=UTC).timestamp())),
+                make_post(2, when=0),
+            ]
+        )
+    )
+    result = await call(lookup_profile, "lookup.activity", {"target_pk": "7", "window": 12})
+    matrix = result["timeline"]["weekday_hours"]
+    assert matrix[0][23] == matrix[1][0] == 1
+    assert sum(map(sum, matrix)) == 2
+    assert [sum(row) for row in matrix] == result["timeline"]["day_of_week"]
+    assert [sum(row[hour] for row in matrix) for hour in range(24)] == result["timeline"][
+        "hour_of_day"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -697,6 +722,41 @@ def transport_backend(handler, *, max_pages=None):
         retry_decorator=lookup._fail_fast(),
         max_pages=lookup.MAX_PAGE_REQUESTS if max_pages is None else max_pages,
     )
+
+
+async def test_lookup_installs_shared_ledger_and_maps_exhausted_cap(lookup_profile, constructed):
+    import httpx
+
+    from insto.service.usage import UsageLedger, usage_path
+
+    ledger = UsageLedger(usage_path(lookup_profile.home / "store.db"))
+    await ledger.configure(1)
+    await ledger.reserve()
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(500)
+
+    backend = transport_backend(handler)
+    constructed(backend)
+    with pytest.raises(DesktopError, match="daily_budget_reached"):
+        await call(lookup_profile, "lookup.activity", {"target_pk": "7", "window": 12})
+    assert requests == []
+    assert MESSAGES["daily_budget_reached"][1] is False
+
+
+async def test_lookup_counts_failed_http_attempts(lookup_profile, constructed):
+    import httpx
+
+    from insto.service.usage import UsageLedger, usage_path
+
+    backend = transport_backend(lambda request: httpx.Response(503))
+    constructed(backend)
+    with pytest.raises(DesktopError, match="network_error"):
+        await call(lookup_profile, "lookup.activity", {"target_pk": "7", "window": 12})
+    state = await UsageLedger(usage_path(lookup_profile.home / "store.db")).inspect()
+    assert state["used"] == 2
 
 
 def media(index):

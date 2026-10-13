@@ -2,6 +2,17 @@
 
 All notable changes to insto. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/spec/v2.0.0.html). Entries from 0.1.1 onward will be assembled from Conventional Commits by [release-please](https://github.com/googleapis/release-please).
 
+## 0.7.25 (2026-10-13)
+
+### Added
+
+* Desktop activity includes a Monday-first 7-by-24 UTC posting heatmap from the same fetched posts.
+* Local daily request-attempt inspection and optional ceilings shared by desktop lookups and the watch runtime, including atomic reservations and live cap changes.
+
+### Fixed
+
+* Home path validation consistently rejects symlink loops on Python 3.13.
+
 ## [0.7.24](https://github.com/subzeroid/insto/compare/v0.7.23...v0.7.24) (2026-10-09)
 
 

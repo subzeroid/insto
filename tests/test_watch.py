@@ -122,6 +122,76 @@ async def test_success_resets_recovered_error_state(tmp_path: Path) -> None:
     manager.release_executor()
 
 
+@pytest.mark.parametrize("recovery", ["raise-cap", "utc-reset"])
+@pytest.mark.parametrize("prior_errors", [0, 1])
+async def test_daily_budget_waits_without_pausing_and_recovers(
+    tmp_path: Path, recovery: str, prior_errors: int
+) -> None:
+    from insto.service.usage import UsageLedger
+
+    moment = 86401
+    ledger = UsageLedger(tmp_path / "usage.db", clock=lambda: moment)
+    await ledger.configure(1)
+    await ledger.reserve()
+    manager = _manager(tmp_path)
+    manager.acquire_executor()
+    calls = 0
+
+    async def tick() -> None:
+        nonlocal calls
+        calls += 1
+        await ledger.reserve()
+
+    initial = _spec(
+        last_ok=1000,
+        last_error="earlier failure" if prior_errors else None,
+        consecutive_errors=prior_errors,
+    )
+    manager.add(initial, tick=tick, state_changed=_accept, start=False)
+    try:
+        for index in range(3):
+            blocked = await manager.tick_once("alice")
+            assert calls == index + 1  # no immediate retry of a blocked tick
+            assert blocked == initial  # budget exhaustion preserves prior errors
+        if recovery == "raise-cap":
+            await ledger.configure(2)
+        else:
+            moment += 86400
+        recovered = await manager.tick_once("alice")
+        assert calls == 4
+        assert recovered.status == "active"
+        assert recovered.last_ok == 1234
+        assert recovered.last_error is None
+        assert recovered.consecutive_errors == 0
+    finally:
+        await manager.cancel_all()
+        manager.release_executor()
+
+
+async def test_daily_budget_on_retry_does_not_increase_existing_failures(tmp_path: Path) -> None:
+    from insto.exceptions import DailyBudgetReached
+
+    manager = _manager(tmp_path)
+    manager.acquire_executor()
+    calls = 0
+
+    async def tick() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise Transient("network failure before the cap was exhausted")
+        raise DailyBudgetReached()
+
+    initial = _spec(last_ok=1000, last_error="earlier failure", consecutive_errors=1)
+    manager.add(initial, tick=tick, state_changed=_accept, start=False)
+    try:
+        assert await manager.tick_once("alice") == initial
+        assert calls == 2
+    finally:
+        await manager.cancel_all()
+        manager.release_executor()
+
+
 async def test_hard_failure_pauses_without_retry(tmp_path: Path) -> None:
     manager = _manager(tmp_path)
     manager.acquire_executor()

@@ -9,6 +9,7 @@ active, errors=0 -- failed tick --> active, errors=1
 active, errors=1 -- failed tick --> paused, errors=2
 active ---------- success ------> active, errors=0
 active ---------- hard error ---> paused
+active ---------- daily cap ----> active, prior errors retained
 ```
 """
 
@@ -20,7 +21,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from insto.exceptions import AuthInvalid, Banned
+from insto.exceptions import AuthInvalid, Banned, DailyBudgetReached
 from insto.models import WatchSpec, WatchStatus
 from insto.service.watch_lock import WatchProcessLock
 
@@ -253,6 +254,11 @@ class WatchManager:
             await self._run_tick(entry)
         except asyncio.CancelledError:
             raise
+        except DailyBudgetReached:
+            # A local ceiling is not a failed provider check. Keep the watch
+            # scheduled at its normal interval so cap changes/UTC reset recover
+            # automatically, preserving any earlier provider failure streak.
+            return await self._emit_state(entry)
         except (Banned, AuthInvalid) as exc:
             entry.status = "paused"
             entry.last_error = str(exc)
@@ -268,6 +274,8 @@ class WatchManager:
             await self._run_tick(entry)
         except asyncio.CancelledError:
             raise
+        except DailyBudgetReached:
+            return await self._emit_state(entry)
         except (Banned, AuthInvalid) as exc:
             entry.status = "paused"
             entry.last_error = str(exc)

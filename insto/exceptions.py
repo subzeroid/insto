@@ -15,6 +15,20 @@ class BackendError(Exception):
         return self.args[0] if self.args else self.__class__.__name__
 
 
+class DailyBudgetReached(BackendError):
+    """The local UTC-day request-attempt ceiling has been reached."""
+
+    def __init__(self) -> None:
+        super().__init__("Daily request-attempt limit reached; resets at midnight UTC.")
+
+
+class UsageStorageError(BackendError):
+    """Attempt accounting cannot be read or committed; no request may proceed."""
+
+    def __init__(self) -> None:
+        super().__init__("Local request-attempt accounting is unavailable.")
+
+
 class ProfileNotFound(BackendError):
     """The username does not resolve to any Instagram profile."""
 

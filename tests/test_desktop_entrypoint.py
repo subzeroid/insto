@@ -37,6 +37,8 @@ EXACT_CAPABILITIES = [
     "home.select",
     "lookup.profile",
     "lookup.activity",
+    "usage.inspect",
+    "usage.configure",
 ]
 
 

@@ -524,7 +524,8 @@ report `schema_mismatch`.
 ## L1 on-demand lookups
 
 Two capabilities, `lookup.profile` and `lookup.activity`, are appended after
-the C3 names, so the table is 27 long. They ask the provider about an account
+the C3 names. The usage operations below follow them, making the table 29 long.
+Lookups ask the provider about an account
 the user has just typed. They are the only operations that make a provider
 request without changing anything, and they exist so the app can show an
 account before the user decides to watch it.
@@ -566,7 +567,11 @@ from a per-post request:
 - `geo`: `geotagged`, `anchor` and `places` (up to 10 `{name,lat,lng,count}`),
   `centroid` `{lat,lng}` or null, `radius_km` or null.
 - `timeline`: `hour_of_day` (24 UTC counts), `day_of_week` (7 counts, Monday
-  first), `first_post_at` and `last_post_at` in Unix seconds or null.
+  first), `weekday_hours` (7 rows by 24 columns of non-negative integer UTC
+  counts, Monday first), `first_post_at` and `last_post_at` in Unix seconds or null.
+  The matrix and both histograms use the same fetched posts; non-positive
+  timestamps are omitted from all three. Each row sums to its weekday count,
+  and each column sums to its hour count.
 - `hashtags`, `mentions`, `locations`: up to 20 `{key,count}` each, ordered by
   count descending then key ascending.
 - `likes`: `total`, `average` and up to 5 `top_posts` `{code,like_count}`.
@@ -637,7 +642,45 @@ on this surface is `access_unconfirmed`, which here means an unexpected
 provider failure and may legitimately be retried once by a person, not
 automatically.
 
-Both operations are pure reads of the network: no `cli_history` row, no file
-under `output/`, no snapshot, no write to the store, and the database is not
-opened at all. They take no profile or service lock either, so they work while
-the watch service is running under the same profile and token.
+Both operations leave history and exports untouched: no `cli_history` row,
+file under `output/`, snapshot, or write to the history store. Each actual HTTP
+attempt reserves one unit in the separate usage ledger below. They take no
+profile or service lock, so they work while the watch service is running under
+the same profile and token.
+
+## Daily request-attempt usage
+
+`usage.inspect` and `usage.configure` are appended in that exact order after
+`lookup.activity`. They are local operations and never call the provider or
+restart the watch service.
+
+| Operation | Exact params | Result |
+| --- | --- | --- |
+| `usage.inspect` | `{}` | Current UTC day, attempts used, cap and next reset. An absent ledger returns zero and unlimited without creating any files. |
+| `usage.configure` | `{"daily_limit":1..1000000\|null}` | Save the cap and return current usage. Requires a configured profile. `null` means unlimited. |
+
+Both return `{kind:"usage", day:"YYYY-MM-DD", used, daily_limit, reset_at}`.
+`used` is a non-negative integer; `daily_limit` is an integer from 1 through
+1,000,000 or null; `reset_at` is Unix seconds for the following midnight UTC.
+Booleans, fractional numbers, missing keys and extra keys are `invalid_params`.
+
+The ledger is `<configured database filename>.usage.db`, beside the configured
+history database (normally `store.db.usage.db`), with private file permissions
+and a small `.init.lock` sidecar for safe concurrent first-time creation.
+It does not change the history schema. Desktop lookups and the shared CLI/watch
+runtime use the same ledger. A SQLite transaction reserves an attempt before
+transport, so concurrent processes cannot overspend the cap. Each retry counts
+separately; failures and cancelled reservations remain counted conservatively.
+The free `/sys/balance` endpoint, including credential validation, is excluded.
+These are **HTTP request attempts, not exact invoiced provider quota**.
+
+The default cap is unlimited. Changing or removing a cap preserves today's
+usage, and a running daemon observes the new cap on its next request. Usage
+resets on the next UTC day while retaining the configured cap. Exhaustion
+blocks transport and retries with non-retryable desktop error
+`daily_budget_reached`: `Daily request-attempt limit reached; resets at midnight UTC.`
+An unreadable or corrupt existing ledger blocks provider requests with
+`storage_error`; it is never replaced by an unlimited ledger automatically.
+Budget-blocked watch ticks retain their prior error state and remain scheduled
+at the normal interval, without immediate retries or permanent pauses. They
+resume checking when the cap is raised or usage resets.

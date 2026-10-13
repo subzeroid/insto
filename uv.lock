@@ -438,7 +438,7 @@ wheels = [
 
 [[package]]
 name = "insto"
-version = "0.7.17"
+version = "0.7.25"
 source = { editable = "." }
 dependencies = [
     { name = "hikerapi" },

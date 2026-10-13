@@ -195,7 +195,7 @@ def test_migration_through_the_bridge(tmp_path: Path) -> None:
             )
         registered_identity(old_identity)
         old_pid = verified_pid(flags)
-        assert len(bridge("hello", {})["capabilities"]) == 27
+        assert len(bridge("hello", {})["capabilities"]) == 29
         report = bridge("home.inspect", {"path": str(home)})
         assert report["adoptable"] and report["registration"] == "owned"
         assert report["interpreter"] == "other" and report["process"] == "running"

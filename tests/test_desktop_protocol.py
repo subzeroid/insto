@@ -169,6 +169,8 @@ async def test_hello() -> None:
                 "home.select",
                 "lookup.profile",
                 "lookup.activity",
+                "usage.inspect",
+                "usage.configure",
             ],
         },
     }

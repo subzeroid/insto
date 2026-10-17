@@ -15,6 +15,8 @@ from insto.desktop.home_params import validate_path
 from insto.desktop.lookup_params import CAPABILITIES as LOOKUP_CAPABILITIES
 from insto.desktop.lookup_params import validate_params as validate_lookup_params
 from insto.desktop.protocol import PROTOCOL_VERSION, ProtocolError, Request, decode, encode
+from insto.desktop.usage_params import CAPABILITIES as USAGE_CAPABILITIES
+from insto.desktop.usage_params import validate_params as validate_usage_params
 from insto.desktop.watch_params import CAPABILITIES as WATCH_CAPABILITIES
 from insto.desktop.watch_params import validate_params as validate_watch_params
 from insto.service.history import _SCHEMA_VERSION
@@ -43,6 +45,7 @@ CAPABILITIES = (
     *_SERVICE_C3,
     *HOME_CAPABILITIES,
     *LOOKUP_CAPABILITIES,
+    *USAGE_CAPABILITIES,
 )
 
 
@@ -52,6 +55,12 @@ async def dispatch(request: Request) -> dict[str, Any]:
     operation = request.operation
     if operation not in CAPABILITIES:
         raise ProtocolError("unsupported_operation", request.request_id)
+    if operation in USAGE_CAPABILITIES:
+        params = validate_usage_params(operation, request.params)
+        from insto.desktop import usage
+        from insto.desktop.profile import Profile
+
+        return await usage.run(Profile.from_environment(), operation, params)
     if operation in WATCH_CAPABILITIES:
         params = validate_watch_params(operation, request.params)
         from insto.desktop import watches

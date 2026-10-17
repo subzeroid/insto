@@ -42,6 +42,8 @@ CAPABILITIES = [
     "home.select",
     "lookup.profile",
     "lookup.activity",
+    "usage.inspect",
+    "usage.configure",
 ]
 
 LOOKUP_CAPABILITIES = ["lookup.profile", "lookup.activity"]
@@ -73,9 +75,10 @@ def forbid_import(monkeypatch, name):
 async def test_exact_c2_capabilities():
     response = json.loads(await handle(wire("hello", {})))
     assert response["result"]["capabilities"] == list(CAPABILITIES)
-    assert len(CAPABILITIES) == 27
-    assert list(CAPABILITIES[-7:-2]) == C3_CAPABILITIES
-    assert list(CAPABILITIES[-2:]) == LOOKUP_CAPABILITIES
+    assert len(CAPABILITIES) == 29
+    assert list(CAPABILITIES[-9:-4]) == C3_CAPABILITIES
+    assert list(CAPABILITIES[-4:-2]) == LOOKUP_CAPABILITIES
+    assert list(CAPABILITIES[-2:]) == ["usage.inspect", "usage.configure"]
 
 
 async def test_c3_operations_reach_their_modules(monkeypatch, tmp_path):

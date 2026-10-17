@@ -37,6 +37,10 @@ def validate_path(value: Any, *, allow_none: bool) -> Path | None:
     if not path.is_absolute() or os.path.normpath(expanded) != str(path):
         raise DesktopError("home_invalid")
     try:
+        # Python 3.13 may leave a symlink loop unresolved in non-strict mode.
+        # Check existing path components before resolve() can accept it as-is.
+        if any(os.path.islink(component) for component in (path, *path.parents)):
+            raise DesktopError("home_invalid")
         resolved = path.resolve()
     except (OSError, RuntimeError):
         # RuntimeError: a symlink loop on Python 3.11/3.12 (ELOOP as OSError later).

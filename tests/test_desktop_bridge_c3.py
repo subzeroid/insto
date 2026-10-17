@@ -67,9 +67,9 @@ def seed_home(tmp_path: Path, name: str = "cli-home", *, database: bool = True) 
     return home
 
 
-def test_hello_lists_27_capabilities(tmp_path: Path) -> None:
+def test_hello_lists_29_capabilities(tmp_path: Path) -> None:
     response = bridge(tmp_path, tmp_path / "root", "hello", {})
-    assert len(EXACT_CAPABILITIES) == 27
+    assert len(EXACT_CAPABILITIES) == 29
     assert response["result"]["capabilities"] == EXACT_CAPABILITIES
     assert not (tmp_path / "root").exists()
 

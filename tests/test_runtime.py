@@ -158,6 +158,32 @@ def test_runtime_preserves_legacy_positional_field_order() -> None:
     assert runtime.webhook_notifier is None
 
 
+async def test_runtime_installs_shared_ledger_and_observes_live_cap_changes(tmp_path):
+    from insto.exceptions import DailyBudgetReached
+    from insto.service.usage import UsageLedger, usage_path
+    from tests.test_hiker_usage import backend_for
+
+    config = _config(tmp_path)
+    ledger = UsageLedger(usage_path(config.db_path))
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, json={"requests": 40})
+
+    backend = await backend_for(handler, None)
+    async with open_runtime(config, role="daemon", backend_factory=lambda _: backend):
+        # The daemon is already running when a desktop operation changes the cap.
+        await ledger.configure(1)
+        await backend._client._client.get("/paid")
+        with pytest.raises(DailyBudgetReached):
+            await backend._client._client.get("/paid")
+        await ledger.configure(2)
+        await backend._client._client.get("/paid")
+        assert len(requests) == 2
+        assert (await ledger.inspect())["used"] == 2
+
+
 async def test_one_shot_runtime_never_acquires_executor_and_cleans_up(tmp_path: Path) -> None:
     config = _config(tmp_path)
     events: list[str] = []

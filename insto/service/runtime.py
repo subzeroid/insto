@@ -19,6 +19,7 @@ from insto.backends._cdn import DEFAULT_TIMEOUT as CDN_TIMEOUT
 from insto.config import Config
 from insto.service.facade import OsintFacade
 from insto.service.history import HistoryStore
+from insto.service.usage import install_usage_ledger
 from insto.service.watch import TickFn, WatchManager, format_watch_diff
 from insto.service.watch_daemon import WatchDaemon
 from insto.service.watch_lock import WatchProcessLock
@@ -92,6 +93,7 @@ async def open_runtime(
     runtime: Runtime | None = None
     try:
         backend = backend_factory(config)
+        install_usage_ledger(backend, config.db_path)
         factory = cdn_client_factory if cdn_client_factory is not None else _default_cdn_client
         cdn_client = factory(config)
         manager = WatchManager(

@@ -66,6 +66,7 @@ from insto.models import (
     User,
 )
 from insto.service.metrics import Metrics, MetricsSnapshot
+from insto.service.usage import UsageLedger
 
 T = TypeVar("T")
 
@@ -296,6 +297,7 @@ class HikerBackend(OSINTBackend):
         max_pages: int = DEFAULT_MAX_PAGES,
         retry_decorator: Callable[[Callable[..., Awaitable[Any]]], Callable[..., Awaitable[Any]]]
         | None = None,
+        usage_ledger: UsageLedger | None = None,
     ) -> None:
         if proxy is not None:
             _validate_proxy_url(proxy)
@@ -321,6 +323,8 @@ class HikerBackend(OSINTBackend):
 
         hooks = self._client._client.event_hooks.setdefault("response", [])
         hooks.append(self._on_response)
+        self._usage_ledger = usage_ledger
+        self._client._client.event_hooks.setdefault("request", []).append(self._on_request)
 
         self._apply_retry = retry_decorator if retry_decorator is not None else with_retry()
         self._quota: Quota = Quota.unknown()
@@ -335,6 +339,14 @@ class HikerBackend(OSINTBackend):
         return exc
 
     # ------------------------------------------------------------------ hooks
+
+    def install_usage_ledger(self, ledger: UsageLedger) -> None:
+        """Attach the profile's shared ledger without restarting this client."""
+        self._usage_ledger = ledger
+
+    async def _on_request(self, request: httpx.Request) -> None:
+        if self._usage_ledger is not None and request.url.path != "/sys/balance":
+            await self._usage_ledger.reserve()
 
     async def _on_response(self, response: httpx.Response) -> None:
         rem = _parse_int_header(response.headers, _QUOTA_REMAINING_HEADERS)

@@ -134,6 +134,8 @@ class TimelineResult:
       and whether posting is human-paced or scheduler-driven.
     - ``day_of_week``: 7-bucket histogram (Monday=0, Sunday=6). Shape
       reveals weekday vs weekend rhythm.
+    - ``weekday_hours``: joint 7-by-24 UTC counts, Monday first, from
+      the same timestamps as both histograms.
 
     ``first_post_ts`` / ``last_post_ts`` are unix seconds — the
     renderer prints them as ISO so the operator sees the actual span
@@ -148,6 +150,7 @@ class TimelineResult:
     first_post_ts: int | None = None
     last_post_ts: int | None = None
     empty: bool = False
+    weekday_hours: list[list[int]] = field(default_factory=lambda: [[0] * 24 for _ in range(7)])
 
 
 @dataclass(slots=True)
@@ -496,6 +499,7 @@ def compute_timeline(
     window = _take(posts, limit)
     hours = [0] * 24
     weekdays = [0] * 7
+    weekday_hours = [[0] * 24 for _ in range(7)]
     timestamps: list[int] = []
     for post in window:
         ts = post.taken_at
@@ -504,6 +508,7 @@ def compute_timeline(
         dt = datetime.fromtimestamp(ts, tz=UTC)
         hours[dt.hour] += 1
         weekdays[dt.weekday()] += 1
+        weekday_hours[dt.weekday()][dt.hour] += 1
         timestamps.append(ts)
     return TimelineResult(
         target=target,
@@ -511,6 +516,7 @@ def compute_timeline(
         analyzed=len(window),
         hour_of_day=hours,
         day_of_week=weekdays,
+        weekday_hours=weekday_hours,
         first_post_ts=min(timestamps) if timestamps else None,
         last_post_ts=max(timestamps) if timestamps else None,
         empty=not timestamps,

@@ -6,6 +6,7 @@ MESSAGES: dict[str, tuple[str, bool]] = {
     "invalid_params": ("Invalid operation parameters.", False),
     "invalid_token": ("The token was rejected.", False),
     "quota_exhausted": ("Provider quota is exhausted.", False),
+    "daily_budget_reached": ("Daily request-attempt limit reached; resets at midnight UTC.", False),
     "rate_limited": ("Provider access is temporarily rate limited.", True),
     "network_error": ("Provider access is temporarily unavailable.", True),
     "access_unconfirmed": ("Provider access could not be confirmed.", True),
